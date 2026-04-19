@@ -65,6 +65,13 @@ export default class HomeScene extends Phaser.Scene {
   async create() {
     disableMenuBg();
     fadeIn(this);
+    // Phaser keeps scene instances alive across `scene.start`, so flags
+    // like `_letterboxWired` survive into a re-entry. Resetting here
+    // forces a fresh wireLetterboxChecker on every create — without it,
+    // returning to Home from Player/Editor leaves the body painted with
+    // the previous scene's pxCell + origin (or the menu .bg-scroll class
+    // from LevelSelect/Community) instead of Home's own pattern.
+    this._letterboxWired = false;
 
     const progress = await loadProgress();
     const beatenSet = new Set(progress.beaten);
