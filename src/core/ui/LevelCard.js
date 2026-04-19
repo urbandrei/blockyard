@@ -146,4 +146,17 @@ export class LevelCard {
     this.likeBg.destroy();
     this.likeGlyph.destroy();
   }
+
+  // Every GameObject this card owns, in a flat array. Used by
+  // CommunityScene to reparent an existing card into its scroll
+  // container without touching LevelCard's build-time coordinates.
+  static pieces(card) {
+    const out = [card.bg, card.name, card.meta, card.chip, card.chipText,
+                 card.likeBg, card.likeGlyph];
+    if (card.playBg)   out.push(card.playBg);
+    if (card.playText) out.push(card.playText);
+    if (card.editBg)   out.push(card.editBg);
+    if (card.editText) out.push(card.editText);
+    return out;
+  }
 }

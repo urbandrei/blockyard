@@ -380,10 +380,26 @@ export default class CommunityScene extends Phaser.Scene {
   }
 
   _renderList() {
+    // Tear down anything from the previous render — cards, the scroll
+    // container + its mask, the load-more button, and the empty-state
+    // placeholder.
     for (const card of this._cards) card.destroy();
     this._cards = [];
-    if (this._showMoreBtn) { this._destroyButton(this._showMoreBtn); this._showMoreBtn = null; }
+    if (this._loadMoreBtn) { this._destroyButton(this._loadMoreBtn); this._loadMoreBtn = null; }
     if (this._emptyText)   { this._emptyText.destroy(); this._emptyText = null; }
+    if (this._scrollContainer) {
+      try { this._scrollContainer.clearMask(true); } catch (e) {}
+      this._scrollContainer.destroy(true);
+      this._scrollContainer = null;
+    }
+    if (this._scrollCatch) { this._scrollCatch.destroy(); this._scrollCatch = null; }
+    if (this._scrollMaskGfx) { this._scrollMaskGfx.destroy(); this._scrollMaskGfx = null; }
+    this._destroyScrollbar();
+    // Detach prior-render input listeners before we re-register — otherwise
+    // each LOAD MORE leaves stale wheel/move/up handlers piling up.
+    if (this._scrollWheelHandler) { this.input.off('wheel',        this._scrollWheelHandler); this._scrollWheelHandler = null; }
+    if (this._scrollMoveHandler)  { this.input.off('pointermove',  this._scrollMoveHandler);  this._scrollMoveHandler  = null; }
+    if (this._scrollUpHandler)    { this.input.off('pointerup',    this._scrollUpHandler);    this._scrollUpHandler    = null; }
 
     const filtered = applyFilter(this._levels, {
       query: this._query, filter: this._filter, sort: this._sort, likes: this._likes,
@@ -401,13 +417,32 @@ export default class CommunityScene extends Phaser.Scene {
 
     const cardW = this._bpW;
     const cardX = this._centerX;
-    const maxY = this._listBottom || (this._listOriginY + 800);
+    const viewportTop    = this._listOriginY;
+    const viewportBottom = this._listBottom || (viewportTop + 400);
+    const viewportH      = Math.max(60, viewportBottom - viewportTop);
 
+    // Scroll container holds every card + the LOAD MORE button. Its
+    // y-offset shifts to reveal off-band content. Depth sits under the
+    // chrome buttons but above the menu bg.
+    this._scrollContainer = this.add.container(0, 0).setDepth(10);
+    this._scrollOffset = 0;
+
+    // Geometry mask clips the container to the band between the search
+    // row and the footer so overflowing cards don't bleed past the
+    // chrome. The mask graphic itself is NOT added to the scene — Phaser
+    // uses it purely as a clipping source.
+    this._scrollMaskGfx = this.make.graphics({ add: false });
+    this._scrollMaskGfx.fillStyle(0xffffff, 1);
+    this._scrollMaskGfx.fillRect(0, viewportTop, this.scale.width, viewportH);
+    this._scrollContainer.setMask(this._scrollMaskGfx.createGeometryMask());
+
+    // Build cards in absolute scene coordinates (container is at 0,0)
+    // and reparent their pieces into the container. Keeps LevelCard
+    // untouched while letting the whole list translate together.
+    let stackY = viewportTop;
     for (let i = 0; i < page.length; i++) {
       const level = page[i];
-      const cy = this._listOriginY + CARD_H / 2 + i * (CARD_H + CARD_GAP);
-      // Stop rendering once cards would collide with the footer buttons.
-      if (cy + CARD_H / 2 > maxY) break;
+      const cy = stackY + CARD_H / 2;
       const editable = level.origin === 'local' || level.origin === 'imported';
       const card = new LevelCard(this, {
         x: cardX, y: cy, width: cardW, height: CARD_H,
@@ -423,17 +458,238 @@ export default class CommunityScene extends Phaser.Scene {
           ? () => fadeTo(this, 'Editor', { designerMode: true, levelId: level.id })
           : undefined,
       });
+      for (const p of LevelCard.pieces(card)) this._scrollContainer.add(p);
       this._cards.push(card);
+      stackY += CARD_H + CARD_GAP;
     }
 
-    if (filtered.length > this._cards.length) {
-      const cy = this._listOriginY + CARD_H / 2 + this._cards.length * (CARD_H + CARD_GAP);
-      if (cy + SMALL_BTN_H / 2 <= maxY) {
-        this._showMoreBtn = this._makeButton(cardX, cy, 220, SMALL_BTN_H, 'SHOW MORE',
-          MUTED_FILL, MUTED_STROKE, MUTED_TEXT,
-          () => { this._page += 1; this._renderList(); });
-      }
+    // LOAD MORE tile — always rendered so the user can keep pulling in
+    // more levels as the backend catalog grows. Taps bump the page.
+    const loadMoreCY = stackY + SMALL_BTN_H / 2;
+    this._loadMoreBtn = this._makeButton(cardX, loadMoreCY, 220, SMALL_BTN_H, 'LOAD MORE',
+      MUTED_FILL, MUTED_STROKE, MUTED_TEXT,
+      () => this._loadMore());
+    for (const p of [this._loadMoreBtn.gfx, this._loadMoreBtn.t, this._loadMoreBtn.hit]) {
+      if (p) this._scrollContainer.add(p);
     }
+    stackY += SMALL_BTN_H + CARD_GAP;
+
+    // Drag-to-scroll surface — transparent rect under the cards. Cards'
+    // own interactive buttons (PLAY/EDIT/heart) sit on top and get their
+    // clicks first; pointer-down on empty space falls through to this
+    // catcher and starts a scroll drag.
+    const contentH = Math.max(0, stackY - viewportTop);
+    this._scrollMin = Math.min(0, viewportH - contentH);
+    this._scrollCatch = this.add.rectangle(this._centerX, viewportTop + viewportH / 2,
+      cardW, viewportH, 0xffffff, 0)
+      .setInteractive({ useHandCursor: false })
+      .setDepth(9);
+    this._wireScrollInput(cardW, viewportTop, viewportBottom);
+
+    // Scrollbar — drawn only when the content actually overflows the
+    // viewport. Sits outside the right edge of the card column with a
+    // visible gap so it reads as a separate UI element rather than an
+    // extension of the cards.
+    this._renderScrollbar(cardX + cardW / 2 + 22, viewportTop, viewportH, contentH);
+  }
+
+  // Thin vertical scrollbar with a thumb proportional to the visible
+  // fraction of the list. Re-rendered from scratch on every _renderList
+  // pass; position tracked via _setScrollOffset.
+  _renderScrollbar(x, viewportTop, viewportH, contentH) {
+    this._destroyScrollbar();
+    if (contentH <= viewportH + 0.5) return;   // fits — no bar needed
+
+    const TRACK_W        = 20;
+    const TRACK_FILL     = 0xffffff;
+    const TRACK_ALPHA    = 0.92;
+    const TRACK_STROKE   = 0x1a2332;
+    const TRACK_STROKE_W = 2;
+    const THUMB_FILL     = 0x3b66b8;   // menu-primary blue — high contrast vs the white track
+    const THUMB_STROKE   = 0x1f3a74;
+    const THUMB_STROKE_W = 2;
+    const RADIUS         = TRACK_W / 2;
+    const MIN_THUMB_H    = 52;
+
+    const track = this.add.graphics().setDepth(11);
+    track.fillStyle(TRACK_FILL, TRACK_ALPHA);
+    track.lineStyle(TRACK_STROKE_W, TRACK_STROKE, 1);
+    track.fillRoundedRect(x - TRACK_W / 2, viewportTop, TRACK_W, viewportH, RADIUS);
+    track.strokeRoundedRect(x - TRACK_W / 2, viewportTop, TRACK_W, viewportH, RADIUS);
+
+    // Track hit — clicking an empty stretch of the track jumps the
+    // thumb's centre to that Y. Padded outward so mis-taps a few pixels
+    // off the bar still register.
+    const trackHit = this.add.rectangle(x, viewportTop + viewportH / 2, TRACK_W + 10, viewportH, 0xffffff, 0)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(11);
+    trackHit.on('pointerdown', (p) => this._onScrollbarTrackDown(p));
+
+    const thumb = this.add.graphics().setDepth(12);
+    const thumbH = Math.max(MIN_THUMB_H, Math.round(viewportH * (viewportH / contentH)));
+    const maxThumbY = viewportTop + viewportH - thumbH;
+    const thumbHit = this.add.rectangle(x, viewportTop + thumbH / 2, TRACK_W + 10, thumbH, 0xffffff, 0)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(13);
+    thumbHit.on('pointerdown', (p) => this._onScrollbarThumbDown(p));
+
+    this._scrollbar = {
+      track, trackHit, thumb, thumbHit,
+      x, viewportTop, viewportH, contentH,
+      thumbW: TRACK_W, thumbH, maxThumbY,
+      thumbFill: THUMB_FILL, thumbStroke: THUMB_STROKE, thumbStrokeW: THUMB_STROKE_W,
+      radius: RADIUS,
+    };
+
+    // Scene-level listeners that drive the drag. Kept separate from the
+    // card-catcher's drag handlers so the two systems don't conflict.
+    const moveHandler = (p) => this._onScrollbarMove(p);
+    const upHandler   = () => { this._scrollbarDragOffset = null; };
+    this.input.on('pointermove', moveHandler);
+    this.input.on('pointerup',   upHandler);
+    this._scrollbar.moveHandler = moveHandler;
+    this._scrollbar.upHandler   = upHandler;
+
+    this._scrollbarDragOffset = null;
+    this._paintScrollThumb();
+  }
+
+  // Click on the track — jump the thumb so its centre lands on the
+  // click, then start a drag so the user can continue dragging from
+  // wherever they landed.
+  _onScrollbarTrackDown(p) {
+    const sb = this._scrollbar;
+    if (!sb) return;
+    this._scrollbarDragOffset = sb.thumbH / 2;
+    this._setThumbCentreY(p.y);
+  }
+
+  // Pointerdown on the thumb — record WHERE inside the thumb the user
+  // grabbed so subsequent moves preserve that grab point.
+  _onScrollbarThumbDown(p) {
+    const sb = this._scrollbar;
+    if (!sb) return;
+    const thumbY = this._currentThumbY();
+    this._scrollbarDragOffset = p.y - thumbY;
+  }
+
+  _onScrollbarMove(p) {
+    if (this._scrollbarDragOffset == null) return;
+    const sb = this._scrollbar;
+    if (!sb) return;
+    const thumbY = p.y - this._scrollbarDragOffset;
+    this._setScrollFromThumbY(thumbY);
+  }
+
+  _currentThumbY() {
+    const sb = this._scrollbar;
+    if (!sb) return 0;
+    const range = Math.max(1e-6, -this._scrollMin);
+    const t = Math.min(1, Math.max(0, -this._scrollOffset / range));
+    return sb.viewportTop + t * (sb.maxThumbY - sb.viewportTop);
+  }
+
+  _setThumbCentreY(y) {
+    const sb = this._scrollbar;
+    if (!sb) return;
+    this._setScrollFromThumbY(y - sb.thumbH / 2);
+  }
+
+  // Convert a proposed thumb-top Y to a scroll offset and apply it.
+  // Clamps inside the viewport band; _setScrollOffset does the scroll
+  // clamping + thumb repaint.
+  _setScrollFromThumbY(thumbY) {
+    const sb = this._scrollbar;
+    if (!sb) return;
+    const clampedY = Math.max(sb.viewportTop, Math.min(sb.maxThumbY, thumbY));
+    const range = sb.maxThumbY - sb.viewportTop;
+    const t = range > 0 ? (clampedY - sb.viewportTop) / range : 0;
+    // scroll offset in [scrollMin, 0]. t=0 → top (offset=0); t=1 → bottom.
+    this._setScrollOffset(t * this._scrollMin);
+  }
+
+  _paintScrollThumb() {
+    const sb = this._scrollbar;
+    if (!sb) return;
+    const thumbY = this._currentThumbY();
+    sb.thumb.clear();
+    sb.thumb.fillStyle(sb.thumbFill, 1);
+    sb.thumb.lineStyle(sb.thumbStrokeW, sb.thumbStroke, 1);
+    sb.thumb.fillRoundedRect(sb.x - sb.thumbW / 2, thumbY, sb.thumbW, sb.thumbH, sb.radius);
+    sb.thumb.strokeRoundedRect(sb.x - sb.thumbW / 2, thumbY, sb.thumbW, sb.thumbH, sb.radius);
+    // Keep the thumb hit rect glued to the thumb so pointerdown on it
+    // kicks off a drag from the right spot.
+    if (sb.thumbHit) sb.thumbHit.setPosition(sb.x, thumbY + sb.thumbH / 2);
+  }
+
+  _destroyScrollbar() {
+    const sb = this._scrollbar;
+    if (!sb) return;
+    if (sb.moveHandler) this.input.off('pointermove', sb.moveHandler);
+    if (sb.upHandler)   this.input.off('pointerup',   sb.upHandler);
+    try { sb.track.destroy();    } catch (e) {}
+    try { sb.trackHit.destroy(); } catch (e) {}
+    try { sb.thumb.destroy();    } catch (e) {}
+    try { sb.thumbHit.destroy(); } catch (e) {}
+    this._scrollbar = null;
+    this._scrollbarDragOffset = null;
+  }
+
+  _loadMore() {
+    // Tracks user intent — always bumps the page so newly-synced levels
+    // show up on the next filter recompute even if the current filtered
+    // set is already fully visible.
+    this._page += 1;
+    const prevOffset = this._scrollOffset || 0;
+    this._renderList();
+    // Preserve scroll position across a load-more so the user doesn't
+    // jump back to the top; clamp to the new content's bounds.
+    this._setScrollOffset(prevOffset);
+  }
+
+  _wireScrollInput(cardW, viewportTop, viewportBottom) {
+    const inBand = (p) => p.y >= viewportTop && p.y <= viewportBottom;
+    // Wheel (desktop / trackpad) — scales its raw deltaY down a bit so
+    // a single flick doesn't blow past the whole list.
+    const wheelHandler = (_pointer, _over, _dx, dy) => {
+      if (!this._scrollContainer) return;
+      this._setScrollOffset(this._scrollOffset - dy * 0.5);
+    };
+    this.input.on('wheel', wheelHandler);
+    this._scrollWheelHandler = wheelHandler;
+
+    // Touch / mouse drag on the catcher. Only starts a drag once the
+    // pointer moves past a small threshold, so a tap on empty card gap
+    // still gets clean pointer-up timing for nested buttons.
+    let dragStartY = null;
+    let dragging = false;
+    const DRAG_THRESHOLD = 6;
+    this._scrollCatch.on('pointerdown', (p) => {
+      dragStartY = p.y;
+      dragging = false;
+    });
+    const moveHandler = (p) => {
+      if (dragStartY == null) return;
+      const dy = p.y - dragStartY;
+      if (!dragging && Math.abs(dy) < DRAG_THRESHOLD) return;
+      if (!dragging) dragging = true;
+      dragStartY = p.y;
+      this._setScrollOffset(this._scrollOffset + dy);
+    };
+    const upHandler = () => { dragStartY = null; dragging = false; };
+    this.input.on('pointermove', moveHandler);
+    this.input.on('pointerup',   upHandler);
+    this._scrollMoveHandler = moveHandler;
+    this._scrollUpHandler   = upHandler;
+  }
+
+  _setScrollOffset(next) {
+    if (!this._scrollContainer) return;
+    const max = 0;
+    const min = this._scrollMin || 0;
+    this._scrollOffset = Math.max(min, Math.min(max, next));
+    this._scrollContainer.y = this._scrollOffset;
+    this._paintScrollThumb();
   }
 
   // ---------- cleanup ----------
@@ -460,8 +716,21 @@ export default class CommunityScene extends Phaser.Scene {
     this._destroyChrome();
     for (const card of this._cards) card.destroy();
     this._cards = [];
-    if (this._showMoreBtn) { this._destroyButton(this._showMoreBtn); this._showMoreBtn = null; }
+    if (this._loadMoreBtn) { this._destroyButton(this._loadMoreBtn); this._loadMoreBtn = null; }
     if (this._emptyText)   { this._emptyText.destroy(); this._emptyText = null; }
     if (this._toastText)   { this._toastText.destroy(); this._toastText = null; }
+    // Scroll plumbing — drop the container + mask and detach the global
+    // wheel / pointermove / pointerup listeners.
+    if (this._scrollContainer) {
+      try { this._scrollContainer.clearMask(true); } catch (e) {}
+      this._scrollContainer.destroy(true);
+      this._scrollContainer = null;
+    }
+    if (this._scrollCatch)   { this._scrollCatch.destroy(); this._scrollCatch = null; }
+    if (this._scrollMaskGfx) { this._scrollMaskGfx.destroy(); this._scrollMaskGfx = null; }
+    this._destroyScrollbar();
+    if (this._scrollWheelHandler) { this.input.off('wheel',        this._scrollWheelHandler); this._scrollWheelHandler = null; }
+    if (this._scrollMoveHandler)  { this.input.off('pointermove',  this._scrollMoveHandler);  this._scrollMoveHandler  = null; }
+    if (this._scrollUpHandler)    { this.input.off('pointerup',    this._scrollUpHandler);    this._scrollUpHandler    = null; }
   }
 }
