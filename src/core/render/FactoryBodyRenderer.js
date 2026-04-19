@@ -7,71 +7,32 @@ import { drawPuddle } from './shapes.js';
 // Gradient fills aren't in Phaser Graphics natively; we mix BLOCK_LIGHT and
 // BLOCK_DARK into a single mid-tone fill.
 
-export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scale = SHAPE_SCALE, fill, stroke, locked, invalid }) {
+export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scale = SHAPE_SCALE, fill, stroke, invalid }) {
   const gfx = scene.make.graphics({ add: false });
   // Invalid factories paint their perimeter in red so the author sees at a
   // glance which block needs fixing; the actual reason floats as text near
   // the body (see EditorScene._drawFactory).
   const effectiveStroke = invalid ? 0xd02020 : stroke;
   drawFactoryBodyInto(gfx, cells, pxCell, pxGap, scale, { fill, stroke: effectiveStroke });
-  if (locked) {
-    // Darken the body cells before labels paint, so the lock state reads
-    // at a glance for boss carry-over factories. Labels + lock pin sit on
-    // top of the dim wash.
-    drawLockedTint(gfx, cells, pxCell, pxGap, scale);
-  }
   // Per-cell labels — one mini form+color glyph centered on each labeled cell.
   drawCellLabels(gfx, cells, pxCell, pxGap, scale);
-  if (locked) {
-    drawLockPin(gfx, cells, pxCell, pxGap, scale);
-  }
   container.add(gfx);
   return gfx;
 }
 
-// Faint dark overlay over every cell of a locked factory. Reads as
-// "this block is pinned in place" without obscuring the underlying body
-// color or the per-cell labels.
-function drawLockedTint(gfx, cells, pxCell, pxGap, scale) {
-  if (!cells || cells.length === 0) return;
+// Paints the "locked" floor tint: a solid dim square covering each cell
+// of a locked factory. Drawn on a container below the factory body so
+// the body can be alpha-dimmed independently without fading the tint.
+// Returns the graphics so the caller can destroy it on re-render.
+export function renderLockedTint(scene, container, { cells, pxCell, pxGap }) {
+  const gfx = scene.make.graphics({ add: false });
+  gfx.fillStyle(0x000000, 0.35);
   const step = pxCell + pxGap;
-  const inner = pxCell * scale;
-  const m = (pxCell - inner) / 2;
-  gfx.fillStyle(0x000000, 0.22);
-  for (const { r, c } of cells) {
-    gfx.fillRect(c * step + m, r * step + m, inner, inner);
+  for (const { r, c } of (cells || [])) {
+    gfx.fillRect(c * step, r * step, pxCell, pxCell);
   }
-}
-
-// Anchor-pin accent in the factory's top-right corner cell, marking it as
-// non-draggable. Drawn as a filled disc + a downward triangle (a stylized
-// pushpin) so it reads as "fixed in place" without text.
-function drawLockPin(gfx, cells, pxCell, pxGap, scale) {
-  if (!cells || cells.length === 0) return;
-  const step = pxCell + pxGap;
-  const inner = pxCell * scale;
-  const m = (pxCell - inner) / 2;
-  // Anchor to the top-rightmost cell so the pin doesn't hide the converter
-  // badge (which lives near centroid).
-  let pick = cells[0];
-  for (const c of cells) {
-    if (c.r < pick.r || (c.r === pick.r && c.c > pick.c)) pick = c;
-  }
-  const x = pick.c * step + m + inner;
-  const y = pick.r * step + m;
-  const r = Math.max(4, Math.round(inner * 0.12));
-  // Disc (head) + small triangle (point) just inside the corner.
-  gfx.fillStyle(0xffffff, 0.95);
-  gfx.lineStyle(Math.max(1, Math.round(outlineWidth(pxCell) * 0.6)), 0x1a2332, 1);
-  gfx.fillCircle(x - r, y + r, r);
-  gfx.strokeCircle(x - r, y + r, r);
-  gfx.beginPath();
-  gfx.moveTo(x - r * 1.6, y + r * 1.6);
-  gfx.lineTo(x - r * 0.4, y + r * 1.6);
-  gfx.lineTo(x - r,       y + r * 2.6);
-  gfx.closePath();
-  gfx.fillPath();
-  gfx.strokePath();
+  container.add(gfx);
+  return gfx;
 }
 
 export function drawFactoryBodyInto(gfx, cells, pxCell, pxGap, scale, opts = {}) {

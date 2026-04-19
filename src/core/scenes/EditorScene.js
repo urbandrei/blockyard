@@ -9,7 +9,7 @@ import {
   validateFactory,
 } from '../model/shape.js';
 import { renderBorder } from '../render/BorderRenderer.js';
-import { renderFactoryBody } from '../render/FactoryBodyRenderer.js';
+import { renderFactoryBody, renderLockedTint } from '../render/FactoryBodyRenderer.js';
 import { renderFunnels } from '../render/FunnelRenderer.js';
 import { renderFlow } from '../render/FlowRenderer.js';
 import { renderBufferLabels, computeBufferLabelBox } from '../render/BufferLabelRenderer.js';
@@ -184,6 +184,11 @@ export default class EditorScene extends Phaser.Scene {
     this._mode = 'design';                  // 'design' | 'blueprintSetup'
     this._blueprintAssignments = new Map(); // factoryId -> { slot:{r,c}, rotation }
     this._solutionSnapshot = null;
+    // Blueprint-setup-only: factory ids the author has toggled to "locked"
+    // on the play area (via click-to-lock). Locked factories stay pinned
+    // on the board at play time instead of being dragged into a blueprint
+    // slot; in the exported level they land in `lockedFactories`.
+    this._lockedFactoryIds = new Set();
 
     this.dragCtrl = new DragController(this, {
       isOverCell:      (x, y) => this._cellAt(x, y),
@@ -198,7 +203,11 @@ export default class EditorScene extends Phaser.Scene {
         if (!info) return false;
         if (this._mode === 'blueprintSetup') {
           if (info.kind === 'draft') return !!this._findAssignmentAt(info.r, info.c);
-          if (info.kind === 'board') return !!this._factoryAtBoardCell(info.r, info.c);
+          if (info.kind === 'board') {
+            const fac = this._factoryAtBoardCell(info.r, info.c);
+            // A locked factory stays put — taps toggle unlock, drags no-op.
+            return !!fac && !this._lockedFactoryIds.has(fac.id);
+          }
           return false;
         }
         if (info.kind === 'draft') return this._isDraftCell(info.r, info.c);
@@ -389,6 +398,7 @@ export default class EditorScene extends Phaser.Scene {
     // play area on cancel and embed `solution` in the export payload.
     this._solutionSnapshot = JSON.parse(JSON.stringify(this.level.factories || []));
     this._blueprintAssignments = new Map();
+    this._lockedFactoryIds = new Set();
     this._mode = 'blueprintSetup';
     if (this.sim) this.sim.stop();
     if (this.shapeRenderer) this.shapeRenderer.clearAll();
@@ -408,6 +418,7 @@ export default class EditorScene extends Phaser.Scene {
       this.level.factories = JSON.parse(JSON.stringify(this._solutionSnapshot));
     }
     this._blueprintAssignments = new Map();
+    this._lockedFactoryIds = new Set();
     this._mode = 'design';
     this._renderAll();
     this._renderDrawGrid();
@@ -417,13 +428,22 @@ export default class EditorScene extends Phaser.Scene {
     this._resetVictoryTracking();
   }
 
-  // True when every solution factory has been assigned to a unique blueprint
-  // slot (per the export rule: each slot holds at most ONE factory).
+  // True when every solution factory has been either (a) assigned to a
+  // unique blueprint slot OR (b) marked locked to the play area. Locked
+  // factories skip the slot requirement entirely — they ship as
+  // `lockedFactories` in the export.
   _blueprintExportReady() {
     if (this._mode !== 'blueprintSetup') return false;
     const total = (this._solutionSnapshot || []).length;
     if (total === 0) return false;
-    if (this._blueprintAssignments.size !== total) return false;
+    const accountedFor = this._blueprintAssignments.size + this._lockedFactoryIds.size;
+    if (accountedFor !== total) return false;
+    for (const fac of (this._solutionSnapshot || [])) {
+      const hasSlot = this._blueprintAssignments.has(fac.id);
+      const isLocked = this._lockedFactoryIds.has(fac.id);
+      if (!hasSlot && !isLocked) return false;
+      if (hasSlot && isLocked) return false;   // invariant: never both
+    }
     const slots = new Set();
     for (const v of this._blueprintAssignments.values()) {
       const k = `${v.slot.r},${v.slot.c}`;
@@ -466,7 +486,18 @@ export default class EditorScene extends Phaser.Scene {
 
   _assembleExportLevel() {
     const initialFactories = [];
+    const lockedFactories = [];
     for (const fac of this._solutionSnapshot || []) {
+      if (this._lockedFactoryIds.has(fac.id)) {
+        // Locked = pinned to its authored anchor, no slot assignment.
+        lockedFactories.push({
+          id: fac.id,
+          anchor: { ...fac.anchor },
+          cells: fac.cells.map((c) => ({ ...c })),
+          funnels: (fac.funnels || []).map((f) => ({ ...f })),
+        });
+        continue;
+      }
       const a = this._blueprintAssignments.get(fac.id);
       if (!a) continue;
       // Embed the cells/funnels in their AUTHORED orientation; rotation
@@ -501,6 +532,9 @@ export default class EditorScene extends Phaser.Scene {
       outputs: this.level.outputs,
       // Player-friendly layout — the blueprint the player starts with.
       initialFactories,
+      // Factories pinned to the play area from the start (click-to-lock
+      // in blueprint-setup adds entries here; see _toggleLockAtBoardCell).
+      lockedFactories,
       // Solution = the editor-verified placement (for backend mod review).
       solution: { factories: this._solutionSnapshot || [] },
       likes: this.level.likes || 0,
@@ -753,16 +787,31 @@ export default class EditorScene extends Phaser.Scene {
     funnels.setPosition(-cx, -cy);
     const body = renderFactoryBody(this, bodyWrap, {
       cells: absCells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
-      locked: !!factory.locked, invalid: !validity.valid,
+      invalid: !validity.valid,
     });
     body.setPosition(-cx, -cy);
+    // Locked visual: full-cell floor tint below the body so the dim
+    // doesn't fade when the body is alpha-reduced. In design mode
+    // `factory.locked` carries the authored flag; in blueprintSetup,
+    // the session-level `_lockedFactoryIds` Set decides what is locked.
+    const isLocked = !!factory.locked ||
+      (this._lockedFactoryIds && this._lockedFactoryIds.has(factory.id));
+    let tintGfx = null;
+    if (isLocked) {
+      tintGfx = renderLockedTint(this, this.boardContainer, {
+        cells: absCells, pxCell: this.pxCell, pxGap: BOARD_GAP,
+      });
+      // Dim the body so the dark grid underneath reads through — matches
+      // PlayerScene's idle-state dim (the editor has no "play" state here).
+      bodyWrap.alpha = 0.65;
+    }
     // Flow doesn't pulse — it lives in a separate container without a wrap.
     const flow = renderFlow(this, this.flowContainer, {
       cells: absCells, funnels: absFunnels, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
     });
     this.flowUpdaters.push(flow);
     if (!validity.valid) this._paintFactoryError(absCells, validity.error);
-    return { bodyWrap, funnelWrap, body, funnels, absCells };
+    return { bodyWrap, funnelWrap, body, funnels, absCells, tintGfx, locked: isLocked };
   }
 
   // Hovering red label placed just above the factory's top-left cell. The
@@ -1130,6 +1179,27 @@ export default class EditorScene extends Phaser.Scene {
     return null;
   }
 
+  // Blueprint-setup-only: click a board factory to pin it to the play area
+  // (locked) or undo the pin. Locked factories skip the blueprint entirely
+  // at play time — exported as `lockedFactories` — so the play-time chrome
+  // renders them with a darkened floor and a dimmed body. A factory
+  // assigned to a blueprint slot can't also be locked; tapping in that
+  // case is a no-op so we don't silently clobber the slot assignment.
+  _toggleLockAtBoardCell(r, c) {
+    if (this._mode !== 'blueprintSetup') return;
+    const fac = this._factoryAtBoardCell(r, c);
+    if (!fac) return;
+    if (this._blueprintAssignments.has(fac.id)) return;
+    if (this._lockedFactoryIds.has(fac.id)) {
+      this._lockedFactoryIds.delete(fac.id);
+    } else {
+      this._lockedFactoryIds.add(fac.id);
+    }
+    this._renderAll();
+    this._renderIconIsland();
+    this._refreshSteps();
+  }
+
   // ===================================================================
   //   Gesture handlers
   // ===================================================================
@@ -1137,11 +1207,17 @@ export default class EditorScene extends Phaser.Scene {
   _onToggleCell(info) {
     if (!info) return;
     if (this._mode === 'blueprintSetup') {
-      // Setup-mode taps: slot tap rotates the factory assigned there;
-      // board tap is a no-op (use drag to move into a slot).
+      // Setup-mode taps:
+      //   • Slot tap → rotate the factory assigned there.
+      //   • Board tap → toggle the locked state of the factory under
+      //     the pointer. A locked factory stays on the play area at
+      //     play time (exported as `lockedFactories`) instead of
+      //     starting in the blueprint. Tap again to unlock.
       if (info.kind === 'draft') {
         const a = this._findAssignmentAt(info.r, info.c);
         if (a) this._rotateSlotted(a.factoryId);
+      } else if (info.kind === 'board') {
+        this._toggleLockAtBoardCell(info.r, info.c);
       }
       return;
     }

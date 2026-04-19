@@ -4,7 +4,7 @@ import {
   rotateFactoryShape, isBorderCell, normalizeFactory,
 } from '../model/shape.js';
 import { renderBorder } from '../render/BorderRenderer.js';
-import { renderFactoryBody } from '../render/FactoryBodyRenderer.js';
+import { renderFactoryBody, renderLockedTint } from '../render/FactoryBodyRenderer.js';
 import { renderFunnels } from '../render/FunnelRenderer.js';
 import { renderFlow } from '../render/FlowRenderer.js';
 import { renderBufferLabels } from '../render/BufferLabelRenderer.js';
@@ -466,14 +466,23 @@ export default class PlayerScene extends Phaser.Scene {
     funnels.setPosition(-cx, -cy);
     const body = renderFactoryBody(this, bodyWrap, {
       cells: absCells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
-      converter: factory.converter, locked: !!factory.locked,
+      converter: factory.converter,
     });
     body.setPosition(-cx, -cy);
+    // Locked-only decoration: full-cell floor tint on boardContainer so
+    // the dim doesn't fade with the body's idle alpha. The body alpha
+    // itself is driven from the update loop based on simState.
+    let tintGfx = null;
+    if (factory.locked) {
+      tintGfx = renderLockedTint(this, this.boardContainer, {
+        cells: absCells, pxCell: this.pxCell, pxGap: BOARD_GAP,
+      });
+    }
     const flow = renderFlow(this, this.flowContainer, {
       cells: absCells, funnels: absFunnels, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
     });
     this.flowUpdaters.push(flow);
-    return { bodyWrap, funnelWrap, body, funnels };
+    return { bodyWrap, funnelWrap, body, funnels, tintGfx, locked: !!factory.locked };
   }
 
   _clearBoardDynamic() {
@@ -885,7 +894,14 @@ export default class PlayerScene extends Phaser.Scene {
       if (entry.bodyWrap)   { entry.bodyWrap.scaleX   = sq.body.scaleX;    entry.bodyWrap.scaleY   = sq.body.scaleY; }
       if (entry.funnelWrap) { entry.funnelWrap.scaleX = sq.funnels.scaleX; entry.funnelWrap.scaleY = sq.funnels.scaleY; }
     };
-    for (const entry of this.factoryRefs.values())   applyPair(entry);
+    // Locked factories dim to 0.65 when the sim isn't running so the player
+    // can read the dark grid-cell tint through the body; full alpha during
+    // play so the block reads as a firm wall.
+    const lockedAlpha = (this.simState === 'running') ? 1.0 : 0.65;
+    for (const entry of this.factoryRefs.values()) {
+      applyPair(entry);
+      if (entry.locked && entry.bodyWrap) entry.bodyWrap.alpha = lockedAlpha;
+    }
     for (const entry of this.blueprintRefs.values()) applyPair(entry);
     if (this.ghostPulse) applyPair(this.ghostPulse);
     if (this.borderFunnelWraps) {
