@@ -51,20 +51,15 @@ jobs:
       - name: Build itch bundle
         run: npm run build:itch
 
-      - name: Install butler
-        run: |
-          curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
-          unzip -q butler.zip
-          chmod +x butler
-          ./butler -V
-
+      # manleydev/butler-publish-itchio-action wraps butler install + push.
+      # Prefer it over a manual curl from broth.itch.ovh, which
+      # intermittently fails DNS resolution from GitHub-hosted runners.
       - name: Push to itch.io
+        uses: manleydev/butler-publish-itchio-action@v1.0.3
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
-        run: |
-          TARGET="${ITCH_USER}/${ITCH_GAME}:${{ inputs.channel }}"
-          if [ -n "${{ inputs.version }}" ]; then
-            ./butler push dist/itch "$TARGET" --userversion "${{ inputs.version }}"
-          else
-            ./butler push dist/itch "$TARGET"
-          fi
+          CHANNEL: ${{ inputs.channel }}
+          ITCH_GAME: ${{ env.ITCH_GAME }}
+          ITCH_USER: ${{ env.ITCH_USER }}
+          PACKAGE: dist/itch
+          VERSION: ${{ inputs.version }}
