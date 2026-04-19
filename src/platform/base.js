@@ -73,6 +73,7 @@ export function createBaseAdapter(name = 'base') {
     async publishLevel(_level) { return false; },
     async searchLevels(_opts)  { return { levels: [], hasMore: false }; },
     async likeLevel(_id, _liked) { return false; },
+    async fetchLevel(_id) { return null; },
 
     // External-link primitive. Adapters that can pop a new tab override this
     // (web/itch/newgrounds). Sandboxed platforms (YouTube Playables) return

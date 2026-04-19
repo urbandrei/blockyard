@@ -100,6 +100,7 @@ export default class CommunityScene extends Phaser.Scene {
     this._cards = [];
     if (this._showMoreBtn) { this._destroyButton(this._showMoreBtn); this._showMoreBtn = null; }
     if (this._emptyText)   { this._emptyText.destroy(); this._emptyText = null; }
+    if (this._offlineBanner) { this._offlineBanner.destroy(); this._offlineBanner = null; }
     this._layoutAndRender();
     this._renderList();
   }
@@ -374,8 +375,32 @@ export default class CommunityScene extends Phaser.Scene {
   // ---------- level list ----------
 
   async _refreshLevels() {
-    this._levels = await listAll();
+    const local = await listAll();
     this._likes = await getLikes();
+
+    // Remote fetch. `platform.searchLevels` returns `{ offline: true }` on a
+    // failed fetch so we can flip the banner without losing the local list.
+    // Page size is intentionally larger than the on-screen PAGE_SIZE — the
+    // scene does its own client-side filtering and pagination on the merged
+    // pool, and the backend stays a simple list endpoint.
+    let remote = [];
+    this._offline = false;
+    try {
+      const res = await platform.searchLevels({ pageSize: 50, sort: 'recent' });
+      if (res && res.offline) this._offline = true;
+      else if (res && Array.isArray(res.levels)) {
+        remote = res.levels.map((e) => ({ ...e, origin: 'remote' }));
+      }
+    } catch (e) {
+      this._offline = true;
+    }
+
+    // Merge: server copy wins on id collision (so a level you submitted
+    // shows its real server-side like count once approved).
+    const byId = new Map();
+    for (const l of local) byId.set(l.id, l);
+    for (const l of remote) byId.set(l.id, l);
+    this._levels = [...byId.values()];
     this._renderList();
   }
 
@@ -387,6 +412,7 @@ export default class CommunityScene extends Phaser.Scene {
     this._cards = [];
     if (this._loadMoreBtn) { this._destroyButton(this._loadMoreBtn); this._loadMoreBtn = null; }
     if (this._emptyText)   { this._emptyText.destroy(); this._emptyText = null; }
+    if (this._offlineBanner) { this._offlineBanner.destroy(); this._offlineBanner = null; }
     if (this._scrollContainer) {
       try { this._scrollContainer.clearMask(true); } catch (e) {}
       this._scrollContainer.destroy(true);
@@ -407,8 +433,18 @@ export default class CommunityScene extends Phaser.Scene {
     const endIdx = (this._page + 1) * PAGE_SIZE;
     const page = filtered.slice(0, endIdx);
 
+    if (this._offlineBanner) { this._offlineBanner.destroy(); this._offlineBanner = null; }
+    if (this._offline) {
+      this._offlineBanner = this.add.text(this._centerX, this._listOriginY + 18,
+        'community offline — showing local levels only', {
+        fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontStyle: 'italic',
+        color: '#ff9a5c',
+      }).setOrigin(0.5, 0).setDepth(11);
+    }
+
     if (page.length === 0) {
-      this._emptyText = this.add.text(this._centerX, this._listOriginY + 40,
+      const emptyY = this._listOriginY + (this._offline ? 48 : 40);
+      this._emptyText = this.add.text(this._centerX, emptyY,
         'No community levels yet — design one or import a JSON.', {
         fontFamily: 'system-ui, sans-serif', fontSize: '14px', color: '#e6edf5',
       }).setOrigin(0.5).setDepth(11);
@@ -444,14 +480,33 @@ export default class CommunityScene extends Phaser.Scene {
       const level = page[i];
       const cy = stackY + CARD_H / 2;
       const editable = level.origin === 'local' || level.origin === 'imported';
+      const isRemote = level.origin === 'remote';
       const card = new LevelCard(this, {
         x: cardX, y: cy, width: cardW, height: CARD_H,
         level,
         liked: this._likes.has(level.id),
-        onPlay: () => fadeTo(this, 'Player', { levelData: level }),
+        onPlay: isRemote
+          ? async () => {
+              // Remote list entries are summaries only — fetch the full body
+              // before handing it to the Player scene. If the server went
+              // offline between render and tap, surface a toast instead of
+              // stranding the player on a broken scene.
+              const res = await platform.fetchLevel(level.id);
+              const body = res && res.level;
+              if (body) fadeTo(this, 'Player', { levelData: body });
+              else this._toast('Could not fetch level — try again later');
+            }
+          : () => fadeTo(this, 'Player', { levelData: level }),
         onToggleLike: async () => {
+          // Optimistic local toggle first so the heart flips immediately.
           const next = await toggleLike(level.id);
           if (next) this._likes.add(level.id); else this._likes.delete(level.id);
+          if (isRemote) {
+            // Best-effort remote sync. If it fails we keep the optimistic
+            // local state — the refresh on next entry will reconcile.
+            try { await platform.likeLevel(level.id, next); }
+            catch (e) { console.warn('[community] likeLevel failed', e); }
+          }
           return next;
         },
         onEdit: editable
@@ -718,6 +773,7 @@ export default class CommunityScene extends Phaser.Scene {
     this._cards = [];
     if (this._loadMoreBtn) { this._destroyButton(this._loadMoreBtn); this._loadMoreBtn = null; }
     if (this._emptyText)   { this._emptyText.destroy(); this._emptyText = null; }
+    if (this._offlineBanner) { this._offlineBanner.destroy(); this._offlineBanner = null; }
     if (this._toastText)   { this._toastText.destroy(); this._toastText = null; }
     // Scroll plumbing — drop the container + mask and detach the global
     // wheel / pointermove / pointerup listeners.
