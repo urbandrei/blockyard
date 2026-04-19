@@ -14,7 +14,15 @@ const R = 0x41, G = 0x27, B = 0x22;
 const FADE_MS = 220;
 
 export function fadeIn(scene) {
-  if (!scene || !scene.cameras || !scene.cameras.main) return;
+  if (!scene) return;
+  // Phaser keeps scene instances alive across scene.start, so the
+  // `_fading` flag and the disabled input from a prior fadeTo() would
+  // carry over into this create() unless we explicitly reset them.
+  // Without this the user would return to Home and find every button
+  // dead because fadeTo() short-circuits on `_fading`.
+  scene._fading = false;
+  if (scene.input) scene.input.enabled = true;
+  if (!scene.cameras || !scene.cameras.main) return;
   scene.cameras.main.fadeIn(FADE_MS, R, G, B);
 }
 
