@@ -51,15 +51,39 @@ jobs:
       - name: Build itch bundle
         run: npm run build:itch
 
-      # manleydev/butler-publish-itchio-action wraps butler install + push.
-      # Prefer it over a manual curl from broth.itch.ovh, which
-      # intermittently fails DNS resolution from GitHub-hosted runners.
+      # Install butler manually. Tries the newer CDN (broth.itch.zone)
+      # first, then falls back to broth.itch.ovh — the latter has
+      # intermittent DNS outages from GitHub-hosted runners. --retry +
+      # --ipv4 shake out the residual flakiness.
+      - name: Install butler
+        run: |
+          set -e
+          URLS=(
+            "https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default"
+            "https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default"
+          )
+          ok=0
+          for url in "${URLS[@]}"; do
+            echo "Trying $url"
+            if curl --fail --ipv4 --retry 5 --retry-delay 10 --retry-connrefused -L -o butler.zip "$url"; then
+              ok=1
+              break
+            fi
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "All butler mirrors failed"; exit 1
+          fi
+          unzip -q butler.zip
+          chmod +x butler
+          ./butler -V
+
       - name: Push to itch.io
-        uses: manleydev/butler-publish-itchio-action@v1.0.3
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
-          CHANNEL: ${{ inputs.channel }}
-          ITCH_GAME: ${{ env.ITCH_GAME }}
-          ITCH_USER: ${{ env.ITCH_USER }}
-          PACKAGE: dist/itch
-          VERSION: ${{ inputs.version }}
+        run: |
+          TARGET="${ITCH_USER}/${ITCH_GAME}:${{ inputs.channel }}"
+          if [ -n "${{ inputs.version }}" ]; then
+            ./butler push dist/itch "$TARGET" --userversion "${{ inputs.version }}"
+          else
+            ./butler push dist/itch "$TARGET"
+          fi
