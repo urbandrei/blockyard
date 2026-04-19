@@ -2,18 +2,30 @@ import Phaser from 'phaser';
 import { loadProgress } from '../progress.js';
 import { nextUnbeaten, LEVELS } from '../catalog/index.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
-import { enableMenuBg, disableMenuBg } from '../ui/MenuBackground.js';
+import { enableMenuBg } from '../ui/MenuBackground.js';
+import { compute920Box } from '../ui/ContentBox.js';
 
-// Home menu. Three primary actions:
-//   • QUICK PLAY (<next unbeaten level name>) — jumps straight into the
-//     first level the player hasn't beaten, or back into the last one if
-//     everything is done.
+// Home menu. Three primary actions stacked vertically in the centered
+// content column:
+//   • QUICK PLAY (LEVEL N) — jumps to the first unbeaten level, or back to
+//     the last one if everything's been cleared.
 //   • LEVEL SELECT — opens the section/level grid.
-//   • COMMUNITY — placeholder route for the future Community scene
-//     (Milestone G). Logs a stub for now.
-//
-// A small EDITOR link at the bottom keeps the sandbox reachable from home
-// during development.
+//   • COMMUNITY — opens the community hub.
+// A small EDITOR link lives just under the primary stack for sandbox
+// access during development.
+
+const BTN_H       = 76;
+const BTN_RADIUS  = 18;
+const BTN_GAP     = 22;
+const TITLE_H     = 64;
+
+const QP_FILL   = 0x4caf50;
+const QP_STROKE = 0x2e7a36;
+const QP_TEXT   = '#ffffff';
+
+const BTN_FILL    = 0x223047;
+const BTN_STROKE  = 0x3a5a88;
+const BTN_TEXT    = '#e6edf5';
 
 export default class HomeScene extends Phaser.Scene {
   constructor() { super({ key: 'Home' }); }
@@ -22,66 +34,178 @@ export default class HomeScene extends Phaser.Scene {
     enableMenuBg();
     fadeIn(this);
 
-    const { width, height } = this.scale;
+    const progress = await loadProgress();
+    const beatenSet = new Set(progress.beaten);
+    const next = nextUnbeaten(beatenSet) || LEVELS[LEVELS.length - 1] || null;
+    this._next = next;
+    this._quickLabel = next ? `LEVEL ${next.number}` : 'QUICK PLAY';
 
-    this.add.text(width / 2, height * 0.18, 'BLOCKYARD', {
+    this._buttons = [];
+    this._layoutAndRender();
+
+    this._onResize = () => this._relayout();
+    this.scale.on('resize', this._onResize);
+    this.events.on('shutdown', () => {
+      if (this._onResize) this.scale.off('resize', this._onResize);
+    });
+  }
+
+  _relayout() {
+    for (const b of this._buttons) b.destroy();
+    this._buttons = [];
+    this._layoutAndRender();
+  }
+
+  _layoutAndRender() {
+    const { boxX, boxY, boxW, boxH } = compute920Box(this);
+    const centerX = boxX + Math.round(boxW / 2);
+
+    // Match LevelSelect's header/button width so the menu reads as the
+    // same column the game uses — not a fullscreen sprawl.
+    const btnW = Math.min(420, boxW - 48);
+
+    // Title + 3 primary buttons, vertically centered in the content box.
+    const primaryCount = 3;
+    const stackH =
+      TITLE_H + BTN_GAP +
+      primaryCount * BTN_H + (primaryCount - 1) * BTN_GAP;
+    const topPad = Math.max(24, Math.floor((boxH - stackH) / 2));
+    let y = boxY + topPad;
+
+    // ---- Title ----
+    const title = this.add.text(centerX, y + TITLE_H / 2, 'BLOCKYARD', {
       fontFamily: 'system-ui, sans-serif',
       fontSize: '56px',
       color: '#e6edf5',
       fontStyle: 'bold',
     }).setOrigin(0.5);
+    // Fade/slide the title in so Home has a first-frame moment of motion.
+    title.alpha = 0;
+    title.y -= 12;
+    this.tweens.add({
+      targets: title, alpha: 1, y: y + TITLE_H / 2,
+      duration: 360, ease: 'Sine.Out',
+    });
+    this._buttons.push({ destroy: () => title.destroy() });
 
-    const progress = await loadProgress();
-    const beatenSet = new Set(progress.beaten);
-    const next = nextUnbeaten(beatenSet) || LEVELS[LEVELS.length - 1] || null;
-    const quickLabel = next
-      ? `QUICK PLAY — ${next.name}`
-      : 'QUICK PLAY';
+    y += TITLE_H + BTN_GAP;
 
-    this._button(width / 2, height * 0.42, quickLabel, () => {
-      if (next) fadeTo(this, 'Player', { levelId: next.id });
+    // ---- QUICK PLAY (green) ----
+    const qp = this._button(centerX, y + BTN_H / 2, btnW, BTN_H, this._quickLabel, {
+      fill: QP_FILL, stroke: QP_STROKE, textColor: QP_TEXT, pulse: true, fontSize: 28,
+      onClick: () => {
+        if (this._next) fadeTo(this, 'Player', { levelId: this._next.id });
+      },
     });
-    this._button(width / 2, height * 0.55, 'LEVEL SELECT', () => {
-      fadeTo(this, 'LevelSelect');
-    });
-    this._button(width / 2, height * 0.68, 'COMMUNITY', () => {
-      fadeTo(this, 'Community');
-    });
+    this._buttons.push(qp);
+    y += BTN_H + BTN_GAP;
 
-    this._smallButton(width / 2, height * 0.85, 'EDITOR (sandbox)', () => {
-      fadeTo(this, 'Editor');
-    });
+    // ---- LEVEL SELECT ----
+    this._buttons.push(this._button(centerX, y + BTN_H / 2, btnW, BTN_H, 'LEVEL SELECT', {
+      fill: BTN_FILL, stroke: BTN_STROKE, textColor: BTN_TEXT,
+      onClick: () => fadeTo(this, 'LevelSelect'),
+    }));
+    y += BTN_H + BTN_GAP;
+
+    // ---- COMMUNITY ----
+    this._buttons.push(this._button(centerX, y + BTN_H / 2, btnW, BTN_H, 'COMMUNITY', {
+      fill: BTN_FILL, stroke: BTN_STROKE, textColor: BTN_TEXT,
+      onClick: () => fadeTo(this, 'Community'),
+    }));
   }
 
+  // Rounded rectangle button drawn with Phaser Graphics, positioned via
+  // .x/.y so scale tweens grow around the button center instead of the
+  // scene origin. Returns a `{ destroy }` handle for relayout teardown.
+  _button(cx, cy, w, h, label, opts) {
+    const {
+      fill, stroke, textColor, onClick,
+      pulse = false, fontSize = 22, radius = BTN_RADIUS,
+    } = opts;
 
-  _button(x, y, label, onClick) {
-    const w = 420, h = 76;
-    const rect = this.add.rectangle(x, y, w, h, 0x223047, 1)
-      .setStrokeStyle(2, 0x3a5a88, 1)
-      .setInteractive({ useHandCursor: true });
-    const text = this.add.text(x, y, label, {
+    // Graphics in local coords (origin = button center) so scale transforms
+    // stay centered.
+    const g = this.add.graphics();
+    g.fillStyle(fill, 1);
+    g.lineStyle(2, stroke, 1);
+    g.fillRoundedRect(-w / 2, -h / 2, w, h, radius);
+    g.strokeRoundedRect(-w / 2, -h / 2, w, h, radius);
+    g.x = cx; g.y = cy;
+    g.setScale(1);
+    g.alpha = 0;
+
+    const text = this.add.text(cx, cy, label, {
       fontFamily: 'system-ui, sans-serif',
-      fontSize: '22px',
-      color: '#e6edf5',
+      fontSize: `${fontSize}px`,
+      fontStyle: 'bold',
+      color: textColor,
       letterSpacing: 2,
     }).setOrigin(0.5);
-    rect.on('pointerover', () => rect.setFillStyle(0x2a3b55, 1));
-    rect.on('pointerout',  () => rect.setFillStyle(0x223047, 1));
-    rect.on('pointerup', onClick);
-    return { rect, text };
-  }
+    text.alpha = 0;
 
-  _smallButton(x, y, label, onClick) {
-    const w = 260, h = 48;
-    const rect = this.add.rectangle(x, y, w, h, 0x1a2332, 1)
-      .setStrokeStyle(1, 0x3a5a88, 1)
+    // Staggered fade-in so the stack cascades rather than flashing in
+    // all at once.
+    const delay = this._buttons ? Math.min(this._buttons.length * 55, 320) : 0;
+    this.tweens.add({
+      targets: [g, text], alpha: 1,
+      duration: 280, ease: 'Sine.Out', delay,
+    });
+
+    // Invisible hit rect on top — absorbs pointer events so the underlying
+    // graphics doesn't need to be interactive (graphics hit regions are
+    // more trouble than a plain rectangle).
+    const hit = this.add.rectangle(cx, cy, w, h, 0xffffff, 0)
       .setInteractive({ useHandCursor: true });
-    const text = this.add.text(x, y, label, {
-      fontFamily: 'system-ui, sans-serif',
-      fontSize: '14px',
-      color: '#9aa6b2',
-    }).setOrigin(0.5);
-    rect.on('pointerup', onClick);
-    return { rect, text };
+
+    const tweens = [];
+
+    // Idle pulse on the quick-play tile only — "tap me" without being loud.
+    let pulseTween = null;
+    if (pulse) {
+      pulseTween = this.tweens.add({
+        targets: g,
+        scale: { from: 1.0, to: 1.035 },
+        duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.InOut',
+      });
+      tweens.push(pulseTween);
+    }
+
+    // Juice: hover = slight grow; press = squash; release = pop back with
+    // a hint of overshoot. The pulse tween (if any) gets paused during
+    // press so it doesn't fight the squash.
+    const squash = () => {
+      if (pulseTween) pulseTween.pause();
+      this.tweens.killTweensOf([g, text]);
+      this.tweens.add({ targets: [g, text], scale: 0.93, duration: 80, ease: 'Sine.Out' });
+    };
+    const pop = () => {
+      this.tweens.killTweensOf([g, text]);
+      this.tweens.add({
+        targets: [g, text], scale: 1, duration: 240, ease: 'Back.Out',
+        onComplete: () => { if (pulseTween) pulseTween.resume(); },
+      });
+    };
+    const hover = (entering) => {
+      if (pulseTween) return;            // pulsing buttons don't hover-scale
+      this.tweens.killTweensOf([g, text]);
+      this.tweens.add({
+        targets: [g, text],
+        scale: entering ? 1.04 : 1,
+        duration: 140, ease: 'Sine.Out',
+      });
+    };
+
+    hit.on('pointerover', () => hover(true));
+    hit.on('pointerout',  () => { hover(false); pop(); });
+    hit.on('pointerdown', () => squash());
+    hit.on('pointerup',   () => { pop(); if (onClick) onClick(); });
+
+    return {
+      destroy: () => {
+        for (const t of tweens) { try { t.stop(); } catch (e) {} }
+        try { this.tweens.killTweensOf([g, text]); } catch (e) {}
+        g.destroy(); text.destroy(); hit.destroy();
+      },
+    };
   }
 }

@@ -3,21 +3,46 @@ import { SECTIONS } from '../catalog/index.js';
 import { loadProgress } from '../progress.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
 import { enableMenuBg } from '../ui/MenuBackground.js';
+import { compute920Box } from '../ui/ContentBox.js';
+import { BOARD_GAP, BLUEPRINT_BG, BLUEPRINT_STROKE, BLUEPRINT_DOT } from '../constants.js';
+import { drawHome } from '../ui/Icons.js';
+import { TitleBar } from '../ui/TitleBar.js';
 
-// Level select. One vertical-scroll list of sections; each section is a 2x5
-// grid of regular levels followed by a wider BOSS button. Buttons reflect
-// progress: unlocked / locked (dimmed) / beaten (checkmark overlay).
-//
-// Unlock rule (MVP): the first level is always unlocked; level N is unlocked
-// once any earlier level has been beaten. Bosses unlock once every regular
-// level in the section is beaten.
+// Level select. Layout mirrors the Player scene's column so this screen
+// reads as a "preview" of the in-game layout: the LEVEL SELECT header box,
+// each section's level row, and the BOSS tile all sit at the same width as
+// the in-game blueprint. An icon island at the bottom — sized identically
+// to the Player's island — holds a single centered HOME button.
 
-const HEADER_H        = 64;
-const SECTION_GAP     = 32;
-const BUTTON_SIZE     = 80;
-const BUTTON_GAP      = 12;
-const BOSS_HEIGHT     = 110;
-const COLS            = 5;
+// These values have to stay in sync with PlayerScene. Moving them to a
+// shared helper is a fair cleanup for later; inlining them here keeps the
+// constraint explicit.
+const REF_DIM             = 5;
+const BLUEPRINT_PAD       = 10;
+const BLUEPRINT_RADIUS    = 12;
+const ISLAND_TO_GRID_GAP  = 14;
+
+const HEADER_H          = 72;          // matches TitleBar TITLE_H
+const HEADER_CORNER_R   = 14;
+const HEADER_FRAME_FILL   = 0xffffff;
+const HEADER_FRAME_STROKE = 0x1a2332;
+const HEADER_TEXT_COLOR   = '#1a2332';
+
+// Unified inter-block margin. Used between every stacked element — header
+// to row, row to boss, boss to next section, and between level tiles
+// within a row — so the layout reads as an evenly spaced column.
+const BLOCK_GAP         = 22;
+const BUTTON_CORNER_R   = 12;
+const BOSS_H            = 96;
+const TOP_MARGIN        = 16;
+const BOTTOM_MARGIN     = 16;
+
+const COLOR_GREEN        = 0x4caf50;
+const COLOR_GREEN_STROKE = 0x2e7a36;
+const COLOR_BLUE         = 0x3b66b8;
+const COLOR_BLUE_STROKE  = 0x1f3a74;
+const COLOR_GREY         = 0x9aa6b2;
+const COLOR_GREY_STROKE  = 0x5a6674;
 
 export default class LevelSelectScene extends Phaser.Scene {
   constructor() { super({ key: 'LevelSelect' }); }
@@ -26,108 +51,203 @@ export default class LevelSelectScene extends Phaser.Scene {
     enableMenuBg();
     fadeIn(this);
 
-    const { width, height } = this.scale;
-
-    this.add.rectangle(width / 2, 36, width, 72, 0x1a2332, 1).setOrigin(0.5);
-    this.add.text(width / 2, 36, 'LEVEL SELECT', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '24px', fontStyle: 'bold',
-      color: '#e6edf5',
-    }).setOrigin(0.5);
-
-    // Back button — top-left.
-    const back = this.add.rectangle(60, 36, 88, 44, 0x223047, 1)
-      .setStrokeStyle(1, 0x3a5a88, 1)
-      .setInteractive({ useHandCursor: true });
-    this.add.text(60, 36, 'BACK', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '14px', color: '#e6edf5',
-    }).setOrigin(0.5);
-    back.on('pointerup', () => fadeTo(this, 'Home'));
-
     const progress = await loadProgress();
-    const beaten = new Set(progress.beaten);
+    this._beaten = new Set(progress.beaten);
+    this._nextLevelId = this._findNextLevelId();
+    this._gfx  = [];
+    this._hits = [];
+    this._texts = [];
 
-    // Render sections in vertical sequence, top-down.
-    let y = 96;
-    for (const section of SECTIONS) {
-      y = this._renderSection(section, beaten, width, y);
-      y += SECTION_GAP;
-    }
-  }
+    this._layoutAndRender();
 
-  _renderSection(section, beaten, width, topY) {
-    this.add.text(width / 2, topY, section.name, {
-      fontFamily: 'system-ui, sans-serif', fontSize: '20px', fontStyle: 'bold',
-      color: '#e6edf5',
-    }).setOrigin(0.5);
-    let y = topY + 32;
-
-    // Compute unlock state for each level. Unlocked iff it's the very first
-    // level in the catalog or any earlier level in this section is beaten.
-    const levels = section.levels;
-    const gridW = COLS * BUTTON_SIZE + (COLS - 1) * BUTTON_GAP;
-    const startX = width / 2 - gridW / 2;
-    let anyEarlierBeaten = beaten.size > 0;
-    levels.forEach((lvl, idx) => {
-      const r = Math.floor(idx / COLS);
-      const c = idx % COLS;
-      const cx = startX + c * (BUTTON_SIZE + BUTTON_GAP) + BUTTON_SIZE / 2;
-      const cy = y + r * (BUTTON_SIZE + BUTTON_GAP) + BUTTON_SIZE / 2;
-      const isBeaten  = beaten.has(lvl.id);
-      // First level is always unlocked. Others require any prior beaten OR
-      // the immediately previous level beaten — using "any earlier" keeps
-      // the player from getting fully stuck.
-      const unlocked  = idx === 0 || anyEarlierBeaten;
-      this._levelButton(cx, cy, lvl, isBeaten, unlocked);
-      if (isBeaten) anyEarlierBeaten = true;
+    this._onResize = () => this._relayout();
+    this.scale.on('resize', this._onResize);
+    this.events.on('shutdown', () => {
+      if (this._onResize) this.scale.off('resize', this._onResize);
     });
-    const usedRows = Math.ceil(levels.length / COLS);
-    y += usedRows * (BUTTON_SIZE + BUTTON_GAP);
-
-    // Boss placeholder (no boss level in catalog yet — render as locked).
-    const bossW = gridW;
-    const bossY = y + BOSS_HEIGHT / 2 + 6;
-    const bossRect = this.add.rectangle(width / 2, bossY, bossW, BOSS_HEIGHT, 0x2a3b55, 1)
-      .setStrokeStyle(2, 0x3a5a88, 1);
-    this.add.text(width / 2, bossY, 'BOSS — coming soon', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '20px', fontStyle: 'bold',
-      color: '#9aa6b2',
-    }).setOrigin(0.5);
-    bossRect.setAlpha(0.7);
-    return bossY + BOSS_HEIGHT / 2;
   }
 
-  _levelButton(cx, cy, level, isBeaten, unlocked) {
-    const fill   = unlocked ? 0x3b66b8 : 0x2a3b55;
-    const stroke = unlocked ? 0x1a2332 : 0x1a2332;
-    const rect = this.add.rectangle(cx, cy, BUTTON_SIZE, BUTTON_SIZE, fill, 1)
-      .setStrokeStyle(2, stroke, 1);
-    if (!unlocked) rect.setAlpha(0.55);
+  _relayout() {
+    for (const g of this._gfx)   g.destroy();
+    for (const h of this._hits)  h.destroy();
+    for (const t of this._texts) t.destroy();
+    this._gfx = []; this._hits = []; this._texts = [];
+    this._layoutAndRender();
+  }
 
-    this.add.text(cx, cy - 8, String(level.number), {
-      fontFamily: 'system-ui, sans-serif', fontSize: '28px', fontStyle: 'bold',
+  // First level whose unlock-gate is open and that isn't beaten. `null` if
+  // the player has cleared everything.
+  _findNextLevelId() {
+    const beaten = this._beaten;
+    let anyEarlierBeaten = false;
+    for (const section of SECTIONS) {
+      for (const lvl of section.levels) {
+        const unlocked = anyEarlierBeaten || lvl === SECTIONS[0].levels[0];
+        if (unlocked && !beaten.has(lvl.id)) return lvl.id;
+        if (beaten.has(lvl.id)) anyEarlierBeaten = true;
+      }
+    }
+    return null;
+  }
+
+  // Derive the Player scene's blueprint width from the current content box
+  // so our header/level/boss/island all match the in-game chrome.
+  _computeRefMetrics(box) {
+    const { boxW, boxH } = box;
+    const availW = boxW - 8;
+    const refSlotCols = (REF_DIM - 2) + 1;
+    const refSlotRows = (REF_DIM - 2) + 1;
+    const topMargin       = TitleBar.HEIGHT + 8;
+    const titleToBoardGap = 4;
+    const boardToBpGap    = 6;
+    const bottomMargin    = 16;
+    const chrome          = BLUEPRINT_PAD * 4 + ISLAND_TO_GRID_GAP;
+    const stackFixed      = topMargin + titleToBoardGap + boardToBpGap + bottomMargin + chrome;
+
+    const wCellFactor     = REF_DIM;
+    const wGapFactor      = Math.max(0, REF_DIM - 1);
+    const cellW_board     = (availW - BOARD_GAP * wGapFactor) / wCellFactor;
+    const cellW_blueprint = (availW - BLUEPRINT_PAD * 2) / refSlotCols;
+    const stackCellFactor = REF_DIM + (refSlotRows + 1);
+    const stackGapFactor  = Math.max(0, REF_DIM - 1);
+    const cellH_stack     = (boxH - stackFixed - BOARD_GAP * stackGapFactor) / stackCellFactor;
+    const refPxCell       = Math.max(24, Math.floor(Math.min(cellW_board, cellW_blueprint, cellH_stack)));
+
+    const bpW     = refSlotCols * refPxCell;
+    const islandW = bpW;
+    const islandH = refPxCell;
+    return { refPxCell, bpW, islandW, islandH };
+  }
+
+  _layoutAndRender() {
+    const box = compute920Box(this);
+    const { boxX, boxY, boxW, boxH } = box;
+    const { bpW, islandW, islandH } = this._computeRefMetrics(box);
+
+    const centerX = boxX + Math.round(boxW / 2);
+
+    // 5 tiles per row, uniform BLOCK_GAP between them — same gap as between
+    // stacked blocks, so horizontal + vertical spacing read as one rhythm.
+    const cols = 5;
+    const btnSize = Math.floor((bpW - BLOCK_GAP * (cols - 1)) / cols);
+
+    // ---- Top-justified stack: header + sections ----
+    let y = boxY + TOP_MARGIN;
+    this._drawHeaderBox(centerX, y + HEADER_H / 2, bpW, HEADER_H, 'LEVEL SELECT');
+    y += HEADER_H + BLOCK_GAP;
+
+    for (let si = 0; si < SECTIONS.length; si++) {
+      const section = SECTIONS[si];
+      const startX = centerX - bpW / 2;
+      section.levels.forEach((lvl, idx) => {
+        if (idx >= cols) return;  // MVP: one row per section
+        const cx = startX + idx * (btnSize + BLOCK_GAP) + btnSize / 2;
+        const cy = y + btnSize / 2;
+        this._drawLevelTile(cx, cy, btnSize, lvl);
+      });
+      y += btnSize + BLOCK_GAP;
+
+      this._drawBossTile(centerX, y + BOSS_H / 2, bpW, BOSS_H, section);
+      y += BOSS_H;
+      if (si < SECTIONS.length - 1) y += BLOCK_GAP;
+    }
+
+    // ---- Bottom-justified icon island ----
+    const islandTotalH = islandH + BLUEPRINT_PAD * 2;
+    const islandOriginX = centerX - islandW / 2;
+    const islandOriginY = boxY + boxH - BOTTOM_MARGIN - islandTotalH + BLUEPRINT_PAD;
+    this._drawIconIsland(islandOriginX, islandOriginY, islandW, islandH);
+  }
+
+  _drawHeaderBox(cx, cy, w, h, label) {
+    const gfx = this.add.graphics().setDepth(10);
+    gfx.fillStyle(HEADER_FRAME_FILL, 1);
+    gfx.lineStyle(2, HEADER_FRAME_STROKE, 1);
+    gfx.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, HEADER_CORNER_R);
+    gfx.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, HEADER_CORNER_R);
+    this._gfx.push(gfx);
+    const text = this.add.text(cx, cy, label, {
+      fontFamily: 'system-ui, sans-serif', fontSize: '24px', fontStyle: 'bold',
+      color: HEADER_TEXT_COLOR,
+    }).setOrigin(0.5).setDepth(11);
+    this._texts.push(text);
+  }
+
+  _drawLevelTile(cx, cy, size, level) {
+    const beaten = this._beaten.has(level.id);
+    const isNext = this._nextLevelId === level.id;
+    let fill, stroke, clickable;
+    if (beaten)      { fill = COLOR_GREEN; stroke = COLOR_GREEN_STROKE; clickable = true;  }
+    else if (isNext) { fill = COLOR_BLUE;  stroke = COLOR_BLUE_STROKE;  clickable = true;  }
+    else             { fill = COLOR_GREY;  stroke = COLOR_GREY_STROKE;  clickable = false; }
+
+    const gfx = this.add.graphics().setDepth(10);
+    gfx.fillStyle(fill, 1);
+    gfx.lineStyle(2, stroke, 1);
+    gfx.fillRoundedRect(cx - size / 2, cy - size / 2, size, size, BUTTON_CORNER_R);
+    gfx.strokeRoundedRect(cx - size / 2, cy - size / 2, size, size, BUTTON_CORNER_R);
+    this._gfx.push(gfx);
+
+    const num = this.add.text(cx, cy, String(level.number), {
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: `${Math.floor(size * 0.42)}px`,
+      fontStyle: 'bold',
       color: '#ffffff',
-    }).setOrigin(0.5);
-    this.add.text(cx, cy + 22, level.name, {
-      fontFamily: 'system-ui, sans-serif', fontSize: '11px',
-      color: '#e6edf5',
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setDepth(11);
+    this._texts.push(num);
 
-    if (isBeaten) {
-      // Small green checkmark overlay (top-right corner).
-      const badge = this.add.circle(cx + BUTTON_SIZE / 2 - 10, cy - BUTTON_SIZE / 2 + 10, 12, 0x4caf50, 1)
-        .setStrokeStyle(2, 0x1a2332, 1);
-      this.add.text(badge.x, badge.y, '✓', {
-        fontFamily: 'system-ui, sans-serif', fontSize: '16px', fontStyle: 'bold',
-        color: '#ffffff',
-      }).setOrigin(0.5);
-    }
-
-    if (unlocked) {
-      rect.setInteractive({ useHandCursor: true });
-      rect.on('pointerover', () => rect.setFillStyle(0x4a76c8, 1));
-      rect.on('pointerout',  () => rect.setFillStyle(fill, 1));
-      rect.on('pointerup', () => fadeTo(this, 'Player', { levelId: level.id }));
+    if (clickable) {
+      const hit = this.add.rectangle(cx, cy, size, size, 0xffffff, 0)
+        .setInteractive({ useHandCursor: true }).setDepth(12);
+      hit.on('pointerup', () => fadeTo(this, 'Player', { levelId: level.id }));
+      this._hits.push(hit);
     }
   }
 
+  _drawBossTile(cx, cy, w, h, section) {
+    // No boss levels authored yet — render as grey/locked with a "coming
+    // soon" label. Mirrors the regular-tile styling so sections read as a
+    // unit.
+    const gfx = this.add.graphics().setDepth(10);
+    gfx.fillStyle(COLOR_GREY, 1);
+    gfx.lineStyle(2, COLOR_GREY_STROKE, 1);
+    gfx.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, BUTTON_CORNER_R);
+    gfx.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, BUTTON_CORNER_R);
+    this._gfx.push(gfx);
+    const text = this.add.text(cx, cy, `${section.name.toUpperCase()} BOSS — COMING SOON`, {
+      fontFamily: 'system-ui, sans-serif', fontSize: '16px', fontStyle: 'bold',
+      color: '#ffffff',
+    }).setOrigin(0.5).setDepth(11);
+    this._texts.push(text);
+  }
+
+  _drawIconIsland(originX, originY, islandW, islandH) {
+    const frame = this.add.graphics().setDepth(10);
+    frame.x = originX; frame.y = originY;
+    frame.fillStyle(BLUEPRINT_BG, 1);
+    frame.lineStyle(2, BLUEPRINT_STROKE, 1);
+    frame.fillRoundedRect(-BLUEPRINT_PAD, -BLUEPRINT_PAD, islandW + BLUEPRINT_PAD * 2, islandH + BLUEPRINT_PAD * 2, BLUEPRINT_RADIUS);
+    frame.strokeRoundedRect(-BLUEPRINT_PAD, -BLUEPRINT_PAD, islandW + BLUEPRINT_PAD * 2, islandH + BLUEPRINT_PAD * 2, BLUEPRINT_RADIUS);
+    this._gfx.push(frame);
+
+    // Single centered HOME slot.
+    const slot = this.add.graphics().setDepth(10);
+    slot.x = originX; slot.y = originY;
+    slot.fillStyle(BLUEPRINT_BG, 1);
+    slot.lineStyle(1, BLUEPRINT_STROKE, 0.5);
+    const slotPad = 4;
+    slot.fillRoundedRect(slotPad, slotPad, islandW - slotPad * 2, islandH - slotPad * 2, 8);
+    this._gfx.push(slot);
+
+    const iconSize = Math.round(Math.min(islandW, islandH) * 0.55);
+    const icon = this.add.graphics().setDepth(11);
+    icon.x = originX; icon.y = originY;
+    drawHome(icon, islandW / 2, islandH / 2, iconSize, BLUEPRINT_DOT);
+    this._gfx.push(icon);
+
+    const hit = this.add.rectangle(originX + islandW / 2, originY + islandH / 2, islandW - 6, islandH - 6, 0xffffff, 0)
+      .setInteractive({ useHandCursor: true }).setDepth(12);
+    hit.on('pointerup', () => fadeTo(this, 'Home'));
+    this._hits.push(hit);
+  }
 }
