@@ -1,0 +1,20 @@
+I will be referring to the collection of placeable blocks/funnels as factories, and what are currently circles as shapes.
+Be able to set blocks adjacent to the funnels to certain shapes/colors/both to define accepted input/expected output types.
+Single blocks can be set to certain shapes/colors/both, and they convert shapes from the input funnels to the shape/color/both int eh output funnel.
+There should be blocks that are locked to the ground in the playable area and can't move. You should be able to set block type using an icon in the edit grid, which I will be calling the blueprint.
+The background should be white, instead of an outside border shape within the playabel area, the playable area should be just the internal section, with a buffer region around it where the border shape is now, where the funnel type labels will rest.
+The editable area of the blueprint should be what is now the area within one block of the current space, with the area around it being the background, and the top buffer being where icons for editing will reside. On the play section, it will be where undo and help icons will reside.
+Add a title block with a level number square with a home button to the right of it above the playable area ( [[#] level name][home icon] ) <- brackets are enclosing rectangles.
+The blueprint should be blue, with white dotted lines for the editable area.
+The playable area should show dotted lines for the grid when the mouse is near it, in a faded circle around the mouse.
+
+On the home screen, there should be a quick play button with the name of the next unbeaten level, a level select button, and a community button.
+The level slect should have 10 blocks for each of the levels in a section, in rows of 5 squares with the numbers within, followed by a full width button for a boss fight that is also slightly taller than the squares.
+The community section should have a level designer button at the top, followed by a level search, and import level button. there should also be a button linking to the discord.
+The level search should show the top levels designed, with a button to show more, as well as a search bar, and a filter button. You should be able to like levels, and filter by liked, or filter by how much a level has been liked (in both ways)
+In the level designer, it should be what we currently have as the level editor, but instead of a title/level number as in the regular levels, replace it with an editable name section, followed by a save option that drops a menu where you can save locally, save publicly, or download json. Saving publicly will send it to a server, where it must be verified by an admin before being publicly available. Your own levels, public or otherwise, should be seen and filterable in the community level select, with tags to show that is private, pending or public.
+
+At the start of each row of normal nonboss levels, as well at the start of bosses, there should be a short animation that is played about the story of that row. It should be skippable by clicking. At the start of each level, the previous blueprint should go away (if applicable) by dropping down, the previous map should be centered, and the factories be replaced with the new structures. The new title should flash on the screen, then it should go to the normal position, the playable area should go to normal position, and the blueprint should pop up from the bottom with the new factories.
+Factories should be rotateable if tapped in the blueprint, or in the playable area. In the regular play, factories can be stacked int eh blueprint area (not in the playable area)
+After all factories are placed, a reset button and a play button are shown in the blueprint. Pressing play should start spawning shapes at the corner inputs. Clicking anywhere interrupts the play. If all the border output funnels are satisfied, a victory message is played, and players are gien the option to proceed, try again, or return to level select.
+If the reset button is clicked (even if in play mode, in which cas it is stopped first), then all factories are returned to the blueprint in the original configuration.

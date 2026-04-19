@@ -1,0 +1,70 @@
+# Manual itch.io publish via butler.
+#
+# Prereqs (one-time):
+#   1. Generate a butler API key:  https://itch.io/user/settings/api-keys
+#   2. Add it as a repo secret named BUTLER_API_KEY:
+#        Settings → Secrets and variables → Actions → New repository secret.
+#   3. Edit the ITCH_USER / ITCH_GAME values below to match your project's
+#        itch.io URL (https://<user>.itch.io/<game>).
+#
+# Run:  Actions tab → "Publish to itch.io" → Run workflow → pick a channel.
+#
+# Butler channels are free-form; convention for HTML5 games is `html5`.
+# Butler auto-versions each push; you can override by filling the `version`
+# input (e.g. "v0.2.0-rc3").
+
+name: Publish to itch.io
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'itch.io channel (e.g. html5, windows, mac)'
+        required: true
+        default: 'html5'
+      version:
+        description: 'Optional version tag (e.g. v0.2.0). Leave blank for auto.'
+        required: false
+        default: ''
+
+env:
+  # TODO: replace with your itch.io username + game slug.
+  ITCH_USER: your-itch-username
+  ITCH_GAME: blockyard
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build itch bundle
+        run: npm run build:itch
+
+      - name: Install butler
+        run: |
+          curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
+          unzip -q butler.zip
+          chmod +x butler
+          ./butler -V
+
+      - name: Push to itch.io
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          TARGET="${ITCH_USER}/${ITCH_GAME}:${{ inputs.channel }}"
+          if [ -n "${{ inputs.version }}" ]; then
+            ./butler push dist/itch "$TARGET" --userversion "${{ inputs.version }}"
+          else
+            ./butler push dist/itch "$TARGET"
+          fi

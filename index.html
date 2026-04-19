@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Blockyard</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    color: #e6edf5;
+    font-family: system-ui, sans-serif;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Baseline body background. In editor/player scenes LetterboxChecker
+     overrides these inline with a board-aligned static checker. Menu scenes
+     toggle on `.bg-scroll` to get an animated diagonal checker that spans
+     the full viewport (the Phaser canvas is transparent so the body shows
+     through the letterbox AND the canvas area). */
+  body { background-color: #412722; }
+  body.bg-scroll {
+    background-image: conic-gradient(
+      #412722 0 25%, #552e26 0 50%, #412722 0 75%, #552e26 0 100%
+    );
+    background-size: 64px 64px;
+    background-repeat: repeat;
+    animation: blockyard-bg-scroll 4.2s linear infinite;
+  }
+  @keyframes blockyard-bg-scroll {
+    from { background-position:   0px   0px; }
+    to   { background-position:  64px  64px; }
+  }
+  #game {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  #game canvas {
+    display: block;
+    margin: auto;
+  }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

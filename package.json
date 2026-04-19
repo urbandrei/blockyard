@@ -1,0 +1,26 @@
+{
+  "name": "blockyard-v2",
+  "version": "0.1.0",
+  "description": "Puzzle editor + circle-flow sim, rebuilt on Phaser 3 with a platform-adapter architecture.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build:web":        "cross-env PLATFORM=web        vite build --outDir dist/web",
+    "build:itch":       "cross-env PLATFORM=web        vite build --outDir dist/itch",
+    "build:newgrounds": "cross-env PLATFORM=newgrounds vite build --outDir dist/newgrounds",
+    "build:youtube":    "cross-env PLATFORM=youtube    vite build --outDir dist/youtube",
+    "build:wavedash":   "cross-env PLATFORM=wavedash   vite build --outDir dist/wavedash",
+    "build:crazygames": "cross-env PLATFORM=crazygames vite build --outDir dist/crazygames",
+    "build:steam":      "cross-env PLATFORM=steam      vite build --outDir dist/steam",
+    "build:mobile":     "cross-env PLATFORM=mobile     vite build --outDir dist/mobile",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "phaser": "^3.80.1"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "vite": "^5.4.0"
+  }
+}
