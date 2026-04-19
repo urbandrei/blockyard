@@ -40,7 +40,7 @@ export class ExportPanel {
       .setDepth(SHIELD_DEPTH).setInteractive();
 
     const panelW = Math.min(560, width - 60);
-    const panelH = 460;
+    const panelH = 500;
     const px = width / 2 - panelW / 2;
     const py = height / 2 - panelH / 2;
     this._panel = { px, py, panelW, panelH };
@@ -68,9 +68,30 @@ export class ExportPanel {
     }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH);
     this.authorEdit = this._smallButton(px + panelW - 90, py + 118, 60, 28, 'EDIT', () => this._editAuthor());
 
+    // Hint row — the instructional text that appears in the blueprint's
+    // top slot at play time. Blank = no hint (top slot stays open).
+    // Disabled whenever an initial factory occupies slot row 0, because
+    // the hint pill and a top-row factory can't coexist in the same
+    // cell — the author has to move the factory first.
+    this._topRowBlocked = this._hasTopRowFactory();
+    this._addText(px + 20, py + 158, 'HINT', '12px', 'bold', '#1a2332', 0, 0.5);
+    const hintColor = this._topRowBlocked
+      ? '#a01010'
+      : (this.level.instructionalText ? '#1a2332' : '#6b7a8f');
+    this.hintDisplay = this.scene.add.text(px + 90, py + 158, this._hintDisplayText(), {
+      fontFamily: 'system-ui, sans-serif', fontSize: '14px',
+      color: hintColor,
+      wordWrap: { width: panelW - 90 - 90 - 8 },
+    }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH);
+    this.hintEdit = this._smallButton(
+      px + panelW - 90, py + 158, 60, 28, 'EDIT',
+      () => { if (!this._topRowBlocked) this._editHint(); },
+      { disabled: this._topRowBlocked },
+    );
+
     // Share string row.
-    this._addText(px + 20, py + 158, 'SHARE STRING', '12px', 'bold', '#1a2332', 0, 0.5);
-    const shareBoxX = px + 20, shareBoxY = py + 178, shareBoxW = panelW - 40, shareBoxH = 80;
+    this._addText(px + 20, py + 198, 'SHARE STRING', '12px', 'bold', '#1a2332', 0, 0.5);
+    const shareBoxX = px + 20, shareBoxY = py + 218, shareBoxW = panelW - 40, shareBoxH = 80;
     this.shareBg = this.scene.add.graphics().setDepth(PANEL_DEPTH);
     this.shareBg.fillStyle(0xeef3fb, 1);
     this.shareBg.lineStyle(1, PANEL_STROKE, 0.6);
@@ -123,17 +144,21 @@ export class ExportPanel {
     return t;
   }
 
-  _smallButton(cx, cy, w, h, label, onTap) {
-    const rect = this.scene.add.rectangle(cx, cy, w, h, 0x223047, 1)
+  _smallButton(cx, cy, w, h, label, onTap, opts = {}) {
+    const disabled = !!opts.disabled;
+    const idleFill  = disabled ? 0x9aa6b2 : 0x223047;
+    const hoverFill = disabled ? 0x9aa6b2 : 0x2a3b55;
+    const textColor = disabled ? '#d8dde4' : '#ffffff';
+    const rect = this.scene.add.rectangle(cx, cy, w, h, idleFill, 1)
       .setStrokeStyle(1, PANEL_STROKE, 1)
-      .setInteractive({ useHandCursor: true })
+      .setInteractive({ useHandCursor: !disabled })
       .setDepth(PANEL_DEPTH);
     const text = this.scene.add.text(cx, cy, label, {
       fontFamily: 'system-ui, sans-serif', fontSize: '11px', fontStyle: 'bold',
-      color: '#ffffff',
+      color: textColor,
     }).setOrigin(0.5).setDepth(PANEL_DEPTH);
-    rect.on('pointerover', () => rect.setFillStyle(0x2a3b55, 1));
-    rect.on('pointerout',  () => rect.setFillStyle(0x223047, 1));
+    rect.on('pointerover', () => rect.setFillStyle(hoverFill, 1));
+    rect.on('pointerout',  () => rect.setFillStyle(idleFill, 1));
     rect.on('pointerup', onTap);
     return { rect, text };
   }
@@ -207,6 +232,42 @@ export class ExportPanel {
         this._authorPrompt = null;
       },
       onCancel: () => { this._authorPrompt = null; },
+    });
+  }
+
+  _hasTopRowFactory() {
+    const list = this.level.initialFactories || [];
+    return list.some((f) => f && f.slot && f.slot.row === 0);
+  }
+
+  _hintDisplayText() {
+    if (this._topRowBlocked) {
+      return 'Move top-row blueprint factories before adding a hint.';
+    }
+    return this.level.instructionalText || '(none — blank for no hint)';
+  }
+
+  _editHint() {
+    if (this._hintInput) { this._hintInput.destroy(); this._hintInput = null; }
+    const lx = this.hintDisplay.x + 160;
+    const ly = this.hintDisplay.y;
+    this._hintInput = new TextInputOverlay(this.scene, {
+      x: lx, y: ly, width: 360, height: 30,
+      value: this.level.instructionalText || '',
+      placeholder: 'short hint shown above the blueprint',
+      maxLength: 80,
+      onCommit: (v) => {
+        const text = (v || '').trim();
+        // Empty hint = no hint; drop the field so exports stay clean.
+        this.level.instructionalText = text || null;
+        if (this.hintDisplay) {
+          this.hintDisplay.setText(this._hintDisplayText());
+          this.hintDisplay.setColor(text ? '#1a2332' : '#6b7a8f');
+        }
+        this._refreshShareString();
+        this._hintInput = null;
+      },
+      onCancel: () => { this._hintInput = null; },
     });
   }
 

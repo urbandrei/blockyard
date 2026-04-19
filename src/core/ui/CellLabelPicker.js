@@ -1,12 +1,16 @@
-import { FORMS, COLORS, COLOR_HEX, DEFAULT_SHAPE_TYPE } from '../model/shape.js';
+import { FORMS, COLORS, COLOR_HEX } from '../model/shape.js';
 
-// Floating editor for a factory cell's label: form (circle/square/triangle)
-// × color (red/green/blue), with a CLEAR option to remove the label and
-// turn the cell back into pass-through pipe space.
+// Floating editor for a factory cell's label.
+//
+// The label is a partial shape type: `{form?, color?}`. Each axis is a
+// toggle — tap a selected form/color to drop it and leave that axis
+// wildcard. A cell with only `{form}` is a shape converter (white-fill
+// glyph); one with only `{color}` is a color converter (puddle glyph);
+// one with both is a full-type singleton. When both axes are dropped
+// the picker emits onClear so the cell becomes pass-through again.
 //
 // Same shield + panel + clamp pattern as FunnelTypePicker so the visual
-// language is consistent. Live commits each pick via opts.onChange; CLEAR
-// fires opts.onClear and closes.
+// language is consistent. Live commits each pick via opts.onChange.
 
 const PANEL_W = 260;
 const PANEL_H = 256;
@@ -31,7 +35,9 @@ export class CellLabelPicker {
   constructor(scene, opts) {
     this.scene = scene;
     this.opts = opts;
-    this.label = { ...(opts.label || DEFAULT_SHAPE_TYPE) };
+    // Empty object = "no label yet" / "both axes cleared". Existing
+    // labels may be partial (form-only or color-only) — preserve as-is.
+    this.label = { ...(opts.label || {}) };
     this._showRemove = !!opts.onRemove;
     this._build();
   }
@@ -79,6 +85,9 @@ export class CellLabelPicker {
     if (this._showRemove) {
       this.removeBtn = this._buildRemove(0, topY + ROW_H * 3);
     }
+    // Paint initial selection rings so the picker opens showing the
+    // cell's current label state (partial or full).
+    this._refreshSelections();
   }
 
   _buildFormRow(cx, cy) {
@@ -86,18 +95,14 @@ export class CellLabelPicker {
     const span = SWATCH * 1.2;
     FORMS.forEach((form, i) => {
       const x = cx + (i - 1) * span;
-      const btn = this._iconBtn(x, cy, () => {
-        this.label = { ...this.label, form };
-        this._refreshSelections();
-        this.opts.onChange && this.opts.onChange(this.label);
-      });
+      const btn = this._iconBtn(x, cy, () => this._toggleForm(form));
       const gfx = this.scene.add.graphics();
-      drawFormIcon(gfx, 0, 0, SWATCH * 0.32, form, COLOR_HEX[this.label.color]);
       btn.add(gfx);
       btn._form = form;
       btn._iconGfx = gfx;
       buttons.push(btn);
     });
+    this._repaintFormIcons(buttons);
     return buttons;
   }
 
@@ -106,15 +111,7 @@ export class CellLabelPicker {
     const span = SWATCH * 1.2;
     COLORS.forEach((color, i) => {
       const x = cx + (i - 1) * span;
-      const btn = this._iconBtn(x, cy, () => {
-        this.label = { ...this.label, color };
-        this._refreshSelections();
-        for (const b of this.formRow) {
-          b._iconGfx.clear();
-          drawFormIcon(b._iconGfx, 0, 0, SWATCH * 0.32, b._form, COLOR_HEX[this.label.color]);
-        }
-        this.opts.onChange && this.opts.onChange(this.label);
-      });
+      const btn = this._iconBtn(x, cy, () => this._toggleColor(color));
       const gfx = this.scene.add.graphics();
       gfx.fillStyle(COLOR_HEX[color], 1);
       gfx.lineStyle(2, 0x000000, 1);
@@ -125,6 +122,46 @@ export class CellLabelPicker {
       buttons.push(btn);
     });
     return buttons;
+  }
+
+  _toggleForm(form) {
+    if (this.label.form === form) delete this.label.form;
+    else                          this.label.form = form;
+    this._commit();
+  }
+
+  _toggleColor(color) {
+    if (this.label.color === color) delete this.label.color;
+    else                             this.label.color = color;
+    this._commit();
+  }
+
+  // Repaint + fire the appropriate callback. A label with neither axis
+  // set is semantically "no label" — we call onClear so the cell drops
+  // back to pass-through pipe space instead of carrying an empty {}.
+  _commit() {
+    this._refreshSelections();
+    if (this.formRow) this._repaintFormIcons(this.formRow);
+    const hasAxis = !!this.label.form || !!this.label.color;
+    if (hasAxis) {
+      this.opts.onChange && this.opts.onChange({ ...this.label });
+    } else {
+      this.opts.onClear && this.opts.onClear();
+    }
+  }
+
+  // Form-row icon reflects the current color axis:
+  //   full label  → form glyph in label.color
+  //   form only   → form glyph filled white (color axis is wildcard)
+  // The color row button always shows its canonical color regardless of
+  // selection state, so we don't repaint it here.
+  _repaintFormIcons(buttons) {
+    const colorKey = this.label.color;
+    const fill = colorKey ? COLOR_HEX[colorKey] : 0xffffff;
+    for (const b of buttons) {
+      b._iconGfx.clear();
+      drawFormIcon(b._iconGfx, 0, 0, SWATCH * 0.32, b._form, fill);
+    }
   }
 
   _buildClear(cx, cy) {
