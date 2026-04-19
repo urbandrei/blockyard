@@ -29,8 +29,8 @@ on:
 
 env:
   # TODO: replace with your itch.io username + game slug.
-  ITCH_USER: your-itch-username
-  ITCH_GAME: blockyard
+  ITCH_USER: urbandrei
+  ITCH_GAME: block-yard
 
 jobs:
   publish:
