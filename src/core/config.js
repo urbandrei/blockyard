@@ -24,8 +24,12 @@ export const gameConfig = {
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
+    // Canvas aspect = content stack aspect. 720×1580 (~9:19.75) is tuned so
+    // the editor's stack (title + 5-cell board + 4-slot blueprint + icon
+    // island row) fits the canvas with an equal slim margin on every side.
+    // Wider desktops get a portrait column against the body's CSS checker.
     width: 720,
-    height: 1080,
+    height: 1580,
   },
   render: {
     antialias: true,

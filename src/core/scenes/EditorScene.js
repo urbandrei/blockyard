@@ -49,7 +49,7 @@ const SHAPE_WARP_AMP = 0.15;
 //   • Tap a border cell's inner edge to cycle a border funnel.
 //   • Play/Stop in the toolbar runs the sim (shapes flow through factories).
 
-const TOOLBAR_H = TitleBar.HEIGHT + 24;   // space reserved above the play area
+const TOOLBAR_H = TitleBar.HEIGHT + 8;    // space reserved above the play area
 const ICON_SLOTS = 5;                     // fixed — BACK, HINT, -, +, CLEAR
 
 // Blueprint (draft-composer) chrome. Grid + a small separate icon island
@@ -566,7 +566,7 @@ export default class EditorScene extends Phaser.Scene {
     const titleToBoardGap = 4;
     const boardToBpGap   = 6;
     const bottomMargin   = 16;
-    const availW = boxW - 40;
+    const availW = boxW - 8;
 
     // Total chrome within the blueprint+island column:
     //   blueprint padding + gap + island padding = 4*PAD + gap
@@ -588,9 +588,13 @@ export default class EditorScene extends Phaser.Scene {
       topMargin + titleToBoardGap + boardToBpGap + bottomMargin + chrome;
 
     const fitPxCell = (boardDim, drawGridColsN, drawGridRowsN) => {
-      const interior = Math.max(1, boardDim - 2);
-      const wCellFactor = interior + 2 * SHAPE_SCALE;
-      const wGapFactor  = Math.max(0, interior - 1);
+      // Cell-size derivation. Width: the board's OUTER width (all cells at
+      // full pxCell, including the buffer ring) must fit availW. Height:
+      // the full vertical stack (board + blueprint + 1 island row + chrome)
+      // must fit boxH. The smaller of the two wins so the whole stack
+      // stays in-view on every aspect.
+      const wCellFactor = boardDim;
+      const wGapFactor  = Math.max(0, boardDim - 1);
       const cellW_board     = (availW - BOARD_GAP * wGapFactor) / wCellFactor;
       const cellW_blueprint = (availW - BLUEPRINT_PAD * 2) / drawGridColsN;
       const stackCellFactor = boardDim + (drawGridRowsN + 1);
@@ -634,8 +638,21 @@ export default class EditorScene extends Phaser.Scene {
     this.boardW = boardW;
     this.titleBarW = Math.round(titleBarW);
     this.islandSlotW = bpW / ICON_SLOTS;
+    // Center the full stack vertically inside the content box so leftover
+    // slack (canvas tuned close to content aspect but not exact) splits
+    // evenly top + bottom. With availW trimmed to boxW-8 the horizontal
+    // slack also matches, giving a slim margin on all four sides.
+    const stackH =
+      topMargin + titleToBoardGap +
+      boardH + boardToBpGap +
+      (BLUEPRINT_PAD * 2) + bpH +
+      ISLAND_TO_GRID_GAP + (BLUEPRINT_PAD * 2) + this.islandH +
+      bottomMargin;
+    const verticalSlack = Math.max(0, Math.floor((boxH - stackH) / 2));
+    const stackTop = boxY + verticalSlack;
+    this.stackTop = stackTop;              // used by _buildTitleBar
     this.boardOriginX = boxX + Math.round((boxW - boardW) / 2);
-    this.boardOriginY = boxY + topMargin + titleToBoardGap;
+    this.boardOriginY = stackTop + topMargin + titleToBoardGap;
 
     const blueprintTopY = this.boardOriginY + boardH + boardToBpGap;
 
@@ -1802,10 +1819,14 @@ export default class EditorScene extends Phaser.Scene {
     // steps` variant — three bare pills, no surrounding frame, no HOME
     // button. The icon-island BACK slot remains the only way out.
     if (this.titleBar) this.titleBar.destroy();
-    const boxY = (this.contentBox && this.contentBox.boxY) || 0;
+    // Use the centered stackTop so the title bar shifts with the stack
+    // when the content box has vertical slack (keeps margins symmetric).
+    const stackTop = this.stackTop != null
+      ? this.stackTop
+      : ((this.contentBox && this.contentBox.boxY) || 0);
     this.titleBar = new TitleBar(this, {
       x: this.boardOriginX + this.boardW / 2,
-      y: boxY + TitleBar.HEIGHT / 2 + 12,
+      y: stackTop + TitleBar.HEIGHT / 2 + 12,
       width: this.titleBarW,
       levelNumber: this.level.number,
       levelName: this.level.name,

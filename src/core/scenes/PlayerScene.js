@@ -29,7 +29,7 @@ import {
 } from '../constants.js';
 
 const SHAPE_WARP_AMP = 0.15;
-const TOOLBAR_H = TitleBar.HEIGHT + 24;
+const TOOLBAR_H = TitleBar.HEIGHT + 8;
 
 const BLUEPRINT_PAD       = 10;
 const BLUEPRINT_RADIUS    = 12;
@@ -320,14 +320,14 @@ export default class PlayerScene extends Phaser.Scene {
     const titleToBoardGap = 4;
     const boardToBpGap = 6;
     const bottomMargin = 16;
-    const availW = boxW - 40;
+    const availW = boxW - 8;
     const chrome = BLUEPRINT_PAD * 4 + ISLAND_TO_GRID_GAP;
     const stackFixed = topMargin + titleToBoardGap + boardToBpGap + bottomMargin + chrome;
 
     const fitPxCell = (boardDim, slotColsN, slotRowsN) => {
-      const interior = Math.max(1, boardDim - 2);
-      const wCellFactor = interior + 2 * SHAPE_SCALE;
-      const wGapFactor  = Math.max(0, interior - 1);
+      // Full-board cell fit — see EditorScene.fitPxCell for the rationale.
+      const wCellFactor = boardDim;
+      const wGapFactor  = Math.max(0, boardDim - 1);
       const cellW_board = (availW - BOARD_GAP * wGapFactor) / wCellFactor;
       const cellW_blueprint = (availW - BLUEPRINT_PAD * 2) / slotColsN;
       const stackCellFactor = boardDim + (slotRowsN + 1);
@@ -359,8 +359,19 @@ export default class PlayerScene extends Phaser.Scene {
     this.boardW = boardW;
     this.titleBarW = Math.round(titleBarW);
     this.islandSlotW = bpW / ICON_SLOTS;
+    // Center the full stack vertically inside the content box — matches
+    // the horizontal centering so leftover slack splits evenly top/bottom.
+    const stackH =
+      topMargin + titleToBoardGap +
+      boardH + boardToBpGap +
+      (BLUEPRINT_PAD * 2) + bpH +
+      ISLAND_TO_GRID_GAP + (BLUEPRINT_PAD * 2) + this.islandH +
+      bottomMargin;
+    const verticalSlack = Math.max(0, Math.floor((boxH - stackH) / 2));
+    const stackTop = boxY + verticalSlack;
+    this.stackTop = stackTop;
     this.boardOriginX = boxX + Math.round((boxW - boardW) / 2);
-    this.boardOriginY = boxY + topMargin + titleToBoardGap;
+    this.boardOriginY = stackTop + topMargin + titleToBoardGap;
 
     const blueprintTopY = this.boardOriginY + boardH + boardToBpGap;
     this.blueprintOriginX = boxX + Math.round((boxW - bpW) / 2);
@@ -626,13 +637,15 @@ export default class PlayerScene extends Phaser.Scene {
 
   _buildToolbar() {
     if (this.titleBar) this.titleBar.destroy();
-    const boxY = (this.contentBox && this.contentBox.boxY) || 0;
+    const stackTop = this.stackTop != null
+      ? this.stackTop
+      : ((this.contentBox && this.contentBox.boxY) || 0);
     // HOME lives in the icon-island BACK slot (drawn with the home glyph,
     // routes to fadeTo('Home')). The title-bar right box now carries HINT
     // instead — stub for now; real hint system lands later.
     this.titleBar = new TitleBar(this, {
       x: this.boardOriginX + this.boardW / 2,
-      y: boxY + TitleBar.HEIGHT / 2 + 12,
+      y: stackTop + TitleBar.HEIGHT / 2 + 12,
       width: this.titleBarW,
       levelNumber: this.sourceLevel.number,
       levelName: this.sourceLevel.name,
