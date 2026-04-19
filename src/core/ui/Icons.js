@@ -115,6 +115,65 @@ export function drawTrash(gfx, cx, cy, size, color = 0xffffff) {
   }
 }
 
+// 3×3 grid of filled squares. Used for the LEVEL SELECT button.
+export function drawGrid(gfx, cx, cy, size, color = 0xffffff) {
+  const s = size * 0.85;
+  const cellW = s / 3;
+  const gap = Math.max(1, cellW * 0.2);
+  const inner = cellW - gap;
+  gfx.fillStyle(color, 1);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      const x = cx - s / 2 + c * cellW + gap / 2;
+      const y = cy - s / 2 + r * cellW + gap / 2;
+      gfx.fillRect(x, y, inner, inner);
+    }
+  }
+}
+
+// Circular arrow for RESET. 270° arc from 3 o'clock clockwise through 6, 9,
+// 12; arrow at 12 o'clock pointing right so the glyph reads as a natural
+// "this loops back around" motion. The arrow's base sits on the arc's
+// endpoint so there's no visible gap between them.
+export function drawCircleArrow(gfx, cx, cy, size, color = 0xffffff) {
+  const r = size * 0.35;
+  const stroke = Math.max(2, Math.round(size * 0.12));
+  gfx.lineStyle(stroke, color, 1);
+  // Sweep from angle 0 (3 o'clock) clockwise to 3π/2 (12 o'clock).
+  gfx.beginPath();
+  gfx.arc(cx, cy, r, 0, Math.PI * 1.5, false);
+  gfx.strokePath();
+  // Arrow at 12 o'clock. Base sits on the arc's endpoint; tip extends
+  // to the right into the gap. Base is a vertical segment, tip is
+  // horizontal — clean right-angled arrowhead.
+  const tipBaseX = cx;
+  const tipBaseY = cy - r;
+  const ah = stroke * 2.6;
+  const halfBase = ah * 0.78;
+  gfx.fillStyle(color, 1);
+  gfx.beginPath();
+  gfx.moveTo(tipBaseX + ah,        tipBaseY);              // rightward tip
+  gfx.lineTo(tipBaseX,             tipBaseY - halfBase);  // base top
+  gfx.lineTo(tipBaseX,             tipBaseY + halfBase);  // base bottom
+  gfx.closePath();
+  gfx.fillPath();
+}
+
+// Sideways triangle for PLAY. Points right. Taller than wide so the glyph
+// reads as a slim classic play icon rather than a chunky equilateral.
+export function drawPlayTriangle(gfx, cx, cy, size, color = 0xffffff) {
+  const h = size * 0.82;
+  const halfH = h / 2;
+  const halfW = halfH * 0.78;
+  gfx.fillStyle(color, 1);
+  gfx.beginPath();
+  gfx.moveTo(cx - halfW, cy - halfH);
+  gfx.lineTo(cx - halfW, cy + halfH);
+  gfx.lineTo(cx + halfW, cy);
+  gfx.closePath();
+  gfx.fillPath();
+}
+
 function toCssColor(c) {
   return '#' + c.toString(16).padStart(6, '0');
 }

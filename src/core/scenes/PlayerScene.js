@@ -17,8 +17,7 @@ import { compute920Box } from '../ui/ContentBox.js';
 import { Simulation } from '../sim/Simulation.js';
 import { DragController } from '../input/DragController.js';
 import { shapeSquash } from '../render/pulse.js';
-import { VictoryModal } from '../ui/VictoryModal.js';
-import { drawHome, drawTrash } from '../ui/Icons.js';
+import { drawHome, drawGrid, drawCircleArrow, drawPlayTriangle } from '../ui/Icons.js';
 import { getLevelById, nextLevelAfter } from '../catalog/index.js';
 import { markBeaten } from '../progress.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
@@ -36,10 +35,13 @@ const BLUEPRINT_RADIUS    = 12;
 const ISLAND_TO_GRID_GAP  = 14;
 
 // Icon island slots: BACK | (gap) | RESET | PLAY.
-const ICON_SLOTS  = 4;
-const SLOT_BACK   = 0;
-const SLOT_RESET  = 2;
-const SLOT_PLAY   = 3;
+// Icon island — three evenly-spread shortcuts. PLAY / RESET that drive the
+// actual simulation have been promoted out of the island into a prominent
+// overlay in the blueprint area (see _renderBlueprint).
+const ICON_SLOTS           = 3;
+const SLOT_HOME            = 0;
+const SLOT_LEVEL_SELECT    = 1;
+const SLOT_RESET           = 2;
 
 // Player scene: load a level (catalog or sandbox), present an interactive
 // blueprint of starting factories, let the player drag/rotate them onto the
@@ -84,6 +86,10 @@ export default class PlayerScene extends Phaser.Scene {
     this.blueprintContainer    = this.add.container(0, 0).setDepth(50);
     this.blueprintFlowContainer= this.add.container(0, 0).setDepth(51);
     this.blueprintBodyContainer= this.add.container(0, 0).setDepth(52);
+    // Persistent overlay that survives _renderBlueprint's removeAll — lets
+    // the PLAY + RESET tiles fade out when the user picks a factory back up
+    // and fade back in only after the last factory is released.
+    this.blueprintOverlayContainer = this.add.container(0, 0).setDepth(53);
     this.iconIslandContainer   = this.add.container(0, 0).setDepth(54);
     this.ghostContainer        = this.add.container(0, 0).setDepth(70);
     this.placementContainer    = this.add.container(0, 0).setDepth(80);
@@ -146,7 +152,10 @@ export default class PlayerScene extends Phaser.Scene {
     this.events.on('shutdown', () => {
       this.sim && this.sim.stop();
       this.dragCtrl && this.dragCtrl.destroy();
-      if (this.victoryModal) { this.victoryModal.destroy(); this.victoryModal = null; }
+      this._teardownBlueprintPlayButtons();
+      if (this._victoryTextBg) { this._victoryTextBg.destroy(); this._victoryTextBg = null; }
+      if (this._victoryTextName) { this._victoryTextName.destroy(); this._victoryTextName = null; }
+      if (this._victoryTextSub)  { this._victoryTextSub.destroy();  this._victoryTextSub  = null; }
       if (this._onScaleResize) this.scale.off('resize', this._onScaleResize);
     });
 
@@ -400,6 +409,7 @@ export default class PlayerScene extends Phaser.Scene {
     setPos(this.blueprintContainer,    this.blueprintOriginX, this.blueprintOriginY);
     setPos(this.blueprintFlowContainer,this.blueprintOriginX, this.blueprintOriginY);
     setPos(this.blueprintBodyContainer,this.blueprintOriginX, this.blueprintOriginY);
+    setPos(this.blueprintOverlayContainer, this.blueprintOriginX, this.blueprintOriginY);
     setPos(this.iconIslandContainer,   this.iconIslandOriginX, this.iconIslandOriginY);
     setPos(this.ghostContainer,        0, 0);
   }
@@ -476,6 +486,11 @@ export default class PlayerScene extends Phaser.Scene {
     // Drop references to flow updaters whose gfx is about to be destroyed.
     if (this.blueprintFlows) this.blueprintFlows.length = 0;
     else this.blueprintFlows = [];
+    // PLAY + RESET tiles live in `blueprintOverlayContainer`, a persistent
+    // container that is intentionally NOT torn down here — that's what lets
+    // the tiles fade in/out across drag start/end without blinking. The
+    // show/hide decision is made below based on the blueprint's content
+    // AND the current drag state.
     this.blueprintContainer.removeAll(true);
     this.blueprintFlowContainer.removeAll(true);
     this.blueprintBodyContainer.removeAll(true);
@@ -509,8 +524,10 @@ export default class PlayerScene extends Phaser.Scene {
     // layers offset + dimmed; the topmost layer is opaque and is what tap-
     // and drag-pickup target). Factories currently being dragged are skipped
     // — the ghost takes over their visual.
+    let anyFactoriesInBlueprint = false;
     for (const [, stack] of this.blueprint) {
       if (stack.length === 0) continue;
+      anyFactoriesInBlueprint = true;
       const topIdx = stack.length - 1;
       for (let i = 0; i < stack.length; i++) {
         const id = stack[i];
@@ -522,6 +539,160 @@ export default class PlayerScene extends Phaser.Scene {
         this._drawBlueprintFactory(def, { isTop, layerFromTop });
       }
     }
+
+    // Blueprint is empty AND nothing is being dragged — show the big PLAY +
+    // RESET buttons centered inside the blueprint frame. Tiles live in a
+    // persistent overlay so they can fade out the moment a factory is
+    // picked back up, then fade back in only once it's released onto the
+    // board. Rotations and unrelated re-renders leave the visible tiles
+    // untouched.
+    const shouldShow = !anyFactoriesInBlueprint && !this.drag;
+    if (shouldShow) {
+      if (!this._blueprintButtonsVisible) this._showBlueprintPlayButtons(dgW, dgH, true);
+      else this._repositionBlueprintPlayButtons(dgW, dgH);
+    } else if (this._blueprintButtonsVisible) {
+      this._hideBlueprintPlayButtons(true);
+    }
+  }
+
+  _showBlueprintPlayButtons(dgW, dgH, animateEntry) {
+    // Guard: if a prior hide-tween is still winding down, hard-reset the
+    // overlay first so we don't stack two generations of tiles on top of
+    // each other. (Can happen if the user rapid-fires pickup/release.)
+    this._teardownBlueprintPlayButtons();
+
+    const btnSize  = Math.floor(Math.min(dgW * 0.30, dgH * 0.55));
+    const btnGap   = Math.floor(btnSize * 0.25);
+    const centerY  = dgH / 2;
+    const centerX  = dgW / 2;
+    const resetCX  = centerX - (btnSize + btnGap) / 2;
+    const playCX   = centerX + (btnSize + btnGap) / 2;
+    const radius   = Math.floor(btnSize * 0.24);
+
+    // Each tile is drawn in LOCAL coords (origin at its own center) and
+    // positioned with .x/.y, so scaleX/Y pulses grow/shrink around the
+    // button center instead of warping from the blueprint's origin.
+    const makeTile = (cx, iconDraw) => {
+      const g = this.make.graphics({ add: false });
+      g.fillStyle(BLUEPRINT_BG, 1);
+      g.fillRoundedRect(-btnSize / 2, -btnSize / 2, btnSize, btnSize, radius);
+      iconDraw(g);
+      g.x = cx;
+      g.y = centerY;
+      g.setScale(1);
+      this.blueprintOverlayContainer.add(g);
+      return g;
+    };
+
+    const resetBg = makeTile(resetCX, (g) => drawCircleArrow(g, 0, 0, btnSize * 0.75, 0xffffff));
+
+    const running = this.simState === 'running';
+    const playIconColor = running ? 0x637a5a : 0x4caf50;
+    const playBg = makeTile(playCX, (g) => drawPlayTriangle(g, btnSize * 0.04, 0, btnSize * 0.68, playIconColor));
+
+    const tweens = [];
+    if (animateEntry) {
+      resetBg.alpha = 0;
+      playBg.alpha  = 0;
+      tweens.push(this.tweens.add({
+        targets: [resetBg, playBg], alpha: 1,
+        duration: 260, ease: 'Sine.Out',
+      }));
+    } else {
+      resetBg.alpha = 1;
+      playBg.alpha  = 1;
+    }
+    tweens.push(this.tweens.add({
+      targets: [resetBg, playBg],
+      scale: { from: 1.0, to: 1.035 },
+      duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.InOut',
+    }));
+
+    const squash = (target) => this.tweens.add({
+      targets: target, scale: 0.88, duration: 80, ease: 'Sine.Out',
+    });
+    const pop = (target) => this.tweens.add({
+      targets: target, scale: 1, duration: 220, ease: 'Back.Out',
+    });
+
+    const resetHitCX = this.blueprintOriginX + resetCX;
+    const playHitCX  = this.blueprintOriginX + playCX;
+    const hitCY      = this.blueprintOriginY + centerY;
+    const resetHit = this.add.rectangle(resetHitCX, hitCY, btnSize, btnSize, 0xffffff, 0)
+      .setInteractive({ useHandCursor: true }).setDepth(56);
+    resetHit.on('pointerdown', () => squash(resetBg));
+    resetHit.on('pointerup',   () => { pop(resetBg); this._resetPlay(); });
+    resetHit.on('pointerout',  () => pop(resetBg));
+
+    const playHit = this.add.rectangle(playHitCX, hitCY, btnSize, btnSize, 0xffffff, 0)
+      .setInteractive({ useHandCursor: !running }).setDepth(56);
+    playHit.on('pointerdown', () => squash(playBg));
+    playHit.on('pointerout',  () => pop(playBg));
+    playHit.on('pointerup', () => {
+      pop(playBg);
+      if (this.simState === 'idle' && this._canPlay()) this._startPlay();
+      else if (this.simState === 'paused') this._resume();
+    });
+    this._blueprintButtonHits   = [resetHit, playHit];
+    this._blueprintButtonTweens = tweens;
+    this._blueprintButtonGfx    = { resetBg, playBg };
+    this._blueprintButtonMetrics = { dgW, dgH, resetCX, playCX, centerY, btnSize };
+    this._blueprintButtonsVisible = true;
+  }
+
+  _hideBlueprintPlayButtons(animate) {
+    if (!this._blueprintButtonsVisible) return;
+    const gfx  = this._blueprintButtonGfx;
+    const hits = this._blueprintButtonHits || [];
+    // Stop idle-pulse + any pending press/release tweens before the fade —
+    // otherwise they'd keep re-asserting scale/alpha under us.
+    if (this._blueprintButtonTweens) {
+      for (const t of this._blueprintButtonTweens) { try { t.stop(); } catch (e) {} }
+      this._blueprintButtonTweens = null;
+    }
+    // Hit rects go away immediately — we don't want the user to tap a
+    // phantom PLAY/RESET while the tile is fading out.
+    for (const h of hits) { try { h.destroy(); } catch (e) {} }
+    this._blueprintButtonHits = null;
+    this._blueprintButtonsVisible = false;
+
+    const targets = gfx ? [gfx.resetBg, gfx.playBg].filter(Boolean) : [];
+    if (!animate || targets.length === 0) {
+      this._teardownBlueprintPlayButtons();
+      return;
+    }
+    this._blueprintButtonFadeTween = this.tweens.add({
+      targets, alpha: 0, duration: 180, ease: 'Sine.In',
+      onComplete: () => this._teardownBlueprintPlayButtons(),
+    });
+  }
+
+  _repositionBlueprintPlayButtons(dgW, dgH) {
+    // Called on re-render when buttons are already visible — only redo
+    // layout if the blueprint outer dims actually changed (viewport
+    // resize). Otherwise leave the tiles + their live tweens alone.
+    const m = this._blueprintButtonMetrics;
+    if (m && m.dgW === dgW && m.dgH === dgH) return;
+    this._showBlueprintPlayButtons(dgW, dgH, false);
+  }
+
+  _teardownBlueprintPlayButtons() {
+    if (this._blueprintButtonFadeTween) {
+      try { this._blueprintButtonFadeTween.stop(); } catch (e) {}
+      this._blueprintButtonFadeTween = null;
+    }
+    if (this._blueprintButtonTweens) {
+      for (const t of this._blueprintButtonTweens) { try { t.stop(); } catch (e) {} }
+      this._blueprintButtonTweens = null;
+    }
+    if (this._blueprintButtonHits) {
+      for (const h of this._blueprintButtonHits) { try { h.destroy(); } catch (e) {} }
+      this._blueprintButtonHits = null;
+    }
+    if (this.blueprintOverlayContainer) this.blueprintOverlayContainer.removeAll(true);
+    this._blueprintButtonGfx      = null;
+    this._blueprintButtonMetrics  = null;
+    this._blueprintButtonsVisible = false;
   }
 
   _drawBlueprintFactory(def, { isTop = true, layerFromTop = 0 } = {}) {
@@ -564,7 +735,7 @@ export default class PlayerScene extends Phaser.Scene {
     if (isTop) this.blueprintRefs.set(def.id, { bodyWrap, funnelWrap, body, funnels });
   }
 
-  // ---------- Icon island (BACK / RESET / PLAY) ----------
+  // ---------- Icon island — Home / Level Select / Reset ----------
 
   _renderIconIsland() {
     this.iconIslandContainer.removeAll(true);
@@ -594,28 +765,18 @@ export default class PlayerScene extends Phaser.Scene {
     const iconSize = Math.round(Math.min(slotW, islandH) * 0.55);
     const cy = islandH / 2;
 
-    // BACK glyph (home).
     const home = this.make.graphics({ add: false });
-    drawHome(home, SLOT_BACK * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
+    drawHome(home, SLOT_HOME * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
     this.iconIslandContainer.add(home);
 
-    // RESET glyph (trash bin — using the existing icon for "wipe").
+    const levelSelect = this.make.graphics({ add: false });
+    drawGrid(levelSelect, SLOT_LEVEL_SELECT * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
+    this.iconIslandContainer.add(levelSelect);
+
     const reset = this.make.graphics({ add: false });
-    drawTrash(reset, SLOT_RESET * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
+    drawCircleArrow(reset, SLOT_RESET * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
     this.iconIslandContainer.add(reset);
 
-    // PLAY label — text-based, enabled when ready or paused.
-    const canPlay = this._canPlay() || this.simState === 'paused';
-    const playColor = canPlay ? '#ffffff' : '#9aa6b2';
-    const playText = this.simState === 'paused' ? 'RESUME'
-                    : this.simState === 'running' ? 'RUNNING' : 'PLAY';
-    const playLabel = this.add.text(
-      SLOT_PLAY * slotW + slotW / 2, cy, playText,
-      { fontFamily: 'system-ui, sans-serif', fontSize: '18px', fontStyle: 'bold', color: playColor },
-    ).setOrigin(0.5);
-    this.iconIslandContainer.add(playLabel);
-
-    // Hit rects.
     const makeHit = (slot, onTap) => {
       const cx = this.iconIslandOriginX + slot * slotW + slotW / 2;
       const ay = this.iconIslandOriginY + islandH / 2;
@@ -624,15 +785,16 @@ export default class PlayerScene extends Phaser.Scene {
       rect.on('pointerup', onTap);
       this.iconHits.push(rect);
     };
-    makeHit(SLOT_BACK, () => {
+    makeHit(SLOT_HOME, () => {
       this.sim && this.sim.stop();
       fadeTo(this, 'Home');
     });
-    makeHit(SLOT_RESET, () => this._resetPlay());
-    makeHit(SLOT_PLAY, () => {
-      if (this.simState === 'idle' && this._canPlay()) this._startPlay();
-      else if (this.simState === 'paused') this._resume();
+    makeHit(SLOT_LEVEL_SELECT, () => {
+      this.sim && this.sim.stop();
+      const isCommunity = this.sourceLevel.origin === 'local' || this.sourceLevel.origin === 'imported';
+      fadeTo(this, isCommunity ? 'Community' : 'LevelSelect');
     });
+    makeHit(SLOT_RESET, () => this._resetPlay());
   }
 
   _buildToolbar() {
@@ -939,9 +1101,10 @@ export default class PlayerScene extends Phaser.Scene {
       baseCells: d.baseCells, baseFunnels: d.baseFunnels,
       converter: d.converter, locked: false,
     });
-    // If from blueprint, also keep the def around so subsequent picks know the
-    // canonical slot — but the def itself stays in blueprintFactories until
-    // the player resets. We don't push back to blueprint.
+    // Clear drag BEFORE re-rendering so _renderBlueprint sees the true
+    // post-drop state — otherwise shouldShow stays false and the PLAY +
+    // RESET tiles wouldn't fade in after the final factory lands.
+    this.drag = null;
     this._renderAll();
     this._renderBlueprint();
     this._renderIconIsland();
@@ -981,6 +1144,9 @@ export default class PlayerScene extends Phaser.Scene {
     } else if (d.source === 'blueprint' && d.originSlot) {
       this._pushToSlot(d.originSlot, d.factoryId);
     }
+    // Same reason as _tryPlaceOnBoard / _dropIntoSlot — _renderBlueprint
+    // reads this.drag when deciding whether to show the PLAY + RESET tiles.
+    this.drag = null;
     this._renderAll();
     this._renderBlueprint();
     this._renderIconIsland();
@@ -1091,7 +1257,11 @@ export default class PlayerScene extends Phaser.Scene {
   }
 
   _resetPlay() {
-    if (this.victoryModal) { this.victoryModal.destroy(); this.victoryModal = null; }
+    // Drop any in-flight victory visuals — reset means "start the level
+    // over clean", including nuking the delayed "completed" banner.
+    if (this._victoryTextBg)   { this._victoryTextBg.destroy();   this._victoryTextBg = null; }
+    if (this._victoryTextName) { this._victoryTextName.destroy(); this._victoryTextName = null; }
+    if (this._victoryTextSub)  { this._victoryTextSub.destroy();  this._victoryTextSub  = null; }
     this.victory = null;
     this.sim && this.sim.stop();
     if (this.shapeRenderer) this.shapeRenderer.clearAll();
@@ -1135,9 +1305,10 @@ export default class PlayerScene extends Phaser.Scene {
   _maybePauseOnTap(pointer) {
     if (this.simState !== 'running') return;
     if (this.victory) return;
-    // Don't pause if the tap landed on the icon island (the PLAY/RESET
-    // buttons handle their own behavior).
+    // Don't pause when the tap landed on a control — those handlers take
+    // care of the intended behavior themselves.
     if (this._inIconIsland(pointer.x, pointer.y)) return;
+    if (this._inBlueprintArea(pointer.x, pointer.y)) return;
     this._pause();
   }
 
@@ -1145,6 +1316,13 @@ export default class PlayerScene extends Phaser.Scene {
     const lx = x - this.iconIslandOriginX;
     const ly = y - this.iconIslandOriginY;
     return lx >= 0 && ly >= 0 && lx <= ICON_SLOTS * this.islandSlotW && ly <= this.islandH;
+  }
+
+  _inBlueprintArea(x, y) {
+    if (this.blueprintOriginX == null) return false;
+    const lx = x - this.blueprintOriginX;
+    const ly = y - this.blueprintOriginY;
+    return lx >= 0 && ly >= 0 && lx <= this.blueprintW && ly <= this.blueprintH;
   }
 
   // ===================================================================
@@ -1162,31 +1340,53 @@ export default class PlayerScene extends Phaser.Scene {
     this._fireVictory();
   }
 
-  async _fireVictory() {
+  _fireVictory() {
     if (this.victory) return;
     this.victory = true;
-    if (this.simState === 'running') {
-      this.sim.pause(this.simTime);
-      this.simState = 'paused';
-    }
-    if (this.sourceLevel.id) await markBeaten(this.sourceLevel.id);
-    // Community-origin levels don't have a "next in section" — Next is
-    // disabled, and the Level Select button routes back to Community.
+    if (this.sourceLevel.id) markBeaten(this.sourceLevel.id);
+    // Hold for one cycle of animation so the last shape has a moment to
+    // visibly land, then announce. Sim keeps running behind the banner.
+    this.time.delayedCall(CYCLE_MS, () => this._showVictoryText());
+  }
+
+  _showVictoryText() {
+    if (!this.scene || !this.victory || this._victoryTextName) return;
+    // Anchor the message over the playable board, not the whole scene, so
+    // it sits on the interesting bit of the screen.
+    const boardCX = this.boardOriginX + this.boardW / 2;
+    const rows = this.sourceLevel.board.rows;
+    const boardH = rows * this.pxCell + (rows - 1) * BOARD_GAP;
+    const boardCY = this.boardOriginY + boardH / 2;
+    const bandH = 190;
+    this._victoryTextBg = this.add.graphics().setDepth(8998);
+    this._victoryTextBg.fillStyle(0x000000, 0.45);
+    this._victoryTextBg.fillRect(this.boardOriginX, boardCY - bandH / 2, this.boardW, bandH);
+    const name = (this.sourceLevel && this.sourceLevel.name) || 'Level';
+    this._victoryTextName = this.add.text(boardCX, boardCY - 30, name, {
+      fontFamily: 'system-ui, sans-serif', fontSize: '52px', fontStyle: 'bold',
+      color: '#ffffff',
+    }).setOrigin(0.5).setDepth(8999);
+    this._victoryTextSub = this.add.text(boardCX, boardCY + 46, 'completed', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '36px',
+      color: '#ffffff',
+    }).setOrigin(0.5).setDepth(8999);
+    // Disable input during the message so stray taps can't derail auto-advance.
+    if (this.input) this.input.enabled = false;
+    // Longer display (2s) so the name reads clearly before the transition.
+    this.time.delayedCall(2000, () => this._advanceAfterVictory());
+  }
+
+  _advanceAfterVictory() {
+    if (!this.victory) return;           // reset in-flight; abort the auto-advance
     const isCommunity = this.sourceLevel.origin === 'local' || this.sourceLevel.origin === 'imported';
     const next = (!isCommunity && this.sourceLevel.id) ? nextLevelAfter(this.sourceLevel.id) : null;
-    this.victoryModal = new VictoryModal(this, {
-      hasNext: !!next,
-      onNext: () => {
-        if (!next) return;
-        fadeTo(this, 'Player', { levelId: next.id });
-      },
-      onRetry: () => {
-        if (this.victoryModal) { this.victoryModal.destroy(); this.victoryModal = null; }
-        this.victory = null;
-        this._resetPlay();
-      },
-      onLevelSelect: () => fadeTo(this, isCommunity ? 'Community' : 'LevelSelect'),
-    });
+    // Re-enable input so SceneFader's own disable/enable cycle works cleanly.
+    if (this.input) this.input.enabled = true;
+    if (next) {
+      fadeTo(this, 'Player', { levelId: next.id });
+    } else {
+      fadeTo(this, isCommunity ? 'Community' : 'LevelSelect');
+    }
   }
 
   // ===================================================================
