@@ -1308,8 +1308,15 @@ export default class EditorScene extends Phaser.Scene {
 
   _onToggleFunnel(info) {
     if (!info) return;
-    if (info.kind === 'border') this._cycleBorderFunnel(info.r, info.c, info.side);
-    else if (info.kind === 'draft') this._cycleDraftFunnel(info.r, info.c, info.side);
+    // Border funnels are locked once the user commits to the blueprint
+    // flow — editing them mid-setup would invalidate the solution
+    // snapshot taken on _enterBlueprintSetup.
+    if (info.kind === 'border') {
+      if (this._mode === 'blueprintSetup') return;
+      this._cycleBorderFunnel(info.r, info.c, info.side);
+    } else if (info.kind === 'draft') {
+      this._cycleDraftFunnel(info.r, info.c, info.side);
+    }
   }
 
   _toggleDraftCell(r, c) {

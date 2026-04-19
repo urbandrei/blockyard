@@ -25,7 +25,10 @@ const FILL_CURRENT    = 0x4caf50;   // green — "you are here"
 const FILL_AVAILABLE  = 0x9aa6b2;   // grey
 const STROKE_BASE     = 0x1a2332;
 const RING_COLOR      = 0x4caf50;   // "new, tap me" ring
-const RING_WIDTH      = 3;
+const RING_WIDTH      = 4;
+const BOX_STROKE_W    = 4;
+const BOX_CORNER_R    = 12;
+const MAX_BOX_H       = 64;
 
 function normalizeState(state) {
   if (!state || typeof state !== 'object') return { reachable: false, current: false, isNew: false };
@@ -59,30 +62,33 @@ export class StepIndicator {
 
   _build() {
     const { x, y, width, height } = this.opts;
-    const gap = 6;
+    const gap = 8;
     const boxW = (width - gap * (STEPS.length - 1)) / STEPS.length;
-    const boxH = Math.min(height, 52);
+    const boxH = Math.min(height, MAX_BOX_H);
     const leftX = x - width / 2;
     const cy = y;
     this._boxes = STEPS.map((step, i) => {
       const cx = leftX + boxW / 2 + i * (boxW + gap);
-      const rect = this.scene.add.rectangle(cx, cy, boxW, boxH, 0xffffff, 1)
-        .setStrokeStyle(2, STROKE_BASE, 1).setDepth(this.depth);
+      // Paint the pill with graphics so we can round the corners. A
+      // transparent hit-rect on top owns the pointer events so we don't
+      // have to keep the graphics body interactive.
+      const rect = this.scene.add.graphics().setDepth(this.depth);
       const text = this.scene.add.text(cx, cy, step.label, {
         fontFamily: 'system-ui, sans-serif',
-        fontSize: boxW >= 110 ? '14px' : '12px',
+        fontSize: boxW >= 110 ? '18px' : '16px',
         fontStyle: 'bold',
         color: '#ffffff',
-      }).setOrigin(0.5).setDepth(this.depth);
+      }).setOrigin(0.5).setDepth(this.depth + 1);
       // Separate graphics for the "new" outer ring so it can be toggled
       // without rebuilding the rect or interfering with its fill.
-      const ring = this.scene.add.graphics().setDepth(this.depth + 1);
+      const ring = this.scene.add.graphics().setDepth(this.depth + 2);
       ring.setVisible(false);
-      rect.on('pointerup', () => {
+      const hit = this.scene.add.rectangle(cx, cy, boxW, boxH, 0xffffff, 0).setDepth(this.depth + 3);
+      hit.on('pointerup', () => {
         if (!this._isInteractive(i)) return;
         if (this.opts.onStep) this.opts.onStep(step.key);
       });
-      return { rect, text, ring, step, cx, cy, boxW, boxH };
+      return { rect, text, ring, hit, step, cx, cy, boxW, boxH };
     });
     this._applyStates();
   }
@@ -94,27 +100,31 @@ export class StepIndicator {
       const interactive = s.reachable;
       const fill  = s.current ? FILL_CURRENT : FILL_AVAILABLE;
       const alpha = s.reachable ? 1.0 : 0.35;
-      entry.rect.setFillStyle(fill, alpha);
-      entry.rect.setStrokeStyle(2, STROKE_BASE, 1);
+      // Repaint the rounded pill from scratch — Phaser Graphics can't
+      // mutate existing paths, so clear + redraw each state change.
+      const half = entry.boxH / 2;
+      const x0 = entry.cx - entry.boxW / 2;
+      const y0 = entry.cy - half;
+      entry.rect.clear();
+      entry.rect.fillStyle(fill, alpha);
+      entry.rect.lineStyle(BOX_STROKE_W, STROKE_BASE, alpha);
+      entry.rect.fillRoundedRect(x0, y0, entry.boxW, entry.boxH, BOX_CORNER_R);
+      entry.rect.strokeRoundedRect(x0, y0, entry.boxW, entry.boxH, BOX_CORNER_R);
       entry.text.setColor('#ffffff');
       entry.text.setAlpha(alpha);
-      if (interactive) {
-        entry.rect.setInteractive({ useHandCursor: true });
-      } else {
-        entry.rect.disableInteractive();
-      }
+      if (interactive) entry.hit.setInteractive({ useHandCursor: true });
+      else             entry.hit.disableInteractive();
       // Green "look here" ring — only when isNew AND reachable (ringing an
       // unreachable pill would be misleading).
       if (s.isNew && s.reachable) {
-        const half = entry.boxH / 2;
         entry.ring.clear();
         entry.ring.lineStyle(RING_WIDTH, RING_COLOR, 1);
         entry.ring.strokeRoundedRect(
-          entry.cx - entry.boxW / 2 - RING_WIDTH,
-          entry.cy - half - RING_WIDTH,
+          x0 - RING_WIDTH,
+          y0 - RING_WIDTH,
           entry.boxW + RING_WIDTH * 2,
           entry.boxH + RING_WIDTH * 2,
-          8,
+          BOX_CORNER_R + RING_WIDTH,
         );
         entry.ring.setVisible(true);
       } else {
@@ -139,6 +149,7 @@ export class StepIndicator {
     if (!this._boxes) return;
     for (const b of this._boxes) {
       b.rect.destroy(); b.text.destroy(); b.ring.destroy();
+      if (b.hit) b.hit.destroy();
     }
     this._boxes = null;
   }
