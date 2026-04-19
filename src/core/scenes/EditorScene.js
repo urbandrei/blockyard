@@ -24,7 +24,7 @@ import { fadeIn, fadeTo } from '../ui/SceneFader.js';
 import { disableMenuBg } from '../ui/MenuBackground.js';
 import { rotateFactoryShape } from '../model/shape.js';
 import { DEFAULT_SHAPE_TYPE } from '../model/shape.js';
-import { drawBackChevron, drawQuestion, drawTrash, drawPlus, drawMinus } from '../ui/Icons.js';
+import { drawBackChevron, drawHome, drawQuestion, drawTrash, drawPlus, drawMinus } from '../ui/Icons.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
 import { compute920Box } from '../ui/ContentBox.js';
 import { Simulation } from '../sim/Simulation.js';
@@ -50,7 +50,7 @@ const SHAPE_WARP_AMP = 0.15;
 //   • Play/Stop in the toolbar runs the sim (shapes flow through factories).
 
 const TOOLBAR_H = TitleBar.HEIGHT + 8;    // space reserved above the play area
-const ICON_SLOTS = 5;                     // fixed — BACK, HINT, -, +, CLEAR
+const ICON_SLOTS = 6;                     // fixed — HOME, BACK, HINT, -, +, CLEAR
 
 // Blueprint (draft-composer) chrome. Grid + a small separate icon island
 // sitting below the grid in its own rounded-rect panel.
@@ -59,11 +59,12 @@ const BLUEPRINT_RADIUS    = 12;
 const ISLAND_TO_GRID_GAP  = 14;
 
 // Which slot holds which icon.
-const SLOT_BACK   = 0;
-const SLOT_HINT   = 1;
-const SLOT_SHRINK = 2;
-const SLOT_GROW   = 3;
-const SLOT_CLEAR  = 4;
+const SLOT_HOME   = 0;
+const SLOT_BACK   = 1;
+const SLOT_HINT   = 2;
+const SLOT_SHRINK = 3;
+const SLOT_GROW   = 4;
+const SLOT_CLEAR  = 5;
 
 // Board resize clamps (for the +/- buttons; testing-only knob).
 const BOARD_MIN_DIM = 3;
@@ -941,6 +942,7 @@ export default class EditorScene extends Phaser.Scene {
       drawFn(g, slot * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
       this.iconIslandContainer.add(g);
     };
+    addGlyph(SLOT_HOME,   drawHome);
     addGlyph(SLOT_BACK,   drawBackChevron);
     addGlyph(SLOT_CLEAR,  drawTrash);
     addGlyph(SLOT_SHRINK, drawMinus);
@@ -2018,6 +2020,12 @@ export default class EditorScene extends Phaser.Scene {
       rect.on('pointerup', onTap);
       this.iconSlotHits.push(rect);
     };
+    makeHit(SLOT_HOME, () => {
+      // HOME always exits to the main menu, regardless of mode or
+      // sandbox/designer flavor. Stops any running test sim first.
+      this.sim && this.sim.stop();
+      fadeTo(this, 'Home');
+    });
     makeHit(SLOT_BACK, () => {
       // BACK in blueprint-setup cancels setup and restores the play area;
       // BACK anywhere else exits the scene to Community / Home.
