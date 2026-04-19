@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { loadProgress } from '../progress.js';
 import { nextUnbeaten, LEVELS } from '../catalog/index.js';
-import { ScrollingChecker } from '../render/ScrollingChecker.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
+import { enableMenuBg, disableMenuBg } from '../ui/MenuBackground.js';
 
 // Home menu. Three primary actions:
 //   • QUICK PLAY (<next unbeaten level name>) — jumps straight into the
@@ -19,7 +19,7 @@ export default class HomeScene extends Phaser.Scene {
   constructor() { super({ key: 'Home' }); }
 
   async create() {
-    this.bg = new ScrollingChecker(this, { scroll: true });
+    enableMenuBg();
     fadeIn(this);
 
     const { width, height } = this.scale;
@@ -53,9 +53,6 @@ export default class HomeScene extends Phaser.Scene {
     });
   }
 
-  update(_time, delta) {
-    if (this.bg) this.bg.update(delta);
-  }
 
   _button(x, y, label, onClick) {
     const w = 420, h = 76;

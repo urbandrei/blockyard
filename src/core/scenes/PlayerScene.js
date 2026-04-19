@@ -22,6 +22,7 @@ import { drawHome, drawTrash } from '../ui/Icons.js';
 import { getLevelById, nextLevelAfter } from '../catalog/index.js';
 import { markBeaten } from '../progress.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
+import { disableMenuBg } from '../ui/MenuBackground.js';
 import {
   BOARD_GAP, CYCLE_MS, SHAPE_SCALE, motionWarp,
   BLUEPRINT_BG, BLUEPRINT_DOT, BLUEPRINT_STROKE,
@@ -55,6 +56,7 @@ export default class PlayerScene extends Phaser.Scene {
   }
 
   async create() {
+    disableMenuBg();
     fadeIn(this);
     this.ready = false;
     this.simState = 'idle';        // 'idle' | 'running' | 'paused'

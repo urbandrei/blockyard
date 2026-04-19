@@ -15,6 +15,11 @@ import { BG_COLOR } from './constants.js';
 export const gameConfig = {
   type: Phaser.AUTO,
   parent: 'game',
+  // Transparent canvas so the HTML body's background (the CSS checker in
+  // menu scenes, or the board-aligned checker LetterboxChecker paints in
+  // editor/player) extends visually through the letterbox AND under any
+  // gaps in the scene layout.
+  transparent: true,
   backgroundColor: BG_COLOR,
   scale: {
     mode: Phaser.Scale.FIT,

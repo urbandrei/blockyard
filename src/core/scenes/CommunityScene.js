@@ -4,8 +4,8 @@ import { LevelCard } from '../ui/LevelCard.js';
 import { TextInputOverlay } from '../ui/TextInputOverlay.js';
 import { ImportModal } from '../ui/ImportModal.js';
 import { platform } from '../../platform/index.js';
-import { ScrollingChecker } from '../render/ScrollingChecker.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
+import { enableMenuBg } from '../ui/MenuBackground.js';
 
 // Community hub. Top: header + LEVEL DESIGNER. Middle: search input +
 // filter button + paginated list of LevelCards. Bottom: IMPORT LEVEL +
@@ -29,7 +29,7 @@ export default class CommunityScene extends Phaser.Scene {
   constructor() { super({ key: 'Community' }); }
 
   async create() {
-    this.bg = new ScrollingChecker(this, { scroll: true });
+    enableMenuBg();
     fadeIn(this);
 
     const { width, height } = this.scale;
@@ -286,9 +286,6 @@ export default class CommunityScene extends Phaser.Scene {
     }
   }
 
-  update(_time, delta) {
-    if (this.bg) this.bg.update(delta);
-  }
 
   _teardown() {
     if (this._searchInput) { this._searchInput.destroy(); this._searchInput = null; }

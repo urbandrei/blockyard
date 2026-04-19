@@ -21,6 +21,7 @@ import { FunnelTypePicker } from '../ui/FunnelTypePicker.js';
 import { CellLabelPicker } from '../ui/CellLabelPicker.js';
 import { ExportPanel } from '../ui/ExportPanel.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
+import { disableMenuBg } from '../ui/MenuBackground.js';
 import { rotateFactoryShape } from '../model/shape.js';
 import { DEFAULT_SHAPE_TYPE } from '../model/shape.js';
 import { drawBackChevron, drawQuestion, drawTrash, drawPlus, drawMinus } from '../ui/Icons.js';
@@ -86,6 +87,7 @@ export default class EditorScene extends Phaser.Scene {
   }
 
   async create() {
+    disableMenuBg();
     fadeIn(this);
     // Synchronous field init BEFORE the await so update() never sees undefined
     // state on the first frame.

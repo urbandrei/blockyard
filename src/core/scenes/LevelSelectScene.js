@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { SECTIONS } from '../catalog/index.js';
 import { loadProgress } from '../progress.js';
-import { ScrollingChecker } from '../render/ScrollingChecker.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
+import { enableMenuBg } from '../ui/MenuBackground.js';
 
 // Level select. One vertical-scroll list of sections; each section is a 2x5
 // grid of regular levels followed by a wider BOSS button. Buttons reflect
@@ -23,7 +23,7 @@ export default class LevelSelectScene extends Phaser.Scene {
   constructor() { super({ key: 'LevelSelect' }); }
 
   async create() {
-    this.bg = new ScrollingChecker(this, { scroll: true });
+    enableMenuBg();
     fadeIn(this);
 
     const { width, height } = this.scale;
@@ -130,7 +130,4 @@ export default class LevelSelectScene extends Phaser.Scene {
     }
   }
 
-  update(_time, delta) {
-    if (this.bg) this.bg.update(delta);
-  }
 }
