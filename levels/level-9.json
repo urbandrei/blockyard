@@ -1,0 +1,145 @@
+{
+  "id": "level-9",
+  "name": "Parallel",
+  "number": 0,
+  "board": {
+    "cols": 7,
+    "rows": 7
+  },
+  "factories": [],
+  "initialFactories": [
+    {
+      "id": "l9-0",
+      "slot": {
+        "row": 1,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "circle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "l9-1",
+      "slot": {
+        "row": 1,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "circle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    }
+  ],
+  "lockedFactories": [],
+  "border": {
+    "funnels": [
+      {
+        "r": 0,
+        "c": 1,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 6,
+        "c": 1,
+        "side": "top",
+        "role": "output"
+      },
+      {
+        "r": 4,
+        "c": 6,
+        "side": "left",
+        "role": "input"
+      },
+      {
+        "r": 4,
+        "c": 0,
+        "side": "right",
+        "role": "output"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "r": 0,
+      "c": 1,
+      "side": "bottom",
+      "type": {
+        "form": "square",
+        "color": "red"
+      }
+    },
+    {
+      "r": 4,
+      "c": 6,
+      "side": "left",
+      "type": {
+        "form": "square",
+        "color": "blue"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "r": 6,
+      "c": 1,
+      "side": "top",
+      "type": {
+        "form": "circle",
+        "color": "red"
+      }
+    },
+    {
+      "r": 4,
+      "c": 0,
+      "side": "right",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    }
+  ],
+  "instructionalText": null,
+  "boss": null
+}

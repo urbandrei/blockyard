@@ -1,0 +1,122 @@
+{
+  "id": "level-20",
+  "name": "Keystone",
+  "number": 0,
+  "board": {
+    "cols": 9,
+    "rows": 9
+  },
+  "factories": [],
+  "initialFactories": [
+    {
+      "id": "l20-0",
+      "slot": {
+        "row": 1,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "square",
+            "color": "red"
+          }
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "label": {
+            "form": "triangle",
+            "color": "green"
+          }
+        },
+        {
+          "r": 0,
+          "c": 2,
+          "label": {
+            "form": "circle",
+            "color": "blue"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 2,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    }
+  ],
+  "lockedFactories": [],
+  "border": {
+    "funnels": [
+      {
+        "r": 0,
+        "c": 3,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 0,
+        "c": 5,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 8,
+        "c": 4,
+        "side": "top",
+        "role": "output"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "r": 0,
+      "c": 3,
+      "side": "bottom",
+      "type": {
+        "form": "square",
+        "color": "red"
+      }
+    },
+    {
+      "r": 0,
+      "c": 5,
+      "side": "bottom",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "r": 8,
+      "c": 4,
+      "side": "top",
+      "type": {
+        "form": "triangle",
+        "color": "green"
+      }
+    }
+  ],
+  "instructionalText": null,
+  "boss": null
+}

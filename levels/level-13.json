@@ -1,0 +1,85 @@
+{
+  "id": "level-13",
+  "name": "Same Cell",
+  "number": 0,
+  "board": {
+    "cols": 8,
+    "rows": 8
+  },
+  "factories": [],
+  "initialFactories": [
+    {
+      "id": "l13-0",
+      "slot": {
+        "row": 1,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "square",
+            "color": "red"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    }
+  ],
+  "lockedFactories": [],
+  "border": {
+    "funnels": [
+      {
+        "r": 0,
+        "c": 3,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 7,
+        "c": 3,
+        "side": "top",
+        "role": "output"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "r": 0,
+      "c": 3,
+      "side": "bottom",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "r": 7,
+      "c": 3,
+      "side": "top",
+      "type": {
+        "form": "square",
+        "color": "red"
+      }
+    }
+  ],
+  "instructionalText": "In and out can sit on the same cell.",
+  "boss": null
+}

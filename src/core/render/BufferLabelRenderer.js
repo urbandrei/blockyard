@@ -5,6 +5,7 @@ import {
   FUNNEL_OUTPUT_FILL, FUNNEL_OUTPUT_STROKE,
 } from '../constants.js';
 import { FRAME_PAD } from './PlayAreaFrame.js';
+import { drawPuddle } from './shapes.js';
 
 // Labels each buffer funnel with a role-colored rounded box (sized like a
 // 1×1 factory: SHAPE_SCALE × pxCell) sitting TANGENT to the interior frame
@@ -113,7 +114,18 @@ function lookupType(level, f) {
 }
 
 function drawForm(gfx, cx, cy, r, form, color) {
-  gfx.fillStyle(color, 1);
+  // Partial-label dispatch (shared vocabulary with FactoryBodyRenderer):
+  //   form && color  → standard form glyph in color
+  //   form && !color → form glyph filled WHITE
+  //   !form && color → puddle blob in color
+  //   neither        → fall back to a default circle in `color`
+  if (!form && color != null) {
+    gfx.fillStyle(color, 1);
+    drawPuddle(gfx, cx, cy, r);
+    return;
+  }
+  const fill = (color != null) ? color : 0xffffff;
+  gfx.fillStyle(fill, 1);
   switch (form) {
     case 'circle': {
       gfx.fillCircle(cx, cy, r);

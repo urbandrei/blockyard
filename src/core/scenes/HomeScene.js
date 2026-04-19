@@ -361,7 +361,12 @@ export default class HomeScene extends Phaser.Scene {
     const labelFor = (idx) => {
       if (idx === 0) {
         if (this._allComplete) return 'COMPLETE';
-        return this._next ? `LEVEL ${this._next.number}` : 'PLAY';
+        if (!this._next) return 'PLAY';
+        // Bosses have `number === null` (stamped in catalog). Show a
+        // BOSS-N label on the quick-play tile when the next step is a
+        // boss fight instead of the usual LEVEL-N.
+        if (this._next.boss) return `BOSS ${this._next.bossIndex ?? ''}`.trim();
+        return `LEVEL ${this._next.number}`;
       }
       if (idx === 1) return 'LEVEL SELECT';
       return 'COMMUNITY';

@@ -1,0 +1,241 @@
+{
+  "id": "boss-1",
+  "name": "Section 1 Boss",
+  "number": 0,
+  "board": {
+    "cols": 7,
+    "rows": 7
+  },
+  "factories": [],
+  "initialFactories": [],
+  "lockedFactories": [],
+  "border": {
+    "funnels": []
+  },
+  "inputs": [],
+  "outputs": [],
+  "instructionalText": null,
+  "boss": {
+    "rounds": [
+      {
+        "instructionalText": "Round 1 — clear it; placed blocks lock for Round 2.",
+        "border": {
+          "funnels": [
+            {
+              "r": 0,
+              "c": 2,
+              "side": "bottom",
+              "role": "input"
+            },
+            {
+              "r": 6,
+              "c": 2,
+              "side": "top",
+              "role": "output"
+            }
+          ]
+        },
+        "inputs": [
+          {
+            "r": 0,
+            "c": 2,
+            "side": "bottom",
+            "type": {
+              "form": "circle",
+              "color": "blue"
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "r": 6,
+            "c": 2,
+            "side": "top",
+            "type": {
+              "form": "circle",
+              "color": "blue"
+            }
+          }
+        ],
+        "initialFactories": [
+          {
+            "id": "l10r1-0",
+            "slot": {
+              "row": 1,
+              "col": 0
+            },
+            "cells": [
+              {
+                "r": 0,
+                "c": 0
+              }
+            ],
+            "funnels": [
+              {
+                "r": 0,
+                "c": 0,
+                "side": "top",
+                "role": "input"
+              },
+              {
+                "r": 0,
+                "c": 0,
+                "side": "bottom",
+                "role": "output"
+              }
+            ],
+            "rotation": 0
+          }
+        ]
+      },
+      {
+        "instructionalText": "Round 2 — new ports; old factories are locked.",
+        "border": {
+          "funnels": [
+            {
+              "r": 0,
+              "c": 4,
+              "side": "bottom",
+              "role": "input"
+            },
+            {
+              "r": 6,
+              "c": 4,
+              "side": "top",
+              "role": "output"
+            }
+          ]
+        },
+        "inputs": [
+          {
+            "r": 0,
+            "c": 4,
+            "side": "bottom",
+            "type": {
+              "form": "square",
+              "color": "red"
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "r": 6,
+            "c": 4,
+            "side": "top",
+            "type": {
+              "form": "circle",
+              "color": "red"
+            }
+          }
+        ],
+        "initialFactories": [
+          {
+            "id": "l10r2-0",
+            "slot": {
+              "row": 1,
+              "col": 0
+            },
+            "cells": [
+              {
+                "r": 0,
+                "c": 0,
+                "label": {
+                  "form": "circle"
+                }
+              }
+            ],
+            "funnels": [
+              {
+                "r": 0,
+                "c": 0,
+                "side": "top",
+                "role": "input"
+              },
+              {
+                "r": 0,
+                "c": 0,
+                "side": "bottom",
+                "role": "output"
+              }
+            ],
+            "rotation": 0
+          }
+        ]
+      },
+      {
+        "instructionalText": "Final round — dodge your locked factories.",
+        "border": {
+          "funnels": [
+            {
+              "r": 3,
+              "c": 0,
+              "side": "right",
+              "role": "input"
+            },
+            {
+              "r": 3,
+              "c": 6,
+              "side": "left",
+              "role": "output"
+            }
+          ]
+        },
+        "inputs": [
+          {
+            "r": 3,
+            "c": 0,
+            "side": "right",
+            "type": {
+              "form": "triangle",
+              "color": "green"
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "r": 3,
+            "c": 6,
+            "side": "left",
+            "type": {
+              "form": "circle",
+              "color": "green"
+            }
+          }
+        ],
+        "initialFactories": [
+          {
+            "id": "l10r3-0",
+            "slot": {
+              "row": 1,
+              "col": 0
+            },
+            "cells": [
+              {
+                "r": 0,
+                "c": 0,
+                "label": {
+                  "form": "circle"
+                }
+              }
+            ],
+            "funnels": [
+              {
+                "r": 0,
+                "c": 0,
+                "side": "left",
+                "role": "input"
+              },
+              {
+                "r": 0,
+                "c": 0,
+                "side": "right",
+                "role": "output"
+              }
+            ],
+            "rotation": 0
+          }
+        ]
+      }
+    ]
+  }
+}

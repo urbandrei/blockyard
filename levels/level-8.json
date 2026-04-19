@@ -1,0 +1,133 @@
+{
+  "id": "level-8",
+  "name": "Two Paths",
+  "number": 0,
+  "board": {
+    "cols": 6,
+    "rows": 6
+  },
+  "factories": [],
+  "initialFactories": [
+    {
+      "id": "l8-0",
+      "slot": {
+        "row": 1,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "output"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "l8-1",
+      "slot": {
+        "row": 1,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "circle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    }
+  ],
+  "lockedFactories": [],
+  "border": {
+    "funnels": [
+      {
+        "r": 0,
+        "c": 2,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 2,
+        "c": 0,
+        "side": "right",
+        "role": "output"
+      },
+      {
+        "r": 2,
+        "c": 5,
+        "side": "left",
+        "role": "output"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "r": 0,
+      "c": 2,
+      "side": "bottom",
+      "type": {
+        "form": "triangle",
+        "color": "green"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "r": 2,
+      "c": 0,
+      "side": "right",
+      "type": {
+        "form": "triangle",
+        "color": "green"
+      }
+    },
+    {
+      "r": 2,
+      "c": 5,
+      "side": "left",
+      "type": {
+        "form": "circle",
+        "color": "green"
+      }
+    }
+  ],
+  "instructionalText": null,
+  "boss": null
+}

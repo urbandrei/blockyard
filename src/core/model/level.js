@@ -7,7 +7,7 @@
 //     number: int,                                     // level # within section (0 = sandbox)
 //     factories: [                                     // factories placed on the board (editor authoring)
 //       { id, anchor:{row,col},
-//         cells:[{r,c, label?: ShapeType},...],        // per-cell label (form+color)
+//         cells:[{r,c, label?: PartialShapeType},...], // per-cell label (form+color, OR just one)
 //         funnels:[{r,c,side,role}], locked?:bool }
 //     ],
 //     initialFactories: [                              // factories the player starts with in the blueprint
@@ -19,11 +19,25 @@
 //     border: { funnels: [{r,c,side,role}] },          // legacy: role-only funnels on buffer
 //     inputs:  [{r,c,side, type: ShapeType}],          // typed spawn points on the buffer
 //     outputs: [{r,c,side, type: ShapeType}],          // typed expected drops on the buffer
+//     instructionalText?: string,                       // optional one-liner pinned to the
+//                                                      //   top row of the player's blueprint.
+//                                                      //   When present, that row is reserved
+//                                                      //   and rejects factory placements.
+//     boss?: { rounds: BossRound[] },                  // optional 3-round boss config — see
+//                                                      //   PlayerScene.bossRoundLevel().
 //   }
+//
+// PartialShapeType:  { form } | { color } | { form, color }
+//   • Shape-only (form, no color)  → input accepts any color of that form;
+//     output (singleton) emits the form filled white. The sim fills the
+//     missing color axis from the input stamp on multi-cell factories.
+//   • Color-only (no form, color)  → input accepts any form of that color;
+//     output (singleton) renders as a "puddle" blob in that color. Missing
+//     form is filled from the input stamp on multi-cell factories.
 //
 // Funnel-typing rules (driven by per-cell labels):
 //   • Single-cell labeled factory: input funnels are wildcard, output funnels
-//     emit the label.
+//     emit the label (which can be partial — see PartialShapeType).
 //   • Multi-cell factory: a funnel on a labeled cell inherits that label
 //     (input = only accepts that type; output = only emits it). A funnel on
 //     an unlabeled cell is wildcard for INPUTS only — output funnels must
@@ -58,6 +72,8 @@ export function defaultLevel() {
     border: { funnels: [] },
     inputs: [],
     outputs: [],
+    instructionalText: null,
+    boss: null,
   };
   seedDefaultFunnels(level);
   return level;
@@ -145,6 +161,10 @@ function migrate(parsed) {
       .filter((f) => f.role === 'output')
       .map((f) => ({ r: f.r, c: f.c, side: f.side, type: { ...DEFAULT_SHAPE_TYPE } }));
   }
+  // New optional fields default to null so consumers can `level.instructionalText`
+  // / `level.boss` without crashing on legacy saves.
+  if (next.instructionalText === undefined) next.instructionalText = null;
+  if (next.boss === undefined) next.boss = null;
   return next;
 }
 

@@ -1,0 +1,102 @@
+{
+  "id": "level-2",
+  "name": "Twin Outputs",
+  "number": 0,
+  "board": {
+    "cols": 5,
+    "rows": 5
+  },
+  "factories": [],
+  "initialFactories": [
+    {
+      "id": "l2-0",
+      "slot": {
+        "row": 1,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "output"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    }
+  ],
+  "lockedFactories": [],
+  "border": {
+    "funnels": [
+      {
+        "r": 0,
+        "c": 2,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 2,
+        "c": 0,
+        "side": "right",
+        "role": "output"
+      },
+      {
+        "r": 2,
+        "c": 4,
+        "side": "left",
+        "role": "output"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "r": 0,
+      "c": 2,
+      "side": "bottom",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "r": 2,
+      "c": 0,
+      "side": "right",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    },
+    {
+      "r": 2,
+      "c": 4,
+      "side": "left",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    }
+  ],
+  "instructionalText": "Splitters fire every output together.",
+  "boss": null
+}

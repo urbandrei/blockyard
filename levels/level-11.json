@@ -1,0 +1,84 @@
+{
+  "id": "level-11",
+  "name": "Repaint",
+  "number": 0,
+  "board": {
+    "cols": 7,
+    "rows": 7
+  },
+  "factories": [],
+  "initialFactories": [
+    {
+      "id": "l11-0",
+      "slot": {
+        "row": 1,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "blue"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    }
+  ],
+  "lockedFactories": [],
+  "border": {
+    "funnels": [
+      {
+        "r": 0,
+        "c": 3,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 6,
+        "c": 3,
+        "side": "top",
+        "role": "output"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "r": 0,
+      "c": 3,
+      "side": "bottom",
+      "type": {
+        "form": "square",
+        "color": "red"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "r": 6,
+      "c": 3,
+      "side": "top",
+      "type": {
+        "form": "square",
+        "color": "blue"
+      }
+    }
+  ],
+  "instructionalText": "Puddle factories: any shape in, this color out.",
+  "boss": null
+}

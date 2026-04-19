@@ -1,5 +1,6 @@
 import { traceFactoryLoops, unitVec, COLOR_HEX, DEFAULT_SHAPE_TYPE } from '../model/shape.js';
 import { SHAPE_SCALE, BLOCK_LIGHT, BLOCK_DARK, BLOCK_STROKE, outlineWidth } from '../constants.js';
+import { drawPuddle } from './shapes.js';
 
 // Renders a factory body (one or more cells, merged) as a Phaser Graphics
 // game object. Uses perimeter-tracing + quadratic-bezier rounded corners.
@@ -13,6 +14,12 @@ export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scal
   // the body (see EditorScene._drawFactory).
   const effectiveStroke = invalid ? 0xd02020 : stroke;
   drawFactoryBodyInto(gfx, cells, pxCell, pxGap, scale, { fill, stroke: effectiveStroke });
+  if (locked) {
+    // Darken the body cells before labels paint, so the lock state reads
+    // at a glance for boss carry-over factories. Labels + lock pin sit on
+    // top of the dim wash.
+    drawLockedTint(gfx, cells, pxCell, pxGap, scale);
+  }
   // Per-cell labels — one mini form+color glyph centered on each labeled cell.
   drawCellLabels(gfx, cells, pxCell, pxGap, scale);
   if (locked) {
@@ -20,6 +27,20 @@ export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scal
   }
   container.add(gfx);
   return gfx;
+}
+
+// Faint dark overlay over every cell of a locked factory. Reads as
+// "this block is pinned in place" without obscuring the underlying body
+// color or the per-cell labels.
+function drawLockedTint(gfx, cells, pxCell, pxGap, scale) {
+  if (!cells || cells.length === 0) return;
+  const step = pxCell + pxGap;
+  const inner = pxCell * scale;
+  const m = (pxCell - inner) / 2;
+  gfx.fillStyle(0x000000, 0.22);
+  for (const { r, c } of cells) {
+    gfx.fillRect(c * step + m, r * step + m, inner, inner);
+  }
 }
 
 // Anchor-pin accent in the factory's top-right corner cell, marking it as
@@ -199,8 +220,22 @@ function drawConverterBadge(gfx, cells, pxCell, pxGap, scale, converter) {
 }
 
 function drawMiniForm(gfx, cx, cy, r, type) {
-  const fill = COLOR_HEX[(type && type.color) || DEFAULT_SHAPE_TYPE.color];
-  const form = (type && type.form) || DEFAULT_SHAPE_TYPE.form;
+  // Partial label dispatch:
+  //   {form, color}  → existing form glyph in color (default)
+  //   {form}         → form glyph filled WHITE (color-axis is wildcard)
+  //   {color}        → puddle blob filled in color (form-axis is wildcard)
+  //   {} / null      → fallback to DEFAULT_SHAPE_TYPE
+  const hasForm  = !!(type && type.form);
+  const hasColor = !!(type && type.color);
+  if (!hasForm && hasColor) {
+    gfx.fillStyle(COLOR_HEX[type.color], 1);
+    drawPuddle(gfx, cx, cy, r);
+    return;
+  }
+  const form = hasForm ? type.form : DEFAULT_SHAPE_TYPE.form;
+  const fill = hasColor
+    ? COLOR_HEX[type.color]
+    : (hasForm ? 0xffffff : COLOR_HEX[DEFAULT_SHAPE_TYPE.color]);
   gfx.fillStyle(fill, 1);
   switch (form) {
     case 'square': {

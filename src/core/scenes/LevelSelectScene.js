@@ -75,17 +75,22 @@ export default class LevelSelectScene extends Phaser.Scene {
     this._layoutAndRender();
   }
 
-  // First level whose unlock-gate is open and that isn't beaten. `null` if
-  // the player has cleared everything.
+  // First level whose unlock-gate is open and that isn't beaten. Walks
+  // every section's regulars THEN its boss before moving on to the next
+  // section, so the "next" tile lights up on the boss once all regulars
+  // in that section are cleared. Returns `null` when everything is beaten.
   _findNextLevelId() {
     const beaten = this._beaten;
-    let anyEarlierBeaten = false;
+    const ordered = [];
     for (const section of SECTIONS) {
-      for (const lvl of section.levels) {
-        const unlocked = anyEarlierBeaten || lvl === SECTIONS[0].levels[0];
-        if (unlocked && !beaten.has(lvl.id)) return lvl.id;
-        if (beaten.has(lvl.id)) anyEarlierBeaten = true;
-      }
+      for (const lvl of section.levels) ordered.push(lvl);
+      if (section.boss) ordered.push(section.boss);
+    }
+    let anyEarlierBeaten = false;
+    for (const lvl of ordered) {
+      const unlocked = anyEarlierBeaten || lvl === ordered[0];
+      if (unlocked && !beaten.has(lvl.id)) return lvl.id;
+      if (beaten.has(lvl.id)) anyEarlierBeaten = true;
     }
     return null;
   }
@@ -139,13 +144,19 @@ export default class LevelSelectScene extends Phaser.Scene {
     for (let si = 0; si < SECTIONS.length; si++) {
       const section = SECTIONS[si];
       const startX = centerX - bpW / 2;
-      section.levels.forEach((lvl, idx) => {
-        if (idx >= cols) return;  // MVP: one row per section
-        const cx = startX + idx * (btnSize + BLOCK_GAP) + btnSize / 2;
-        const cy = y + btnSize / 2;
-        this._drawLevelTile(cx, cy, btnSize, lvl);
-      });
-      y += btnSize + BLOCK_GAP;
+      // Lay out the regular levels in a 5-column grid that wraps over as
+      // many rows as the section needs. Each section ends with its boss
+      // tile (full width) below the regular grid.
+      const lvls = section.levels;
+      for (let idx = 0; idx < lvls.length; idx++) {
+        const r = Math.floor(idx / cols);
+        const c = idx % cols;
+        const cx = startX + c * (btnSize + BLOCK_GAP) + btnSize / 2;
+        const cy = y + r * (btnSize + BLOCK_GAP) + btnSize / 2;
+        this._drawLevelTile(cx, cy, btnSize, lvls[idx]);
+      }
+      const rows = Math.max(1, Math.ceil(lvls.length / cols));
+      y += rows * btnSize + Math.max(0, rows - 1) * BLOCK_GAP + BLOCK_GAP;
 
       this._drawBossTile(centerX, y + BOSS_H / 2, bpW, BOSS_H, section);
       y += BOSS_H;
@@ -205,20 +216,39 @@ export default class LevelSelectScene extends Phaser.Scene {
   }
 
   _drawBossTile(cx, cy, w, h, section) {
-    // No boss levels authored yet — render as grey/locked with a "coming
-    // soon" label. Mirrors the regular-tile styling so sections read as a
-    // unit.
+    const boss = section.boss;
+    // Boss tiles share the regular-tile color logic — green if beaten,
+    // blue if it's the next playable level, grey otherwise. Sections
+    // without a boss authored render the legacy "coming soon" placeholder.
+    let fill, stroke, clickable, label;
+    if (!boss) {
+      fill = COLOR_GREY; stroke = COLOR_GREY_STROKE; clickable = false;
+      label = `${section.name.toUpperCase()} BOSS — COMING SOON`;
+    } else {
+      const beaten = this._beaten.has(boss.id);
+      const isNext = this._nextLevelId === boss.id;
+      if (beaten)      { fill = COLOR_GREEN; stroke = COLOR_GREEN_STROKE; clickable = true;  }
+      else if (isNext) { fill = COLOR_BLUE;  stroke = COLOR_BLUE_STROKE;  clickable = true;  }
+      else             { fill = COLOR_GREY;  stroke = COLOR_GREY_STROKE;  clickable = false; }
+      label = `BOSS ${boss.number} — ${(boss.name || '').toUpperCase()}`;
+    }
     const gfx = this.add.graphics().setDepth(10);
-    gfx.fillStyle(COLOR_GREY, 1);
-    gfx.lineStyle(2, COLOR_GREY_STROKE, 1);
+    gfx.fillStyle(fill, 1);
+    gfx.lineStyle(2, stroke, 1);
     gfx.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, BUTTON_CORNER_R);
     gfx.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, BUTTON_CORNER_R);
     this._gfx.push(gfx);
-    const text = this.add.text(cx, cy, `${section.name.toUpperCase()} BOSS — COMING SOON`, {
-      fontFamily: 'system-ui, sans-serif', fontSize: '16px', fontStyle: 'bold',
-      color: '#ffffff',
+    const text = this.add.text(cx, cy, label, {
+      fontFamily: 'system-ui, sans-serif', fontSize: '18px', fontStyle: 'bold',
+      color: '#ffffff', align: 'center',
     }).setOrigin(0.5).setDepth(11);
     this._texts.push(text);
+    if (clickable) {
+      const hit = this.add.rectangle(cx, cy, w, h, 0xffffff, 0)
+        .setInteractive({ useHandCursor: true }).setDepth(12);
+      hit.on('pointerup', () => fadeTo(this, 'Player', { levelId: boss.id }));
+      this._hits.push(hit);
+    }
   }
 
   _drawIconIsland(originX, originY, islandW, islandH) {

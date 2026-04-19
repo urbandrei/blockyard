@@ -1,130 +1,87 @@
-// MVP level catalog. One section, three handcrafted levels covering filter
-// (single-factory redirect), converter (transform), and multi-factory routing.
+// Catalog of authored levels. Regulars (`levels/level-N.json`) and bosses
+// (`levels/boss-N.json`) are bundled at build time via Vite's
+// `import.meta.glob` (eager: true). Bosses sit BETWEEN regulars in
+// catalog order — each section is 10 regulars + 1 boss — so clearing
+// level 10 routes the player to boss 1, then on to level 11. Bosses are
+// not counted in the "LEVEL N" numbering the UI shows on tiles.
 //
-// Each level is a plain object matching the level.js schema:
-//   { id, sectionId, name, number, board, inputs, outputs, border,
-//     lockedFactories[], initialFactories[] }
-//
-// `id` is the unlock-graph key (used by progress.js). `initialFactories[]`
-// declare what starts in the player's blueprint with `slot:{row,col}` plus
-// `cells/funnels/converter/rotation?`. `lockedFactories[]` are anchored to
-// the play area.
+// To author or regenerate the catalog: edit `scripts/gen-levels.mjs` and
+// run `node scripts/gen-levels.mjs` from the project root. This file
+// picks up whatever JSON shows up in `/levels/` next time Vite recompiles.
 
-import { genId } from '../model/level.js';
+const modules = import.meta.glob('../../../levels/*.json', { eager: true });
 
-const blueCircle  = { form: 'circle',   color: 'blue'  };
-const redSquare   = { form: 'square',   color: 'red'   };
-const greenTri    = { form: 'triangle', color: 'green' };
+const REGULAR_RE = /level-(\d+)\.json$/;
+const BOSS_RE    = /boss-(\d+)\.json$/;
 
-// Section 1 — three intro levels.
+function fileIdx(path, re) {
+  const m = re.exec(path);
+  return m ? parseInt(m[1], 10) : 1e9;
+}
 
-// L1 "First Bend": redirect a top-down stream into a side output.
-const LEVEL_1 = {
-  id: 's1-l1',
-  sectionId: 's1',
-  name: 'First Bend',
-  number: 1,
-  board: { cols: 5, rows: 5 },
-  inputs:  [{ r: 0, c: 2, side: 'bottom', type: { ...blueCircle } }],
-  outputs: [{ r: 2, c: 4, side: 'left',   type: { ...blueCircle } }],
-  border: { funnels: [
-    { r: 0, c: 2, side: 'bottom', role: 'input'  },
-    { r: 2, c: 4, side: 'left',   role: 'output' },
-  ]},
-  lockedFactories: [],
-  initialFactories: [{
-    id: genId(),
-    slot: { row: 0, col: 0 },
-    cells: [{ r: 0, c: 0 }],
-    funnels: [
-      { r: 0, c: 0, side: 'top',   role: 'input'  },
-      { r: 0, c: 0, side: 'right', role: 'output' },
-    ],
-    rotation: 0,
-  }],
-};
+// Deep clone on import so scenes can mutate the returned object without
+// poisoning Vite's cached module.
+function cloneLevel(json) { return JSON.parse(JSON.stringify(json)); }
 
-// L2 "Transformer": single-cell converter level. Player has a converter
-// factory that turns a blue circle into a red square.
-const LEVEL_2 = {
-  id: 's1-l2',
-  sectionId: 's1',
-  name: 'Transformer',
-  number: 2,
-  board: { cols: 5, rows: 5 },
-  inputs:  [{ r: 0, c: 2, side: 'bottom', type: { ...blueCircle } }],
-  outputs: [{ r: 4, c: 2, side: 'top',    type: { ...redSquare  } }],
-  border: { funnels: [
-    { r: 0, c: 2, side: 'bottom', role: 'input'  },
-    { r: 4, c: 2, side: 'top',    role: 'output' },
-  ]},
-  lockedFactories: [],
-  initialFactories: [{
-    // Single-cell labeled factory: input = wildcard (blue circle qualifies),
-    // output emits the cell's label (red square).
-    id: genId(),
-    slot: { row: 0, col: 0 },
-    cells: [{ r: 0, c: 0, label: { ...redSquare } }],
-    funnels: [
-      { r: 0, c: 0, side: 'top',    role: 'input'  },
-      { r: 0, c: 0, side: 'bottom', role: 'output' },
-    ],
-    rotation: 0,
-  }],
-};
+const regularKeys = Object.keys(modules).filter((k) => REGULAR_RE.test(k)).sort((a, b) => fileIdx(a, REGULAR_RE) - fileIdx(b, REGULAR_RE));
+const bossKeys    = Object.keys(modules).filter((k) => BOSS_RE.test(k)).sort((a, b) => fileIdx(a, BOSS_RE) - fileIdx(b, BOSS_RE));
 
-// L3 "Two-Stage": two converters in series. Input → square → triangle.
-const LEVEL_3 = {
-  id: 's1-l3',
-  sectionId: 's1',
-  name: 'Two-Stage',
-  number: 3,
-  board: { cols: 6, rows: 6 },
-  inputs:  [{ r: 0, c: 2, side: 'bottom', type: { ...blueCircle } }],
-  outputs: [{ r: 5, c: 3, side: 'top',    type: { ...greenTri   } }],
-  border: { funnels: [
-    { r: 0, c: 2, side: 'bottom', role: 'input'  },
-    { r: 5, c: 3, side: 'top',    role: 'output' },
-  ]},
-  lockedFactories: [],
-  initialFactories: [
-    {
-      // Stage 1: any input → red square; bend top→right.
-      id: genId(),
-      slot: { row: 0, col: 0 },
-      cells: [{ r: 0, c: 0, label: { ...redSquare } }],
-      funnels: [
-        { r: 0, c: 0, side: 'top',   role: 'input'  },
-        { r: 0, c: 0, side: 'right', role: 'output' },
-      ],
-      rotation: 0,
-    },
-    {
-      // Stage 2: any input → green triangle; bend left→bottom.
-      id: genId(),
-      slot: { row: 0, col: 1 },
-      cells: [{ r: 0, c: 0, label: { ...greenTri } }],
-      funnels: [
-        { r: 0, c: 0, side: 'left',   role: 'input'  },
-        { r: 0, c: 0, side: 'bottom', role: 'output' },
-      ],
-      rotation: 0,
-    },
-  ],
-};
+const REGULARS = regularKeys.map((k, idx) => {
+  const json = (modules[k] && modules[k].default) || modules[k];
+  const lvl = cloneLevel(json);
+  // Stamp 1-based catalog index on regulars so the UI shows "LEVEL N"
+  // without the level JSON author tracking numbers manually.
+  lvl.number = idx + 1;
+  return lvl;
+});
+const BOSSES = bossKeys.map((k, idx) => {
+  const json = (modules[k] && modules[k].default) || modules[k];
+  const lvl = cloneLevel(json);
+  lvl.bossIndex = idx + 1;   // "BOSS 1", "BOSS 2", ... (labels only)
+  lvl.number = null;         // explicit — UI code branches on this
+  return lvl;
+});
 
-export const SECTIONS = [
-  { id: 's1', name: 'Section 1', levels: [LEVEL_1, LEVEL_2, LEVEL_3] },
-];
+// Ordered full catalog: walk each section's regulars, then its boss, then
+// the next section. HomeScene's "next unbeaten" + nextLevelAfter both
+// traverse this list.
+const SECTION_SIZE = 10;
+function buildOrdered() {
+  const out = [];
+  let regIdx = 0;
+  let bossIdx = 0;
+  while (regIdx < REGULARS.length || bossIdx < BOSSES.length) {
+    const slice = REGULARS.slice(regIdx, regIdx + SECTION_SIZE);
+    for (const r of slice) out.push(r);
+    regIdx += slice.length;
+    if (bossIdx < BOSSES.length) {
+      out.push(BOSSES[bossIdx]);
+      bossIdx += 1;
+    }
+  }
+  return out;
+}
+export const LEVELS = buildOrdered();
 
-export const LEVELS = SECTIONS.flatMap((s) => s.levels);
+// Grouped for LevelSelect / section headers: each entry carries its 10
+// regulars plus the boss that guards the section (or `null` if we've
+// shipped more regulars than bosses).
+function buildSections() {
+  const out = [];
+  for (let s = 0; s * SECTION_SIZE < REGULARS.length; s++) {
+    const slice = REGULARS.slice(s * SECTION_SIZE, (s + 1) * SECTION_SIZE);
+    const boss = BOSSES[s] || null;
+    out.push({ id: `s${s + 1}`, name: `Section ${s + 1}`, levels: slice, boss });
+  }
+  return out;
+}
+export const SECTIONS = buildSections();
 
 export function getLevelById(id) {
   return LEVELS.find((l) => l.id === id) || null;
 }
 
-// First level not yet beaten, or null if everything is beaten. Used by the
-// HomeScene's "Quick Play" button.
+// First level not yet beaten, or null if everything is beaten.
 export function nextUnbeaten(beatenSet) {
   for (const l of LEVELS) if (!beatenSet.has(l.id)) return l;
   return null;

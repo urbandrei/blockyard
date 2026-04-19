@@ -1,0 +1,164 @@
+{
+  "id": "level-10",
+  "name": "Junction",
+  "number": 0,
+  "board": {
+    "cols": 7,
+    "rows": 7
+  },
+  "factories": [],
+  "initialFactories": [
+    {
+      "id": "l10-0",
+      "slot": {
+        "row": 1,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "output"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "l10-1",
+      "slot": {
+        "row": 1,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "circle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "l10-2",
+      "slot": {
+        "row": 1,
+        "col": 2
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "circle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    }
+  ],
+  "lockedFactories": [],
+  "border": {
+    "funnels": [
+      {
+        "r": 0,
+        "c": 3,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 3,
+        "c": 0,
+        "side": "right",
+        "role": "output"
+      },
+      {
+        "r": 3,
+        "c": 6,
+        "side": "left",
+        "role": "output"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "r": 0,
+      "c": 3,
+      "side": "bottom",
+      "type": {
+        "form": "square",
+        "color": "red"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "r": 3,
+      "c": 0,
+      "side": "right",
+      "type": {
+        "form": "circle",
+        "color": "red"
+      }
+    },
+    {
+      "r": 3,
+      "c": 6,
+      "side": "left",
+      "type": {
+        "form": "circle",
+        "color": "red"
+      }
+    }
+  ],
+  "instructionalText": null,
+  "boss": null
+}

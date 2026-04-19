@@ -146,8 +146,13 @@ export class Simulation {
         if (isSink(f)) {
           // Typed sinks reject mismatched shapes with a POP and DO NOT count
           // toward the per-cycle hit set. Untyped sinks accept anything.
+          // Partial labels (form-only or color-only) compare on the declared
+          // axis only — the other axis is wildcard.
           const expected = this.funnelTypes && this.funnelTypes.get(f.key);
-          const accepted = !expected || (s.form === expected.form && s.color === expected.color);
+          const accepted =
+            !expected ||
+            ((!expected.form  || s.form  === expected.form) &&
+             (!expected.color || s.color === expected.color));
           if (accepted) {
             this._recordSinkHit(f, now, s);
             this._kill(s, false);
@@ -363,10 +368,12 @@ export class Simulation {
     const sx = funnel.x + funnel.dx * inset;
     const sy = funnel.y + funnel.dy * inset;
     // Stamp the spawned shape with the funnel's declared type (form+color).
-    // Resolution order: declared type on this source funnel → pass-through
-    // stamp from the owner's most recent sink hit → default blue circle.
+    // Resolution is per-axis so partial labels (form-only or color-only)
+    // still produce a fully-typed shape: declared axis → owner's input
+    // stamp → default. The stamp is consulted even when declared exists,
+    // because declared may only specify ONE axis.
     const declared = this.funnelTypes && this.funnelTypes.get(funnel.key);
-    const stamp = !declared && this.inputStamps && this.inputStamps.get(funnel.ownerId);
+    const stamp = this.inputStamps && this.inputStamps.get(funnel.ownerId);
     const form  = (declared && declared.form)  || (stamp && stamp.form)  || DEFAULT_SHAPE_TYPE.form;
     const color = (declared && declared.color) || (stamp && stamp.color) || DEFAULT_SHAPE_TYPE.color;
     const shape = {

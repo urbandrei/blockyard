@@ -98,7 +98,19 @@ export default class PlayerScene extends Phaser.Scene {
     // catalog level by id → editor sandbox fallback.
     let source = this._inlineLevel || (this._levelId ? getLevelById(this._levelId) : null);
     if (!source) source = await loadLevel();
-    this.sourceLevel = source;
+    // Boss levels: keep the original around for future round transitions
+    // and use the round-0 composition as the active sourceLevel. RESET
+    // and scene shutdown both put the boss back at round 0 (no mid-boss
+    // save state per the user's spec).
+    if (source && source.boss) {
+      this._sourceLevelOriginal = source;
+      this._bossState = { roundIdx: 0, locked: [] };
+      this.sourceLevel = bossRoundLevel(source, 0, []);
+    } else {
+      this._sourceLevelOriginal = source;
+      this._bossState = null;
+      this.sourceLevel = source;
+    }
 
     this._initRuntime();
     this._layoutBoardAndBlueprint();
@@ -144,7 +156,7 @@ export default class PlayerScene extends Phaser.Scene {
     // Pause-on-tap during a running sim. Bound at low priority — the icon
     // hits + drag controller still get their pointerup first because they're
     // attached to specific objects with their own listeners.
-    this.input.on('pointerdown', (pointer) => this._maybePauseOnTap(pointer));
+    this.input.on('pointerdown', (pointer) => this._maybeStopOnTap(pointer));
 
     this._onScaleResize = () => this._relayoutForViewport();
     this.scale.on('resize', this._onScaleResize);
@@ -509,16 +521,58 @@ export default class PlayerScene extends Phaser.Scene {
     frame.strokeRoundedRect(-BLUEPRINT_PAD, -BLUEPRINT_PAD, dgW + BLUEPRINT_PAD * 2, dgH + BLUEPRINT_PAD * 2, BLUEPRINT_RADIUS);
     this.blueprintContainer.add(frame);
 
+    // If the level (or current boss round) carries instructional text, the
+    // top row of the blueprint is reserved for the hint pill instead of
+    // slot dots. _slotAt also rejects placements at r === 0 in this case.
+    const hint = this._instructionText();
+    const reservedRow = hint ? 1 : 0;
+
     const dots = this.make.graphics({ add: false });
     dots.fillStyle(BLUEPRINT_DOT, 0.9);
     const DOT_SPACING = 6;
-    for (let r = 0; r <= slotRows; r++) {
+    // Draw the dotted slot-grid lines from the top of the slot area
+    // (reservedRow) to the bottom of the blueprint. Horizontal edges run
+    // at every row line including the topmost, so the slot grid always
+    // shows a closed top boundary regardless of whether a hint pill is
+    // present above it.
+    for (let r = reservedRow; r <= slotRows; r++) {
       for (let c = 0; c <= slotCols; c++) {
-        if (c < slotCols) stampEdge(dots, c * slotPx, r * slotPx, (c + 1) * slotPx, r * slotPx, DOT_SPACING);
-        if (r < slotRows) stampEdge(dots, c * slotPx, r * slotPx, c * slotPx, (r + 1) * slotPx, DOT_SPACING);
+        if (c < slotCols) {
+          stampEdge(dots, c * slotPx, r * slotPx, (c + 1) * slotPx, r * slotPx, DOT_SPACING);
+        }
+        if (r < slotRows) {
+          stampEdge(dots, c * slotPx, r * slotPx, c * slotPx, (r + 1) * slotPx, DOT_SPACING);
+        }
       }
     }
     this.blueprintContainer.add(dots);
+
+    // Hint pill — white rounded box across the reserved top row with the
+    // text centered. Sits inside the blueprintContainer so it scales with
+    // the blueprint's local positioning.
+    if (hint) {
+      const pad = Math.max(4, Math.round(slotPx * 0.12));
+      const pillW = dgW - pad * 2;
+      const pillH = slotPx - pad * 2;
+      const pill = this.make.graphics({ add: false });
+      pill.fillStyle(0xffffff, 1);
+      pill.lineStyle(2, 0x1a2332, 1);
+      const radius = Math.max(6, Math.round(pillH * 0.25));
+      pill.fillRoundedRect(pad, pad, pillW, pillH, radius);
+      pill.strokeRoundedRect(pad, pad, pillW, pillH, radius);
+      this.blueprintContainer.add(pill);
+
+      const fontPx = Math.max(11, Math.min(20, Math.floor(pillH * 0.50)));
+      const text = this.add.text(dgW / 2, slotPx / 2, hint, {
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: `${fontPx}px`,
+        fontStyle: 'bold',
+        color: '#1a2332',
+        align: 'center',
+        wordWrap: { width: pillW - pad * 2 },
+      }).setOrigin(0.5);
+      this.blueprintContainer.add(text);
+    }
 
     // Render every factory in each occupied slot (D4: fanned stack, lower
     // layers offset + dimmed; the topmost layer is opaque and is what tap-
@@ -899,7 +953,19 @@ export default class PlayerScene extends Phaser.Scene {
     const c = Math.floor(lx / this.slotPx);
     const r = Math.floor(ly / this.slotPx);
     if (r < 0 || c < 0 || r >= this._slotRows() || c >= this._slotCols()) return null;
+    // Top row is reserved for the instructional text box (when present) —
+    // reject placements there so the player can't drop a factory under
+    // the hint.
+    if (this._instructionText() && r === 0) return null;
     return { r, c };
+  }
+
+  // Returns the active instructional text for the current sourceLevel
+  // (boss-round levels carry the per-round text in `sourceLevel.instructionalText`
+  // courtesy of `bossRoundLevel`), or null when no hint should be shown.
+  // When non-null the blueprint top row is reserved.
+  _instructionText() {
+    return (this.sourceLevel && this.sourceLevel.instructionalText) || null;
   }
 
   _placedAtBoardCell(r, c) {
@@ -1263,6 +1329,24 @@ export default class PlayerScene extends Phaser.Scene {
     if (this._victoryTextName) { this._victoryTextName.destroy(); this._victoryTextName = null; }
     if (this._victoryTextSub)  { this._victoryTextSub.destroy();  this._victoryTextSub  = null; }
     this.victory = null;
+    // Boss levels: RESET sends the player all the way back to round 1 (no
+    // mid-boss save state). Recompose the level for round 0 with no
+    // locked carry, then fall through to the standard reset below.
+    if (this._bossState && this._sourceLevelOriginal && this._sourceLevelOriginal.boss) {
+      this._bossState = { roundIdx: 0, locked: [] };
+      this.sourceLevel = bossRoundLevel(this._sourceLevelOriginal, 0, []);
+      this.sim && this.sim.stop();
+      if (this.shapeRenderer) this.shapeRenderer.clearAll();
+      if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.clearAll();
+      this.satisfiedOutputs && this.satisfiedOutputs.clear();
+      this.simState = 'idle';
+      this.simTime = 0;
+      this._initRuntime();
+      this._renderAll();
+      this._renderBlueprint();
+      this._renderIconIsland();
+      return;
+    }
     this.sim && this.sim.stop();
     if (this.shapeRenderer) this.shapeRenderer.clearAll();
     if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.clearAll();
@@ -1302,14 +1386,30 @@ export default class PlayerScene extends Phaser.Scene {
     this._renderIconIsland();
   }
 
-  _maybePauseOnTap(pointer) {
+  // Tap anywhere outside the icon island and the blueprint while a sim is
+  // running → STOP the sim and clear all live shapes. Factories on the
+  // board stay where they are so the player can adjust placements without
+  // restarting from the blueprint. Replaces the previous pause-on-tap
+  // behavior; the platform-driven pause/resume on app visibility is
+  // unchanged (still uses Simulation.pause/resume).
+  _maybeStopOnTap(pointer) {
     if (this.simState !== 'running') return;
     if (this.victory) return;
-    // Don't pause when the tap landed on a control — those handlers take
-    // care of the intended behavior themselves.
     if (this._inIconIsland(pointer.x, pointer.y)) return;
     if (this._inBlueprintArea(pointer.x, pointer.y)) return;
-    this._pause();
+    this._stopPlay();
+  }
+
+  _stopPlay() {
+    if (this.simState !== 'running') return;
+    this.sim && this.sim.stop();
+    if (this.shapeRenderer) this.shapeRenderer.clearAll();
+    this.simState = 'idle';
+    this.simTime = 0;
+    // Re-render so the empty-blueprint PLAY/RESET tiles come back, and the
+    // icon-island RESET re-evaluates its enabled state.
+    this._renderBlueprint();
+    this._renderIconIsland && this._renderIconIsland();
   }
 
   _inIconIsland(x, y) {
@@ -1342,11 +1442,64 @@ export default class PlayerScene extends Phaser.Scene {
 
   _fireVictory() {
     if (this.victory) return;
+    // Boss flow — advance to the next round instead of marking the level
+    // beaten + transitioning. The final round falls through to the normal
+    // victory path so beaten/credits/auto-advance still happen.
+    if (this._isBossWithMoreRounds()) {
+      this.victory = true;       // gates duplicate fires from _onOutputSatisfied
+      this.time.delayedCall(CYCLE_MS, () => this._advanceBossRound());
+      return;
+    }
     this.victory = true;
-    if (this.sourceLevel.id) markBeaten(this.sourceLevel.id);
+    if (this._sourceLevelOriginal && this._sourceLevelOriginal.id) {
+      markBeaten(this._sourceLevelOriginal.id);
+    } else if (this.sourceLevel.id) {
+      markBeaten(this.sourceLevel.id);
+    }
     // Hold for one cycle of animation so the last shape has a moment to
     // visibly land, then announce. Sim keeps running behind the banner.
     this.time.delayedCall(CYCLE_MS, () => this._showVictoryText());
+  }
+
+  _isBossWithMoreRounds() {
+    if (!this._bossState || !this._sourceLevelOriginal || !this._sourceLevelOriginal.boss) return false;
+    const total = this._sourceLevelOriginal.boss.rounds.length;
+    return this._bossState.roundIdx + 1 < total;
+  }
+
+  // Snapshot every non-locked placed factory into the boss-locked carry,
+  // increment the round, recompose the level, and re-init runtime + render.
+  _advanceBossRound() {
+    if (!this.scene || !this._isBossWithMoreRounds()) return;
+    const carry = [];
+    for (const p of this.placed.values()) {
+      if (p.locked) continue;       // pre-existing locked factories already in lockedFactories
+      const rot = rotateFactoryShape({ cells: p.baseCells, funnels: p.baseFunnels }, p.rotation);
+      carry.push({
+        id: p.id,
+        anchor: { ...p.anchor },
+        cells: rot.cells,
+        funnels: rot.funnels,
+      });
+    }
+    this._bossState.locked.push(...carry);
+    this._bossState.roundIdx += 1;
+    this.victory = null;
+    this.sim && this.sim.stop();
+    if (this.shapeRenderer) this.shapeRenderer.clearAll();
+    this.simState = 'idle';
+    this.simTime = 0;
+    this.satisfiedOutputs && this.satisfiedOutputs.clear();
+    this.sourceLevel = bossRoundLevel(
+      this._sourceLevelOriginal,
+      this._bossState.roundIdx,
+      this._bossState.locked,
+    );
+    this._initRuntime();
+    this._renderAll();
+    this._renderBlueprint();
+    this._renderIconIsland();
+    if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.clearAll();
   }
 
   _showVictoryText() {
@@ -1436,6 +1589,28 @@ function factoryCenter(cells, pxCell, pxGap) {
     ((minC + maxC) * step + pxCell) / 2,
     ((minR + maxR) * step + pxCell) / 2,
   ];
+}
+
+// Build the level snapshot for boss round `roundIdx`. The shared `board`
+// + `name` carry over; per-round `border / inputs / outputs /
+// initialFactories / instructionalText` come from boss.rounds[roundIdx].
+// `lockedCarry` is the array of factories the player placed in earlier
+// rounds — they're appended to the level's `lockedFactories` so they
+// render with the lock pin + darken tint and are immovable.
+function bossRoundLevel(srcLevel, roundIdx, lockedCarry) {
+  const r = (srcLevel.boss && srcLevel.boss.rounds && srcLevel.boss.rounds[roundIdx]) || {};
+  return {
+    ...srcLevel,
+    border: r.border || { funnels: [] },
+    inputs: r.inputs || [],
+    outputs: r.outputs || [],
+    initialFactories: r.initialFactories || [],
+    lockedFactories: [...(srcLevel.lockedFactories || []), ...lockedCarry],
+    instructionalText: r.instructionalText || null,
+    // Strip `boss` so the per-round snapshot can't trigger another boss
+    // composition recursively (e.g. after _composeLevel persists state).
+    boss: null,
+  };
 }
 
 function stampEdge(gfx, x1, y1, x2, y2, spacing) {

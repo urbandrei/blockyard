@@ -1,0 +1,207 @@
+{
+  "id": "level-19",
+  "name": "Stress Test",
+  "number": 0,
+  "board": {
+    "cols": 9,
+    "rows": 9
+  },
+  "factories": [],
+  "initialFactories": [
+    {
+      "id": "l19-0",
+      "slot": {
+        "row": 1,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "circle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "l19-1",
+      "slot": {
+        "row": 1,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "green"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "l19-2",
+      "slot": {
+        "row": 1,
+        "col": 2
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "triangle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "l19-3",
+      "slot": {
+        "row": 1,
+        "col": 3
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "green"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    }
+  ],
+  "lockedFactories": [],
+  "border": {
+    "funnels": [
+      {
+        "r": 0,
+        "c": 2,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 0,
+        "c": 6,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 8,
+        "c": 2,
+        "side": "top",
+        "role": "output"
+      },
+      {
+        "r": 8,
+        "c": 6,
+        "side": "top",
+        "role": "output"
+      }
+    ]
+  },
+  "inputs": [
+    {
+      "r": 0,
+      "c": 2,
+      "side": "bottom",
+      "type": {
+        "form": "square",
+        "color": "red"
+      }
+    },
+    {
+      "r": 0,
+      "c": 6,
+      "side": "bottom",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "r": 8,
+      "c": 2,
+      "side": "top",
+      "type": {
+        "form": "circle",
+        "color": "green"
+      }
+    },
+    {
+      "r": 8,
+      "c": 6,
+      "side": "top",
+      "type": {
+        "form": "triangle",
+        "color": "green"
+      }
+    }
+  ],
+  "instructionalText": null,
+  "boss": null
+}
