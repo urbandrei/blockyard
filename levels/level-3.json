@@ -1,15 +1,15 @@
 {
   "id": "level-3",
-  "name": "Spin to Win",
+  "name": "Sharp turns",
   "number": 0,
   "board": {
-    "cols": 5,
-    "rows": 5
+    "cols": 4,
+    "rows": 4
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "l3-0",
+      "id": "fmzmihyy",
       "slot": {
         "row": 1,
         "col": 0
@@ -24,7 +24,7 @@
         {
           "r": 0,
           "c": 0,
-          "side": "top",
+          "side": "left",
           "role": "input"
         },
         {
@@ -34,31 +34,31 @@
           "role": "output"
         }
       ],
-      "rotation": 1
+      "rotation": 2
     }
   ],
   "lockedFactories": [],
   "border": {
     "funnels": [
       {
-        "r": 0,
-        "c": 2,
-        "side": "bottom",
-        "role": "input"
-      },
-      {
-        "r": 4,
+        "r": 3,
         "c": 2,
         "side": "top",
         "role": "output"
+      },
+      {
+        "r": 1,
+        "c": 0,
+        "side": "right",
+        "role": "input"
       }
     ]
   },
   "inputs": [
     {
-      "r": 0,
-      "c": 2,
-      "side": "bottom",
+      "r": 1,
+      "c": 0,
+      "side": "right",
       "type": {
         "form": "circle",
         "color": "blue"
@@ -67,7 +67,7 @@
   ],
   "outputs": [
     {
-      "r": 4,
+      "r": 3,
       "c": 2,
       "side": "top",
       "type": {
@@ -76,6 +76,39 @@
       }
     }
   ],
-  "instructionalText": "Tap a placed factory to rotate it.",
-  "boss": null
+  "instructionalText": "Click on a factory to rotate it.",
+  "boss": null,
+  "author": "p4songer",
+  "solution": {
+    "factories": [
+      {
+        "id": "fmzmihyy",
+        "anchor": {
+          "row": 1,
+          "col": 2
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "left",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      }
+    ]
+  },
+  "likes": 0
 }

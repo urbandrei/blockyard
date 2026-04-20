@@ -1,6 +1,6 @@
 {
   "id": "level-4",
-  "name": "Three in a Row",
+  "name": "Safe passage",
   "number": 0,
   "board": {
     "cols": 6,
@@ -9,7 +9,61 @@
   "factories": [],
   "initialFactories": [
     {
-      "id": "l4-0",
+      "id": "fxcc3a7l",
+      "slot": {
+        "row": 2,
+        "col": 3
+      },
+      "cells": [
+        {
+          "r": 1,
+          "c": 0
+        },
+        {
+          "r": 0,
+          "c": 0
+        },
+        {
+          "r": 0,
+          "c": 1
+        }
+      ],
+      "funnels": [],
+      "rotation": 2
+    },
+    {
+      "id": "faflksr3",
+      "slot": {
+        "row": 3,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 1
+        },
+        {
+          "r": 1,
+          "c": 1
+        },
+        {
+          "r": 2,
+          "c": 1
+        },
+        {
+          "r": 2,
+          "c": 0
+        },
+        {
+          "r": 1,
+          "c": 0
+        }
+      ],
+      "funnels": [],
+      "rotation": 1
+    },
+    {
+      "id": "f7pu0qnh",
       "slot": {
         "row": 1,
         "col": 0
@@ -18,79 +72,22 @@
         {
           "r": 0,
           "c": 0
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
         },
         {
-          "r": 0,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        }
-      ],
-      "rotation": 0
-    },
-    {
-      "id": "l4-1",
-      "slot": {
-        "row": 1,
-        "col": 1
-      },
-      "cells": [
+          "r": 1,
+          "c": 0
+        },
         {
-          "r": 0,
+          "r": 2,
+          "c": 0
+        },
+        {
+          "r": 3,
           "c": 0
         }
       ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        }
-      ],
-      "rotation": 0
-    },
-    {
-      "id": "l4-2",
-      "slot": {
-        "row": 1,
-        "col": 2
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        }
-      ],
-      "rotation": 0
+      "funnels": [],
+      "rotation": 1
     }
   ],
   "lockedFactories": [],
@@ -132,6 +129,89 @@
       }
     }
   ],
-  "instructionalText": "Place every factory to clear the level.",
-  "boss": null
+  "instructionalText": "All factories must be placed",
+  "boss": null,
+  "solution": {
+    "factories": [
+      {
+        "id": "fxcc3a7l",
+        "anchor": {
+          "row": 1,
+          "col": 1
+        },
+        "cells": [
+          {
+            "r": 1,
+            "c": 0
+          },
+          {
+            "r": 0,
+            "c": 0
+          },
+          {
+            "r": 0,
+            "c": 1
+          }
+        ],
+        "funnels": []
+      },
+      {
+        "id": "faflksr3",
+        "anchor": {
+          "row": 2,
+          "col": 1
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 1
+          },
+          {
+            "r": 1,
+            "c": 1
+          },
+          {
+            "r": 2,
+            "c": 1
+          },
+          {
+            "r": 2,
+            "c": 0
+          },
+          {
+            "r": 1,
+            "c": 0
+          }
+        ],
+        "funnels": []
+      },
+      {
+        "id": "f7pu0qnh",
+        "anchor": {
+          "row": 1,
+          "col": 4
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0
+          },
+          {
+            "r": 1,
+            "c": 0
+          },
+          {
+            "r": 2,
+            "c": 0
+          },
+          {
+            "r": 3,
+            "c": 0
+          }
+        ],
+        "funnels": []
+      }
+    ]
+  },
+  "likes": 0
 }

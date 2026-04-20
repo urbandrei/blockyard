@@ -3,13 +3,13 @@
   "name": "Reshape",
   "number": 0,
   "board": {
-    "cols": 6,
-    "rows": 6
+    "cols": 5,
+    "rows": 5
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "l6-0",
+      "id": "fenodepp",
       "slot": {
         "row": 1,
         "col": 0
@@ -19,7 +19,7 @@
           "r": 0,
           "c": 0,
           "label": {
-            "form": "circle"
+            "form": "square"
           }
         }
       ],
@@ -50,7 +50,7 @@
         "role": "input"
       },
       {
-        "r": 5,
+        "r": 4,
         "c": 2,
         "side": "top",
         "role": "output"
@@ -63,22 +63,57 @@
       "c": 2,
       "side": "bottom",
       "type": {
-        "form": "square",
+        "form": "circle",
         "color": "blue"
       }
     }
   ],
   "outputs": [
     {
-      "r": 5,
+      "r": 4,
       "c": 2,
       "side": "top",
       "type": {
-        "form": "circle",
+        "form": "square",
         "color": "blue"
       }
     }
   ],
-  "instructionalText": "White-form factories: any color in, this shape out.",
-  "boss": null
+  "instructionalText": "White labels on factory convert the shape",
+  "boss": null,
+  "solution": {
+    "factories": [
+      {
+        "id": "fenodepp",
+        "anchor": {
+          "row": 2,
+          "col": 2
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "form": "square"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      }
+    ]
+  },
+  "likes": 0
 }

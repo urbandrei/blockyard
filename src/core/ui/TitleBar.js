@@ -29,6 +29,8 @@ const FRAME_STROKE = 0x1a2332;
 const PILL_FILL    = 0x3b66b8;
 const PILL_TEXT    = '#ffffff';
 const NAME_TEXT    = '#1a2332';
+const AUTHOR_TEXT  = '#5a6b82';
+const AUTHOR_PAD_R = 14;   // gap from the right edge of the frame to the author label
 const HOME_FILL    = 0x3a5a88;
 const HOME_STROKE  = 0x1a2332;
 const HOME_GLYPH   = 0xffffff;
@@ -47,6 +49,7 @@ export class TitleBar {
    * @param {number} opts.width
    * @param {number} [opts.levelNumber]
    * @param {string} [opts.levelName]
+   * @param {string} [opts.author]                 when set and not in designer/steps mode, drawn right-aligned inside the left frame as "by <author>"
    * @param {() => void} [opts.onHome]
    * @param {boolean} [opts.designerMode=false]   designer-mode: SAVE button replaces number pill, name becomes editable
    * @param {() => void} [opts.onSaveOpen]        designer-mode only — fires when SAVE is tapped
@@ -59,7 +62,7 @@ export class TitleBar {
    */
   constructor(scene, opts) {
     const {
-      x, y, width, levelNumber, levelName, onHome,
+      x, y, width, levelNumber, levelName, author, onHome,
       designerMode = false, onSaveOpen, onNameTap, steps,
       variant, rightButton,
     } = opts;
@@ -153,11 +156,28 @@ export class TitleBar {
         color: PILL_TEXT,
       }).setOrigin(0.5).setDepth(TITLE_DEPTH);
 
+      // Author label (right-aligned inside the left frame, drawn first so
+      // we can measure it and reserve width for the name on its left).
+      const trimmedAuthor = (author || '').trim();
+      let authorLeftEdge = leftX + leftW - AUTHOR_PAD_R;
+      if (trimmedAuthor) {
+        this.authorText = scene.add.text(
+          leftX + leftW - AUTHOR_PAD_R, y, `by ${trimmedAuthor}`,
+          {
+            fontFamily: 'system-ui, sans-serif', fontSize: '14px',
+            color: AUTHOR_TEXT, fontStyle: 'italic',
+          },
+        ).setOrigin(1, 0.5).setDepth(TITLE_DEPTH);
+        authorLeftEdge = this.authorText.x - this.authorText.width - 10;
+      }
+
       // Level name.
       const nameX = pillCX + PILL_SIZE / 2 + 14;
+      const nameMaxW = Math.max(40, authorLeftEdge - nameX);
       this.nameText = scene.add.text(nameX, y, levelName || '', {
         fontFamily: 'system-ui, sans-serif', fontSize: '28px', fontStyle: 'bold',
         color: NAME_TEXT,
+        wordWrap: { width: nameMaxW, useAdvancedWrap: false },
       }).setOrigin(0, 0.5).setDepth(TITLE_DEPTH);
     }
 
@@ -216,6 +236,7 @@ export class TitleBar {
     if (this.nameHit)   this.nameHit.destroy();
     if (this.steps)     this.steps.destroy();
     if (this.nameText)  this.nameText.destroy();
+    if (this.authorText) this.authorText.destroy();
     if (this.rightBox)  this.rightBox.destroy();
     if (this.homeIcon)  this.homeIcon.destroy();
     if (this.homeHit)   this.homeHit.destroy();

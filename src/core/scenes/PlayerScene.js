@@ -874,6 +874,7 @@ export default class PlayerScene extends Phaser.Scene {
       width: this.titleBarW,
       levelNumber: this.sourceLevel.number,
       levelName: this.sourceLevel.name,
+      author: this.sourceLevel.author,
       rightButton: {
         kind: 'hint',
         onTap: () => { console.log('[hint] stub'); },

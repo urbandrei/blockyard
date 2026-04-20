@@ -1,6 +1,6 @@
 {
   "id": "boss-1",
-  "name": "Section 1 Boss",
+  "name": "Section 1 boss",
   "number": 0,
   "board": {
     "cols": 7,
@@ -18,7 +18,7 @@
   "boss": {
     "rounds": [
       {
-        "instructionalText": "Round 1 — clear it; placed blocks lock for Round 2.",
+        "instructionalText": "Round 1 — clear it; placed blocks lock for round 2.",
         "border": {
           "funnels": [
             {
