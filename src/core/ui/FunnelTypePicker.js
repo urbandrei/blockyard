@@ -139,13 +139,13 @@ export class FunnelTypePicker {
   _buildRoleRow(cx, cy) {
     const buttons = [];
     const w = SWATCH * 2.2;
-    // Role-picker colors in the modal are INVERTED from the board triangles:
-    // here INPUT reads red, OUTPUT reads green. This is per-user-preference
-    // for the picker only — FunnelRenderer + BufferLabelRenderer on the
-    // board stay at their green-in / red-out convention.
+    // Role-picker colors match the board triangles: INPUT uses the input
+    // palette, OUTPUT uses the output palette. Kept consistent with
+    // FunnelRenderer + BufferLabelRenderer so the picker reads as the
+    // same convention as the live funnel on the board.
     const opts = [
-      { role: 'input',  label: 'INPUT',  fill: FUNNEL_OUTPUT_FILL, stroke: FUNNEL_OUTPUT_STROKE },
-      { role: 'output', label: 'OUTPUT', fill: FUNNEL_INPUT_FILL,  stroke: FUNNEL_INPUT_STROKE  },
+      { role: 'input',  label: 'INPUT',  fill: FUNNEL_INPUT_FILL,  stroke: FUNNEL_INPUT_STROKE  },
+      { role: 'output', label: 'OUTPUT', fill: FUNNEL_OUTPUT_FILL, stroke: FUNNEL_OUTPUT_STROKE },
     ];
     opts.forEach((o, i) => {
       const x = cx + (i === 0 ? -w / 2 - 2 : w / 2 + 2);

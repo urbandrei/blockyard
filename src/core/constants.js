@@ -13,10 +13,19 @@ export const BOARD_GAP = 3;             // px gap between board grid cells
 export const BLOCK_LIGHT    = 0x5a5f66;
 export const BLOCK_DARK     = 0x2e3238;
 export const BLOCK_STROKE   = 0x14161a;
+// Border funnel palette — unchanged (green = input into play area, red =
+// output out of play area, from the player's perspective).
 export const FUNNEL_INPUT_FILL   = 0x6fcf7b;
 export const FUNNEL_INPUT_STROKE = 0x1f5a2a;
 export const FUNNEL_OUTPUT_FILL  = 0xff8a6a;
 export const FUNNEL_OUTPUT_STROKE = 0x7a2a10;
+// Factory funnel palette — inverted vs. border so the colors read
+// "relative to the factory body": a factory's INPUT is where shapes are
+// taken IN (drawn red), its OUTPUT is where shapes leave (drawn green).
+export const FACTORY_FUNNEL_INPUT_FILL    = 0xff8a6a;
+export const FACTORY_FUNNEL_INPUT_STROKE  = 0x7a2a10;
+export const FACTORY_FUNNEL_OUTPUT_FILL   = 0x6fcf7b;
+export const FACTORY_FUNNEL_OUTPUT_STROKE = 0x1f5a2a;
 export const MANIFOLD_STROKE = 0xffffff;
 
 // Scene clear color (Phaser game `backgroundColor`). Dark brown per the

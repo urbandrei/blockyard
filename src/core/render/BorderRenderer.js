@@ -23,7 +23,7 @@ export function renderBorder(scene, _bodyContainer, funnelContainer, level, { px
     const wrap = scene.add.container(cx, cy);
     funnelContainer.add(wrap);
     const gfx = scene.make.graphics({ add: false });
-    drawFunnelsInto(gfx, [f], pxCell, pxGap, 1);
+    drawFunnelsInto(gfx, [f], pxCell, pxGap, 1, /* isBorder */ true);
     gfx.setPosition(-cx, -cy);
     wrap.add(gfx);
     wraps.push(wrap);
