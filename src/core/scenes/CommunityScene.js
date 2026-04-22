@@ -3,6 +3,7 @@ import { listAll, applyFilter, getLikes, toggleLike } from '../community.js';
 import { LevelCard } from '../ui/LevelCard.js';
 import { TextInputOverlay } from '../ui/TextInputOverlay.js';
 import { ImportModal } from '../ui/ImportModal.js';
+import { EditorModePicker } from '../ui/EditorModePicker.js';
 import { platform } from '../../platform/index.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
 import { enableMenuBg } from '../ui/MenuBackground.js';
@@ -150,7 +151,7 @@ export default class CommunityScene extends Phaser.Scene {
 
     this._makeButton(centerX, y + BTN_H / 2, bpW, BTN_H, 'LEVEL DESIGNER',
       PRIMARY_FILL, PRIMARY_STROKE, PRIMARY_TEXT,
-      () => fadeTo(this, 'Editor', { designerMode: true }));
+      () => this._openEditorModePicker());
     y += BTN_H + BLOCK_GAP;
 
     // Search + filter row.
@@ -296,6 +297,17 @@ export default class CommunityScene extends Phaser.Scene {
         this._searchInput = null;
       },
       onCancel: () => { this._searchInput = null; },
+    });
+  }
+
+  _openEditorModePicker() {
+    if (this._modePicker) return;
+    this._modePicker = new EditorModePicker(this, {
+      onPick: ({ bossMode, stageCount }) => {
+        this._modePicker = null;
+        fadeTo(this, 'Editor', { designerMode: true, bossMode, stageCount });
+      },
+      onClose: () => { this._modePicker = null; },
     });
   }
 

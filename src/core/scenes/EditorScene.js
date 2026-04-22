@@ -1,5 +1,10 @@
 import Phaser from 'phaser';
-import { loadLevel, saveLevel, genId, seedDefaultFunnels, defaultLevel } from '../model/level.js';
+import {
+  loadLevel, saveLevel, genId, seedDefaultFunnels, defaultLevel,
+  defaultBossLevel, defaultBossRound,
+  applyBossRoundToWorking, snapshotWorkingToBossRound,
+} from '../model/level.js';
+import { BossPhaseIndicator } from '../ui/BossPhaseIndicator.js';
 import { getCommunityLevelById, saveLocal as saveCommunityLocal } from '../community.js';
 import { SaveMenu } from '../ui/SaveMenu.js';
 import { TextInputOverlay } from '../ui/TextInputOverlay.js';
@@ -85,6 +90,17 @@ export default class EditorScene extends Phaser.Scene {
     // sandbox key, and replaces the title-bar number pill with a SAVE button.
     this._designerMode = !!(data && data.designerMode);
     this._designerLevelId = (data && data.levelId) || null;
+    // Boss mode: the editor authors an N-stage boss level (2..5). The level's
+    // `boss.rounds[]` holds per-stage data; the top-level fields mirror the
+    // currently-active stage so the existing design/blueprint plumbing keeps
+    // working. `stageCount` is locked at entry.
+    // Boss mode is only supported in designer mode — the sandbox key has
+    // no schema for it. Drop the flag silently if entered non-designer.
+    this._bossMode = !!(data && data.bossMode) && this._designerMode;
+    this._bossStageCount = Math.max(2, Math.min(5, (data && data.stageCount) | 0 || 3));
+    this._bossStageIdx = 0;
+    this._bossMaxVisitedIdx = 0;
+    this._bossNeedsInvalidation = false;
   }
 
   async create() {
@@ -206,7 +222,8 @@ export default class EditorScene extends Phaser.Scene {
           if (info.kind === 'board') {
             const fac = this._factoryAtBoardCell(info.r, info.c);
             // A locked factory stays put — taps toggle unlock, drags no-op.
-            return !!fac && !this._lockedFactoryIds.has(fac.id);
+            // In boss mode, carry-over factories (fac.locked) never unlock.
+            return !!fac && !fac.locked && !this._lockedFactoryIds.has(fac.id);
           }
           return false;
         }
@@ -246,6 +263,7 @@ export default class EditorScene extends Phaser.Scene {
       if (this.nameInput) { this.nameInput.destroy(); this.nameInput = null; }
       if (this.cellLabelPicker) { this.cellLabelPicker.close(); this.cellLabelPicker = null; }
       if (this.exportPanel)     { this.exportPanel.destroy();   this.exportPanel = null; }
+      if (this.bossPhaseIndicator) { this.bossPhaseIndicator.destroy(); this.bossPhaseIndicator = null; }
       this._dismissStepAdvanceBanner && this._dismissStepAdvanceBanner();
       if (this._stepNew) this._stepNew.clear();
       this._lastStepReachable = null;
@@ -344,9 +362,20 @@ export default class EditorScene extends Phaser.Scene {
     if (!this._designerMode) return loadLevel();
     if (this._designerLevelId) {
       const existing = await getCommunityLevelById(this._designerLevelId);
-      if (existing) return normalizeForEditor(existing);
+      if (existing) {
+        const normalized = normalizeForEditor(existing);
+        // If the stored draft already has boss data, re-enter boss mode.
+        if (normalized.boss && Array.isArray(normalized.boss.rounds) && normalized.boss.rounds.length >= 2) {
+          this._bossMode = true;
+          this._bossStageCount = normalized.boss.rounds.length;
+          applyBossRoundToWorking(normalized, 0);
+        }
+        return normalized;
+      }
     }
-    const fresh = defaultLevel();
+    const fresh = this._bossMode
+      ? defaultBossLevel(this._bossStageCount)
+      : defaultLevel();
     fresh.name = 'untitled';
     fresh.number = 0;
     fresh.origin = 'local';
@@ -395,8 +424,13 @@ export default class EditorScene extends Phaser.Scene {
     if (this._mode === 'blueprintSetup') return;
     if (!this._victoryReady) return;
     // Snapshot the solution (deep-clone factories) so we can rebuild the
-    // play area on cancel and embed `solution` in the export payload.
-    this._solutionSnapshot = JSON.parse(JSON.stringify(this.level.factories || []));
+    // play area on cancel and embed `solution` in the export payload. In
+    // boss mode, only non-locked factories (i.e. this stage's own work)
+    // participate in blueprint-setup; locked carry-over from prior stages
+    // is restored back onto the board on exit.
+    const source = (this.level.factories || [])
+      .filter((f) => !(this._bossMode && f.locked));
+    this._solutionSnapshot = JSON.parse(JSON.stringify(source));
     this._blueprintAssignments = new Map();
     this._lockedFactoryIds = new Set();
     this._mode = 'blueprintSetup';
@@ -407,6 +441,7 @@ export default class EditorScene extends Phaser.Scene {
     this._renderIconIsland();
     this._setupIconSlotHandlers();
     this._refreshSteps();
+    this._refreshBossIndicator && this._refreshBossIndicator();
   }
 
   _exitBlueprintSetup() {
@@ -414,7 +449,23 @@ export default class EditorScene extends Phaser.Scene {
     this._dismissStepAdvanceBanner();
     if (this.exportPanel) { this.exportPanel.destroy(); this.exportPanel = null; }
     // Restore the solution snapshot so the user can keep editing the design.
-    if (this._solutionSnapshot) {
+    if (this._bossMode) {
+      // Rebuild level.factories = cumulative locked carry-over + this
+      // stage's unlocked snapshot.
+      const rounds = (this.level.boss && this.level.boss.rounds) || [];
+      const cumulative = [];
+      for (let i = 0; i < this._bossStageIdx; i++) {
+        const sf = (rounds[i] && rounds[i].solution && rounds[i].solution.factories) || [];
+        for (const f of sf) {
+          const fc = JSON.parse(JSON.stringify(f));
+          fc.locked = true;
+          cumulative.push(fc);
+        }
+      }
+      const own = JSON.parse(JSON.stringify(this._solutionSnapshot || []));
+      for (const f of own) f.locked = false;
+      this.level.factories = [...cumulative, ...own];
+    } else if (this._solutionSnapshot) {
       this.level.factories = JSON.parse(JSON.stringify(this._solutionSnapshot));
     }
     this._blueprintAssignments = new Map();
@@ -426,6 +477,7 @@ export default class EditorScene extends Phaser.Scene {
     this._setupIconSlotHandlers();
     this._restartSim();
     this._resetVictoryTracking();
+    this._refreshBossIndicator && this._refreshBossIndicator();
   }
 
   // True when every solution factory has been either (a) assigned to a
@@ -485,6 +537,7 @@ export default class EditorScene extends Phaser.Scene {
   }
 
   _assembleExportLevel() {
+    if (this._bossMode) return this._assembleBossExportLevel();
     const initialFactories = [];
     const lockedFactories = [];
     for (const fac of this._solutionSnapshot || []) {
@@ -541,7 +594,62 @@ export default class EditorScene extends Phaser.Scene {
     };
   }
 
+  // Boss mode: snapshot the current stage's working state back into
+  // boss.rounds, then return the fully-assembled level with every stage's
+  // data embedded. `boss.rounds[i]` is the runtime-consumed shape read by
+  // PlayerScene.bossRoundLevel(); each round also carries an editor-only
+  // `solution.factories` snapshot for review.
+  _assembleBossExportLevel() {
+    // We're on the Export step in the flat sequence — snapshot the last
+    // visited stage (its Blueprint phase state lives on the scene right now)
+    // into boss.rounds[stageIdx] so we don't drop the final assignments.
+    this._bossSnapshotStage(this._bossStageIdx);
+
+    const rawBoard = this.level.board || {};
+    const cols = Number.isFinite(rawBoard.cols) && rawBoard.cols > 0 ? rawBoard.cols : 6;
+    const rows = Number.isFinite(rawBoard.rows) && rawBoard.rows > 0 ? rawBoard.rows : 6;
+    const board = { cols, rows };
+
+    const clone = (v) => JSON.parse(JSON.stringify(v || null));
+    const rounds = ((this.level.boss && this.level.boss.rounds) || [])
+      .slice(0, this._bossStageCount)
+      .map((r) => ({
+        border: clone(r.border) || { funnels: [] },
+        inputs: clone(r.inputs) || [],
+        outputs: clone(r.outputs) || [],
+        initialFactories: clone(r.initialFactories) || [],
+        instructionalText: r.instructionalText || null,
+        solution: { factories: clone((r.solution && r.solution.factories) || []) },
+      }));
+
+    // Mirror round-0 fields at the top level so importers that don't
+    // understand boss still see a valid single-level shape. PlayerScene
+    // reads boss.rounds[0] first anyway (bossRoundLevel), so runtime play
+    // is driven entirely by the rounds array.
+    const r0 = rounds[0] || { border: { funnels: [] }, inputs: [], outputs: [] };
+    return {
+      ...this.level,
+      id: this.level.id || undefined,
+      origin: this.level.origin || 'local',
+      status: this.level.status || 'private',
+      author: this.level.author || null,
+      number: this.level.number || 0,
+      board,
+      border: r0.border,
+      inputs: r0.inputs,
+      outputs: r0.outputs,
+      initialFactories: r0.initialFactories,
+      lockedFactories: [],
+      solution: r0.solution,
+      boss: { rounds },
+      likes: this.level.likes || 0,
+    };
+  }
+
   _persist() {
+    // Boss: any mutation while revisiting a prior stage invalidates the
+    // stages after it. Fire once per back-nav edit cycle.
+    this._bossOnMutate && this._bossOnMutate();
     if (this._designerMode) {
       // Mint the id synchronously so back-to-back persists don't race and
       // double-register the same level into the community index.
@@ -1189,6 +1297,9 @@ export default class EditorScene extends Phaser.Scene {
     if (this._mode !== 'blueprintSetup') return;
     const fac = this._factoryAtBoardCell(r, c);
     if (!fac) return;
+    // Boss mode: carry-over factories from earlier stages are permanently
+    // locked — tapping them should do nothing.
+    if (this._bossMode && fac.locked) return;
     if (this._blueprintAssignments.has(fac.id)) return;
     if (this._lockedFactoryIds.has(fac.id)) {
       this._lockedFactoryIds.delete(fac.id);
@@ -1900,18 +2011,40 @@ export default class EditorScene extends Phaser.Scene {
   }
 
   _buildTitleBar() {
-    // TitleBar hugs the "labels-aware" width. Editor uses the `standalone-
-    // steps` variant — three bare pills, no surrounding frame, no HOME
-    // button. The icon-island BACK slot remains the only way out.
-    if (this.titleBar) this.titleBar.destroy();
+    if (this.titleBar) { this.titleBar.destroy(); this.titleBar = null; }
+    if (this.bossPhaseIndicator) {
+      this.bossPhaseIndicator.destroy();
+      this.bossPhaseIndicator = null;
+    }
     // Use the centered stackTop so the title bar shifts with the stack
     // when the content box has vertical slack (keeps margins symmetric).
     const stackTop = this.stackTop != null
       ? this.stackTop
       : ((this.contentBox && this.contentBox.boxY) || 0);
+    const barCX = this.boardOriginX + this.boardW / 2;
+    const barCY = stackTop + TitleBar.HEIGHT / 2 + 12;
+
+    if (this._bossMode) {
+      // Boss mode: no title-bar step pills. A mid-canvas phase indicator
+      // takes the same slot — left arrow, phase label, right arrow.
+      this.bossPhaseIndicator = new BossPhaseIndicator(this, {
+        x: barCX,
+        y: barCY,
+        width: this.titleBarW,
+        height: TitleBar.HEIGHT,
+        depth: 100,
+        onNav: (delta) => this._bossNav(delta),
+      });
+      this._refreshBossIndicator();
+      return;
+    }
+
+    // TitleBar hugs the "labels-aware" width. Editor uses the `standalone-
+    // steps` variant — three bare pills, no surrounding frame, no HOME
+    // button. The icon-island BACK slot remains the only way out.
     this.titleBar = new TitleBar(this, {
-      x: this.boardOriginX + this.boardW / 2,
-      y: stackTop + TitleBar.HEIGHT / 2 + 12,
+      x: barCX,
+      y: barCY,
       width: this.titleBarW,
       levelNumber: this.level.number,
       levelName: this.level.name,
@@ -1953,6 +2086,213 @@ export default class EditorScene extends Phaser.Scene {
     ];
   }
 
+  // =====================================================================
+  //   Boss-mode phase navigation
+  // =====================================================================
+  //
+  // Flat sequence of 2N+1 positions:
+  //   0: Edit 1, 1: Blueprint 1, 2: Edit 2, 3: Blueprint 2, ... 2N: Export
+  //
+  // _bossStageIdx drives the active stage (0..N-1). The current phase within
+  // the flat sequence is derived from (_bossStageIdx * 2) + (_mode phase),
+  // then the special "export" sentinel at the end. Arrows on the indicator
+  // step ±1 through this sequence, calling _enterBlueprintSetup /
+  // _exitBlueprintSetup / _bossAdvanceToStage / _openExportPanel as needed.
+
+  _bossSeqPos() {
+    if (!this._bossMode) return 0;
+    if (this.exportPanel) return this._bossStageCount * 2;
+    const phase = this._mode === 'blueprintSetup' ? 1 : 0;
+    return this._bossStageIdx * 2 + phase;
+  }
+
+  _bossSeqLabel(pos) {
+    if (pos >= this._bossStageCount * 2) return 'Export';
+    const stage = Math.floor(pos / 2);
+    const phase = pos % 2 === 0 ? 'Edit' : 'Blueprint';
+    return `${phase} ${stage + 1} of ${this._bossStageCount}`;
+  }
+
+  _refreshBossIndicator() {
+    if (!this.bossPhaseIndicator) return;
+    const pos = this._bossSeqPos();
+    const maxPos = this._bossStageCount * 2;   // Export is at `maxPos`
+    const canBack = pos > 0;
+    // Forward depends on current-phase readiness. Edit → needs design
+    // victory. Blueprint → needs all factories slotted/locked. Export is
+    // terminal.
+    let canNext = false;
+    if (pos < maxPos) {
+      const isEdit = pos % 2 === 0;
+      if (isEdit) canNext = !!this._victoryReady;
+      else        canNext = this._blueprintExportReady && this._blueprintExportReady();
+    }
+    this.bossPhaseIndicator.setState({
+      label: this._bossSeqLabel(pos),
+      canBack,
+      canNext,
+    });
+  }
+
+  _bossNav(delta) {
+    if (!this._bossMode) return;
+    if (delta > 0) this._bossForward();
+    else           this._bossBack();
+  }
+
+  _bossForward() {
+    const pos = this._bossSeqPos();
+    const maxPos = this._bossStageCount * 2;
+    if (pos >= maxPos) return;
+    const isEdit = pos % 2 === 0;
+    if (isEdit) {
+      if (!this._victoryReady) return;
+      // Enter blueprint for the current stage — same as single-level's
+      // _enterBlueprintSetup path but keyed to boss.rounds[stageIdx].
+      this._enterBlueprintSetup();
+      this._refreshBossIndicator();
+      return;
+    }
+    // Blueprint → either advance to next stage's Edit, or open Export if
+    // this was the last stage.
+    if (!this._blueprintExportReady()) return;
+    // Snapshot this stage's blueprint+solution into boss.rounds[stageIdx].
+    this._bossSnapshotStage(this._bossStageIdx);
+    const nextStage = this._bossStageIdx + 1;
+    if (nextStage >= this._bossStageCount) {
+      // Done authoring — open export panel.
+      this._openExportPanel();
+      this._refreshBossIndicator();
+      return;
+    }
+    this._bossEnterStage(nextStage);
+    if (nextStage > this._bossMaxVisitedIdx) this._bossMaxVisitedIdx = nextStage;
+    this._refreshBossIndicator();
+  }
+
+  _bossBack() {
+    const pos = this._bossSeqPos();
+    if (pos <= 0) return;
+    const maxPos = this._bossStageCount * 2;
+    // Close the export panel if we're on it — and hop back into the last
+    // stage's Blueprint phase (since that's what preceded Export).
+    if (pos >= maxPos) {
+      if (this.exportPanel) { this.exportPanel.destroy(); this.exportPanel = null; }
+      // _bossStageIdx is still N-1; re-enter its blueprint phase. The
+      // snapshot we captured on forward-advance is still in rounds[N-1].
+      if (this._mode !== 'blueprintSetup') {
+        // The working slots were loaded via applyBossRoundToWorking when
+        // we entered stage N-1 for editing; re-snapshot solution is a
+        // no-op because the sim will re-fire victory on the next cycle.
+        this._enterBlueprintSetup();
+      }
+      this._refreshBossIndicator();
+      return;
+    }
+    const isEdit = pos % 2 === 0;
+    if (isEdit) {
+      // Back from Edit k lands on Edit k-1. We skip past Blueprint k-1
+      // because re-entering Blueprint requires the sim to re-satisfy the
+      // stage's outputs, which happens asynchronously on the next cycle —
+      // the user can tap forward once victory re-fires to revisit the
+      // blueprint slots.
+      this._bossSnapshotStage(this._bossStageIdx);
+      const prevStage = this._bossStageIdx - 1;
+      if (prevStage < 0) return;
+      this._bossEnterStage(prevStage);
+    } else {
+      // Back from Blueprint k to Edit k — same stage, just switch phase.
+      this._exitBlueprintSetup();
+    }
+    // Arrow-back into an earlier stage means later stages are pending
+    // invalidation if/when the user mutates this one.
+    this._bossNeedsInvalidation = this._bossStageIdx < this._bossMaxVisitedIdx;
+    this._refreshBossIndicator();
+  }
+
+  // Snapshot the active working slots into boss.rounds[stageIdx]. Uses
+  // whichever phase is live: in design mode we capture the canonical
+  // solution; in blueprint-setup we also capture initialFactories (the
+  // slot assignments) and the author's lockedFactoryIds choices.
+  _bossSnapshotStage(stageIdx) {
+    if (!this.level || !this.level.boss) return;
+    const rounds = this.level.boss.rounds || [];
+    const r = rounds[stageIdx];
+    if (!r) return;
+    const clone = (v) => JSON.parse(JSON.stringify(v || null));
+    if (this._mode === 'blueprintSetup') {
+      // Capture the blueprint assignments as the stage's initialFactories.
+      const initial = [];
+      for (const fac of (this._solutionSnapshot || [])) {
+        if (this._lockedFactoryIds.has(fac.id)) continue;
+        const a = this._blueprintAssignments.get(fac.id);
+        if (!a) continue;
+        initial.push({
+          id: fac.id,
+          slot: { row: a.slot.r, col: a.slot.c },
+          cells: fac.cells.map((c) => ({ ...c })),
+          funnels: (fac.funnels || []).map((f) => ({ ...f })),
+          rotation: a.rotation || 0,
+        });
+      }
+      // Border/inputs/outputs didn't change during blueprint-setup (the
+      // picker is disabled in this mode) — copy through from the working
+      // slots. Solution is the stage-own factories from the snapshot.
+      r.border = clone(this.level.border) || { funnels: [] };
+      r.inputs = clone(this.level.inputs) || [];
+      r.outputs = clone(this.level.outputs) || [];
+      r.instructionalText = this.level.instructionalText || null;
+      r.initialFactories = initial;
+      r.solution = { factories: clone(this._solutionSnapshot || []) };
+    } else {
+      // Edit-phase snapshot: level.factories has THIS stage's solution
+      // (unlocked) plus locked carry-over from prior stages. snapshotWorking
+      // filters out the locked ones.
+      snapshotWorkingToBossRound(this.level, stageIdx);
+    }
+  }
+
+  _bossEnterStage(stageIdx) {
+    // Leave blueprint-setup if we're in it (without running the
+    // solution-restore logic — boss stage changes do their own state swap).
+    if (this._mode === 'blueprintSetup') {
+      this._dismissStepAdvanceBanner && this._dismissStepAdvanceBanner();
+      if (this.exportPanel) { this.exportPanel.destroy(); this.exportPanel = null; }
+      this._blueprintAssignments = new Map();
+      this._lockedFactoryIds = new Set();
+      this._solutionSnapshot = null;
+      this._mode = 'design';
+    }
+    this._bossStageIdx = stageIdx;
+    applyBossRoundToWorking(this.level, stageIdx);
+    this._renderAll();
+    this._renderDrawGrid();
+    this._renderIconIsland();
+    this._setupIconSlotHandlers();
+    // Reset per-stage tracking — _victoryReady will re-fire on the next
+    // sim cycle if the stored solution satisfies the stage's outputs.
+    this._satisfiedOutputs && this._satisfiedOutputs.clear();
+    this._victoryReady = false;
+    this._restartSim();
+  }
+
+  // Called when the user mutates level state. In boss mode, if we're
+  // revisiting a prior stage, flip the invalidation bit: later stages get
+  // reset back to empty defaults the next time we advance past them.
+  _bossOnMutate() {
+    if (!this._bossMode) return;
+    if (this._bossStageIdx >= this._bossMaxVisitedIdx) return;
+    // First mutation on a prior stage — reset stages strictly AFTER this
+    // one and notify the user.
+    if (!this._bossNeedsInvalidation) return;
+    for (let i = this._bossStageIdx + 1; i < this._bossStageCount; i++) {
+      this.level.boss.rounds[i] = defaultBossRound(this.level.board.cols);
+    }
+    this._bossMaxVisitedIdx = this._bossStageIdx;
+    this._bossNeedsInvalidation = false;
+    this._showStepAdvanceBanner('Later stages reset — they depended on this one.');
+  }
+
   _onStepTap(key) {
     // Tapping a pill always clears its "new" highlight — whether the tap
     // actually advances mode or not (e.g. tapping a currently-active pill).
@@ -1977,6 +2317,13 @@ export default class EditorScene extends Phaser.Scene {
   //   2. Fire a 5-second banner on the same transitions so the user gets
   //      explicit "tap BLUEPRINT / EXPORT to continue" copy.
   _refreshSteps() {
+    if (this._bossMode) {
+      // Boss mode has no title-bar step pills — just refresh the mid-canvas
+      // phase indicator so forward/back arrows enable/disable live as the
+      // sim resolves outputs.
+      this._refreshBossIndicator();
+      return;
+    }
     if (!this.titleBar || !this.titleBar.setStepStates) return;
     if (!this._stepNew) this._stepNew = new Set();
     const prev = this._lastStepReachable || { blocks: true, blueprint: false, export: false };
@@ -2110,6 +2457,14 @@ export default class EditorScene extends Phaser.Scene {
       fadeTo(this, 'Home');
     });
     makeHit(SLOT_BACK, () => {
+      // BACK in boss mode steps one place back in the flat phase sequence;
+      // at the very start (Edit 1) it exits the scene.
+      if (this._bossMode) {
+        if (this._bossSeqPos() > 0) { this._bossBack(); return; }
+        this.sim && this.sim.stop();
+        fadeTo(this, this._designerMode ? 'Community' : 'Home');
+        return;
+      }
       // BACK in blueprint-setup cancels setup and restores the play area;
       // BACK anywhere else exits the scene to Community / Home.
       if (this._mode === 'blueprintSetup') { this._exitBlueprintSetup(); return; }
@@ -2119,18 +2474,37 @@ export default class EditorScene extends Phaser.Scene {
     makeHit(SLOT_HINT, () => {
       // EXPORT progression — same for sandbox and designer mode. Design +
       // victory → switch to blueprint-setup. Setup + all-slotted → open
-      // the ExportPanel.
+      // the ExportPanel. In boss mode this is a shortcut for the
+      // forward-arrow: it advances through the flat stage sequence.
+      if (this._bossMode) { this._bossForward(); return; }
       if (this._mode === 'design') {
         if (this._victoryReady) this._enterBlueprintSetup();
       } else if (this._mode === 'blueprintSetup') {
         if (this._blueprintExportReady()) this._openExportPanel();
       }
     });
-    makeHit(SLOT_SHRINK, () => { if (this._mode !== 'blueprintSetup') this._resizeBoard(-1); });
-    makeHit(SLOT_GROW,   () => { if (this._mode !== 'blueprintSetup') this._resizeBoard(+1); });
+    // Board resize is disabled in boss mode past stage 1 (size is locked
+    // the moment the user advances past the first stage) and in any
+    // blueprint-setup phase.
+    makeHit(SLOT_SHRINK, () => {
+      if (this._mode === 'blueprintSetup') return;
+      if (this._bossMode && this._bossMaxVisitedIdx > 0) return;
+      this._resizeBoard(-1);
+    });
+    makeHit(SLOT_GROW, () => {
+      if (this._mode === 'blueprintSetup') return;
+      if (this._bossMode && this._bossMaxVisitedIdx > 0) return;
+      this._resizeBoard(+1);
+    });
     makeHit(SLOT_CLEAR, () => {
       if (this._mode === 'blueprintSetup') return;
-      this.level.factories = [];
+      // CLEAR only removes THIS stage's own factories in boss mode —
+      // locked carry-over from prior stages is preserved.
+      if (this._bossMode) {
+        this.level.factories = (this.level.factories || []).filter((f) => f.locked);
+      } else {
+        this.level.factories = [];
+      }
       this._persist();
       this._renderAll();
       this._restartSim();
@@ -2147,6 +2521,19 @@ export default class EditorScene extends Phaser.Scene {
     this.level.board.rows = dim;
     this.level.board.cols = dim;
     seedDefaultFunnels(this.level);
+    // Boss mode (only reachable at stage 0): also reseed every stage's
+    // stored round so later stages' funnel positions stay valid at the new
+    // board size. Since resize wipes factories anyway, replacing the
+    // downstream rounds with fresh defaults is a reasonable reset.
+    if (this._bossMode && this.level.boss && Array.isArray(this.level.boss.rounds)) {
+      for (let i = 0; i < this.level.boss.rounds.length; i++) {
+        this.level.boss.rounds[i] = defaultBossRound(dim);
+      }
+      applyBossRoundToWorking(this.level, 0);
+      this._bossMaxVisitedIdx = 0;
+      this._bossStageIdx = 0;
+      this._bossNeedsInvalidation = false;
+    }
     this.draftCells = [];
     this.draftFunnels = [];
     this._persist();

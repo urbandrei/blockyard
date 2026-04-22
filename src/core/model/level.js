@@ -23,8 +23,13 @@
 //                                                      //   top row of the player's blueprint.
 //                                                      //   When present, that row is reserved
 //                                                      //   and rejects factory placements.
-//     boss?: { rounds: BossRound[] },                  // optional 3-round boss config — see
-//                                                      //   PlayerScene.bossRoundLevel().
+//     boss?: { rounds: BossRound[] },                  // optional N-round boss config (N=2..5)
+//                                                      //   read at runtime by PlayerScene.bossRoundLevel().
+//                                                      //   Each round has { border, inputs, outputs,
+//                                                      //   initialFactories, instructionalText?,
+//                                                      //   solution: { factories } }. `solution` is
+//                                                      //   editor-only metadata (the authored canonical
+//                                                      //   layout for review); PlayerScene ignores it.
 //   }
 //
 // PartialShapeType:  { form } | { color } | { form, color }
@@ -77,6 +82,108 @@ export function defaultLevel() {
   };
   seedDefaultFunnels(level);
   return level;
+}
+
+/** Default boss level with N stages (2..5). Board/name are shared across
+ *  stages; per-stage border/inputs/outputs get the same default seed as a
+ *  fresh sandbox so each stage has a ready input→output pair to edit. */
+export function defaultBossLevel(stageCount) {
+  const n = Math.max(2, Math.min(5, stageCount | 0));
+  const dim = 6;
+  const level = {
+    board: { cols: dim, rows: dim },
+    name: 'Sandbox Boss',
+    number: 0,
+    factories: [],
+    initialFactories: [],
+    lockedFactories: [],
+    border: { funnels: [] },
+    inputs: [],
+    outputs: [],
+    instructionalText: null,
+    boss: { rounds: [] },
+  };
+  for (let i = 0; i < n; i++) {
+    level.boss.rounds.push(defaultBossRound(dim));
+  }
+  // Load round 0 into the active working slots so the editor opens on stage 1.
+  applyBossRoundToWorking(level, 0);
+  return level;
+}
+
+/** One empty boss round seeded with the default input/output pair. */
+export function defaultBossRound(dim) {
+  const mid = Math.floor(dim / 2);
+  const lastRow = dim - 1;
+  return {
+    border: {
+      funnels: [
+        { r: 0,       c: mid, side: 'bottom', role: 'input'  },
+        { r: lastRow, c: mid, side: 'top',    role: 'output' },
+      ],
+    },
+    inputs:  [{ r: 0,       c: mid, side: 'bottom', type: { ...DEFAULT_SHAPE_TYPE } }],
+    outputs: [{ r: lastRow, c: mid, side: 'top',    type: { ...DEFAULT_SHAPE_TYPE } }],
+    initialFactories: [],
+    instructionalText: null,
+    solution: { factories: [] },
+  };
+}
+
+/** Copy a boss round's data into the top-level working slots (border/inputs/
+ *  outputs/initialFactories/factories/instructionalText) that the editor UI
+ *  operates on. The factories on the active board are taken from the round's
+ *  `solution.factories` (the stage's canonical authored layout). Cumulative
+ *  lock carry from earlier stages' solutions is baked in as `locked:true`. */
+export function applyBossRoundToWorking(level, roundIdx) {
+  const rounds = (level.boss && level.boss.rounds) || [];
+  const r = rounds[roundIdx];
+  if (!r) return;
+  // Deep clone so edits to working state don't mutate the stored round until
+  // we explicitly snapshot back.
+  const clone = (v) => JSON.parse(JSON.stringify(v || null));
+  level.border = clone(r.border) || { funnels: [] };
+  level.inputs = clone(r.inputs) || [];
+  level.outputs = clone(r.outputs) || [];
+  level.initialFactories = clone(r.initialFactories) || [];
+  level.instructionalText = r.instructionalText || null;
+  const cumulativeLocked = [];
+  for (let i = 0; i < roundIdx; i++) {
+    const prior = rounds[i];
+    const sf = (prior && prior.solution && prior.solution.factories) || [];
+    for (const f of sf) {
+      const fc = clone(f);
+      fc.locked = true;
+      cumulativeLocked.push(fc);
+    }
+  }
+  const ownFactories = clone((r.solution && r.solution.factories) || []);
+  for (const f of ownFactories) f.locked = false;
+  level.factories = [...cumulativeLocked, ...ownFactories];
+  level.lockedFactories = []; // cumulative lock is on factories with locked:true
+}
+
+/** Snapshot the editor's active working slots back into boss.rounds[roundIdx].
+ *  The `solution.factories` captures only the non-locked factories (the ones
+ *  authored in THIS stage, not the cumulative carry). */
+export function snapshotWorkingToBossRound(level, roundIdx) {
+  const rounds = (level.boss && level.boss.rounds) || [];
+  const r = rounds[roundIdx];
+  if (!r) return;
+  const clone = (v) => JSON.parse(JSON.stringify(v || null));
+  r.border = clone(level.border) || { funnels: [] };
+  r.inputs = clone(level.inputs) || [];
+  r.outputs = clone(level.outputs) || [];
+  r.initialFactories = clone(level.initialFactories) || [];
+  r.instructionalText = level.instructionalText || null;
+  const ownFactories = (level.factories || [])
+    .filter((f) => !f.locked)
+    .map((f) => {
+      const c = clone(f);
+      delete c.locked;
+      return c;
+    });
+  r.solution = { factories: ownFactories };
 }
 
 /** Reset the level's funnel/factory state to a single blue-circle input at
