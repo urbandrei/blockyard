@@ -13,6 +13,8 @@ import { ShapeRenderer } from '../render/ShapeRenderer.js';
 import { FunnelParticleSystem, collectFunnelsForParticles, collectFactoryFunnelsForParticles } from '../render/FunnelParticleSystem.js';
 import { BufferMarkerRenderer } from '../render/BufferMarkerRenderer.js';
 import { TitleBar } from '../ui/TitleBar.js';
+import { HintConfirmModal } from '../ui/HintConfirmModal.js';
+import { HintNudgePopup } from '../ui/HintNudgePopup.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
 import { compute920Box } from '../ui/ContentBox.js';
 import { Simulation } from '../sim/Simulation.js';
@@ -123,6 +125,9 @@ export default class PlayerScene extends Phaser.Scene {
     this._renderBlueprint();
     this._renderIconIsland();
     this._buildToolbar();
+    // Toolbar was just (re)built — the earlier _renderAll/_renderBlueprint
+    // calls couldn't update the hint button because it didn't exist yet.
+    this._updateHintButtonState();
 
     wireLetterboxChecker(this, () => ({
       pxCell: this.pxCell,
@@ -169,9 +174,13 @@ export default class PlayerScene extends Phaser.Scene {
     this._onScaleResize = () => this._relayoutForViewport();
     this.scale.on('resize', this._onScaleResize);
 
+    this._startStuckPopupTimer();
+
     this.events.on('shutdown', () => {
       this.sim && this.sim.stop();
       this.dragCtrl && this.dragCtrl.destroy();
+      this._resetStuckPopup();
+      if (this._hintModal) { this._hintModal.destroy(); this._hintModal = null; }
       this._teardownBlueprintPlayButtons();
       if (this.factoryFunnelParticles) { this.factoryFunnelParticles.destroy(); this.factoryFunnelParticles = null; }
       if (this.borderFunnelParticles)  { this.borderFunnelParticles.destroy();  this.borderFunnelParticles  = null; }
@@ -334,6 +343,7 @@ export default class PlayerScene extends Phaser.Scene {
         funnels: rot.funnels,
         converter: p.converter,
         locked: p.locked,
+        rotation: p.rotation || 0,
       });
     }
     return {
@@ -476,6 +486,7 @@ export default class PlayerScene extends Phaser.Scene {
     this.bufferLabelWraps = renderBufferLabels(this, this.labelContainer, lvl, {
       pxCell: this.pxCell, pxGap: BOARD_GAP,
     });
+    this._updateHintButtonState();
   }
 
   _drawFactory(factory) {
@@ -495,6 +506,7 @@ export default class PlayerScene extends Phaser.Scene {
       cells: absCells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
       converter: factory.converter,
       caution: isObstacleFactory(factory.funnels),
+      rotation: factory.rotation || 0,
     });
     body.setPosition(-cx, -cy);
     // Locked-only decoration: full-cell floor tint on boardContainer so
@@ -652,6 +664,7 @@ export default class PlayerScene extends Phaser.Scene {
     } else if (this._blueprintButtonsVisible) {
       this._hideBlueprintPlayButtons(true);
     }
+    this._updateHintButtonState();
   }
 
   _showBlueprintPlayButtons(dgW, dgH, animateEntry) {
@@ -818,6 +831,7 @@ export default class PlayerScene extends Phaser.Scene {
       cells: cellsLocal, pxCell: slotPx, pxGap: 0, scale: SHAPE_SCALE,
       converter: def.converter,
       caution: isObstacleFactory(funnelsLocal),
+      rotation: def.rotation || 0,
     });
     body.setPosition(-cx, -cy);
     if (isTop) {
@@ -924,9 +938,485 @@ export default class PlayerScene extends Phaser.Scene {
       author: this.sourceLevel.author,
       rightButton: {
         kind: 'hint',
-        onTap: () => { console.log('[hint] stub'); },
+        onTap: () => this._openHintModal(),
       },
     });
+  }
+
+  // ===================================================================
+  //   Hint system
+  // ===================================================================
+
+  // Return the canonical solution factories for the current context.
+  //   - Boss level, round i → _sourceLevelOriginal.boss.rounds[i].solution.factories
+  //   - Single level (catalog / community authored) → sourceLevel.solution.factories
+  //   - Legacy community fallback → sourceLevel.factories (pre-placed board state)
+  // Each entry is { id, anchor:{row,col}, cells, funnels, converter? }.
+  //
+  // IMPORTANT: `cells` + `funnels` on a solution entry are the CANONICAL
+  // (rotation-0) layout — the same arrays that `initialFactories[i]` carries
+  // for the blueprint. To place the factory correctly, rotation must be 0.
+  _currentSolutionFactories() {
+    if (this._sourceLevelOriginal && this._sourceLevelOriginal.boss && this._bossState) {
+      const r = this._sourceLevelOriginal.boss.rounds[this._bossState.roundIdx];
+      return (r && r.solution && r.solution.factories) || [];
+    }
+    const sol = this.sourceLevel && this.sourceLevel.solution && this.sourceLevel.solution.factories;
+    if (sol && sol.length) return sol;
+    return (this.sourceLevel && this.sourceLevel.factories) || [];
+  }
+
+  // Pick ONE factory to auto-place / reposition:
+  //   1. Fix any placed factory whose anchor OR rotation doesn't match its
+  //      solution. If the target FOOTPRINT overlaps other placed factories,
+  //      every such factory is recorded as a blocker so we return them to
+  //      the blueprint first.
+  //   2. Otherwise, take a random blueprint factory whose target footprint
+  //      is clear (or only obstructed by displaceable blockers).
+  // Returns { factoryId, from:'board'|'blueprint', toCell:{row,col}, blockerIds:[] }
+  // or null if nothing can be helped.
+  _hintTargetPlan() {
+    const solution = this._currentSolutionFactories();
+    if (!solution.length) return null;
+    const solById = new Map();
+    for (const sf of solution) if (sf.id) solById.set(sf.id, sf);
+
+    // Absolute cells occupied by a placed factory (rotated footprint).
+    const absCellsOf = (p) => {
+      const rot = rotateFactoryShape({ cells: p.baseCells, funnels: p.baseFunnels }, p.rotation || 0);
+      return rot.cells.map((cc) => `${p.anchor.row + cc.r},${p.anchor.col + cc.c}`);
+    };
+
+    // For a factory that will land at `anchor` with its base cells
+    // (rotation 0 = solution rotation), list every placed factory whose
+    // current footprint intersects the target footprint. Skip the factory
+    // being moved itself, and skip locked factories (they'd be uncovered
+    // as not-displaceable — if a locked factory blocks the solution cell,
+    // something else is wrong and this candidate is unreachable).
+    const blockersFor = (factoryId, anchor, baseCells) => {
+      const target = new Set(
+        baseCells.map((cc) => `${anchor.row + cc.r},${anchor.col + cc.c}`),
+      );
+      const blockers = [];
+      let lockedBlocker = false;
+      for (const p of this.placed.values()) {
+        if (p.id === factoryId) continue;
+        const cells = absCellsOf(p);
+        const intersects = cells.some((k) => target.has(k));
+        if (!intersects) continue;
+        if (p.locked) { lockedBlocker = true; continue; }
+        // A blocker is only displaceable if it has a blueprint slot to
+        // return to. Pre-placed community factories (no blueprint entry)
+        // can't be moved by the hint system — treat as a hard block so
+        // this candidate is skipped.
+        if (!this.blueprintFactories.has(p.id)) { lockedBlocker = true; continue; }
+        blockers.push(p.id);
+      }
+      return { blockers, lockedBlocker };
+    };
+
+    // Board-fix priority.
+    const misplaced = [];
+    for (const p of this.placed.values()) {
+      if (p.locked) continue;
+      const sf = solById.get(p.id);
+      if (!sf) continue;
+      const anchorOk = p.anchor.row === sf.anchor.row && p.anchor.col === sf.anchor.col;
+      const rotOk = (p.rotation || 0) === 0;
+      if (anchorOk && rotOk) continue;
+      misplaced.push({ placed: p, solution: sf });
+    }
+    if (misplaced.length) {
+      const pick = misplaced[Math.floor(Math.random() * misplaced.length)];
+      const { blockers, lockedBlocker } = blockersFor(
+        pick.placed.id, pick.solution.anchor, pick.solution.cells,
+      );
+      if (lockedBlocker) {
+        // Target blocked by a locked factory — can't help this one. Try
+        // another misplaced pick if any; otherwise fall through to blueprint.
+        const others = misplaced.filter((m) => m !== pick);
+        for (const alt of others) {
+          const r = blockersFor(alt.placed.id, alt.solution.anchor, alt.solution.cells);
+          if (!r.lockedBlocker) {
+            return {
+              factoryId: alt.placed.id,
+              from: 'board',
+              toCell: { row: alt.solution.anchor.row, col: alt.solution.anchor.col },
+              blockerIds: r.blockers,
+            };
+          }
+        }
+      } else {
+        return {
+          factoryId: pick.placed.id,
+          from: 'board',
+          toCell: { row: pick.solution.anchor.row, col: pick.solution.anchor.col },
+          blockerIds: blockers,
+        };
+      }
+    }
+
+    // Blueprint-to-board.
+    const candidates = [];
+    for (const def of this.blueprintFactories.values()) {
+      const sf = solById.get(def.id);
+      if (!sf) continue;
+      const { blockers, lockedBlocker } = blockersFor(def.id, sf.anchor, sf.cells);
+      if (lockedBlocker) continue;
+      candidates.push({ def, sf, blockerIds: blockers });
+    }
+    if (!candidates.length) return null;
+    // Prefer candidates with no blockers so the easy win happens first.
+    candidates.sort((a, b) => a.blockerIds.length - b.blockerIds.length);
+    const easyCount = candidates.filter((c) => c.blockerIds.length === 0).length;
+    const pool = easyCount > 0 ? candidates.slice(0, easyCount) : candidates;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    return {
+      factoryId: pick.def.id,
+      from: 'blueprint',
+      toCell: { row: pick.sf.anchor.row, col: pick.sf.anchor.col },
+      blockerIds: pick.blockerIds,
+    };
+  }
+
+  // Check whether the hint button should currently be enabled. It's
+  // disabled when there's nothing left to do — i.e. every solution factory
+  // is already in its correct spot AND there are no misplaced pieces on
+  // the board. Also disabled when the level carries no solution data
+  // (early campaign levels with an empty solution array).
+  _updateHintButtonState() {
+    if (!this.titleBar || !this.titleBar.setRightButtonEnabled) return;
+    const plan = this._hintTargetPlan();
+    this.titleBar.setRightButtonEnabled(!!plan);
+  }
+
+  _openHintModal() {
+    if (this._hintModal || this._hintTweenBusy) return;
+    if (this.simState !== 'idle' || this.victory) return;
+    // Guard: if no hint is possible, the button should have been greyed
+    // out already — but a stale tap could still land here. Short-circuit.
+    if (!this._hintTargetPlan()) return;
+    // Dismiss a live nudge popup before showing the modal so the two don't
+    // stack visually, and cut the gentle flash — the player is already
+    // engaging with the hint flow.
+    if (this._stuckPopup) { this._stuckPopup.destroy(); this._stuckPopup = null; }
+    this._stopHintButtonGlow();
+    this._hintModal = new HintConfirmModal(this, {
+      onConfirm: () => { this._hintModal = null; this._applyHint(); },
+      onCancel:  () => { this._hintModal = null; },
+    });
+  }
+
+  _applyHint() {
+    const plan = this._hintTargetPlan();
+    if (!plan) return;
+    this._hintTweenBusy = true;
+    // Rotation-then-move for the target. Blocker returns are NOT queued
+    // up-front — they fire in parallel with the target's slide phase (see
+    // onBeforeSlide). Keeping blockers in place during the rotation phase
+    // makes it clearer to the player what's moving where.
+    this._tweenToSolutionCell(
+      plan.factoryId, plan.from, plan.toCell,
+      () => { this._hintTweenBusy = false; },
+      {
+        onBeforeSlide: () => {
+          for (const blockerId of (plan.blockerIds || [])) {
+            this._tweenPlacedToBlueprint(blockerId);
+          }
+        },
+      },
+    );
+  }
+
+  // Return the world-coord center of the blueprint slot at {r, c}.
+  _blueprintSlotWorldCenter(slotR, slotC) {
+    const slotPx = this.slotPx;
+    return {
+      x: this.blueprintOriginX + slotC * slotPx + slotPx / 2,
+      y: this.blueprintOriginY + slotR * slotPx + slotPx / 2,
+    };
+  }
+
+  // Return the world-coord center-of-rotated-factory for a board placement
+  // at anchor {row, col}, given the factory's rotated cells.
+  _boardCellFactoryWorldCenter(anchor, rotCells) {
+    const absCells = rotCells.map((cc) => ({ r: anchor.row + cc.r, c: anchor.col + cc.c }));
+    const [cx, cy] = factoryCenter(absCells, this.pxCell, BOARD_GAP);
+    return { x: this.boardOriginX + cx, y: this.boardOriginY + cy };
+  }
+
+  // Build a detached ghost container (body + funnels + flow + particles) for a
+  // factory at the given world position. Returns { root, destroy }. The ghost
+  // lives in this.ghostContainer so it sits above the board/blueprint.
+  _buildHintGhost({ worldX, worldY, baseCells, baseFunnels, rotation, converter }) {
+    const rot = rotateFactoryShape({ cells: baseCells, funnels: baseFunnels }, rotation);
+    const [lcx, lcy] = factoryCenter(rot.cells, this.pxCell, BOARD_GAP);
+    const root = this.add.container(worldX - lcx, worldY - lcy);
+    root.setDepth(70);
+    // Particles first so they render behind body+funnels.
+    const particles = new FunnelParticleSystem(this, root, { pxCell: this.pxCell });
+    particles.setFunnels(
+      collectFactoryFunnelsForParticles(rot.cells, rot.funnels, this.pxCell, BOARD_GAP, SHAPE_SCALE),
+    );
+    const funnelWrap = this.add.container(lcx, lcy);
+    const bodyWrap   = this.add.container(lcx, lcy);
+    root.add(funnelWrap);
+    root.add(bodyWrap);
+    const fns = renderFunnels(this, funnelWrap, rot.funnels, {
+      pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
+    });
+    fns.setPosition(-lcx, -lcy);
+    const body = renderFactoryBody(this, bodyWrap, {
+      cells: rot.cells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
+      converter, caution: isObstacleFactory(rot.funnels),
+      rotation,
+    });
+    body.setPosition(-lcx, -lcy);
+    return {
+      root,
+      bodyWrap, funnelWrap,
+      body,
+      lcx, lcy,
+      rotCells: rot.cells,
+      destroy: () => {
+        particles.destroy();
+        root.destroy(true);
+      },
+    };
+  }
+
+  // Tween the blocker factory from its current board position back to its
+  // default blueprint slot. On complete, update state so the factory is in
+  // the blueprint and re-render.
+  _tweenPlacedToBlueprint(blockerId, done) {
+    const p = this.placed.get(blockerId);
+    const def = this.blueprintFactories.get(blockerId);
+    if (!p || !def) { done && done(); return; }
+    const rotCells = rotateFactoryShape({ cells: p.baseCells, funnels: p.baseFunnels }, p.rotation).cells;
+    const startCenter = this._boardCellFactoryWorldCenter(p.anchor, rotCells);
+    const slot = def.defaultSlot || def.slot || { r: 0, c: 0 };
+    const slotCenter = this._blueprintSlotWorldCenter(slot.r, slot.c);
+
+    const ghost = this._buildHintGhost({
+      worldX: startCenter.x, worldY: startCenter.y,
+      baseCells: p.baseCells, baseFunnels: p.baseFunnels,
+      rotation: p.rotation, converter: p.converter,
+    });
+
+    // Remove from board state + re-render (the live factory disappears;
+    // ghost visually takes over during the tween).
+    this.placed.delete(blockerId);
+    this._renderAll();
+
+    const [lcx, lcy] = factoryCenter(ghost.rotCells, this.pxCell, BOARD_GAP);
+    this.tweens.add({
+      targets: ghost.root,
+      x: slotCenter.x - lcx,
+      y: slotCenter.y - lcy,
+      duration: 320,
+      ease: 'Sine.InOut',
+      onComplete: () => {
+        ghost.destroy();
+        def.slot = { ...slot };
+        def.rotation = p.rotation;
+        this._pushToSlot(def.slot, blockerId);
+        this._renderBlueprint();
+        this._renderIconIsland();
+        done && done();
+      },
+    });
+  }
+
+  // Tween a factory (blueprint or board) into its solution cell on the
+  // board. Solution cells/funnels are the canonical (rotation-0) layout,
+  // so the correct placement is always `rotation = 0`.
+  //
+  // Animation sequence:
+  //   1. Build the ghost at the factory's CURRENT rotation, sitting on top
+  //      of the original source location.
+  //   2. Animate one 90° quarter-turn at a time (shortest path, CW or CCW),
+  //      with a short pause between turns so the player can read each step.
+  //   3. Once rotation is 0, slide the ghost from its source to the target
+  //      cell. On complete, write state + re-render.
+  _tweenToSolutionCell(factoryId, from, toCell, done, opts = {}) {
+    let baseCells, baseFunnels, converter, startCenter, startRotation;
+    if (from === 'board') {
+      const p = this.placed.get(factoryId);
+      if (!p) { done && done(); return; }
+      baseCells = p.baseCells; baseFunnels = p.baseFunnels;
+      converter = p.converter; startRotation = p.rotation || 0;
+      const rotCells = rotateFactoryShape({ cells: baseCells, funnels: baseFunnels }, startRotation).cells;
+      startCenter = this._boardCellFactoryWorldCenter(p.anchor, rotCells);
+      this.placed.delete(factoryId);
+      this._renderAll();
+    } else {
+      const def = this.blueprintFactories.get(factoryId);
+      if (!def) { done && done(); return; }
+      baseCells = def.baseCells; baseFunnels = def.baseFunnels;
+      converter = def.converter; startRotation = def.rotation || 0;
+      startCenter = this._blueprintSlotWorldCenter(def.slot.r, def.slot.c);
+      this._popFromSlot(def.slot);
+      this._renderBlueprint();
+    }
+
+    // Ghost at the ORIGINAL rotation so the first frame of the animation
+    // matches what the player just saw.
+    const ghost = this._buildHintGhost({
+      worldX: startCenter.x, worldY: startCenter.y,
+      baseCells, baseFunnels, rotation: startRotation, converter,
+    });
+
+    const targetRotation = 0;
+    // Shortest rotation path: CW or CCW, whichever costs fewer 90° steps.
+    const cwSteps  = ((targetRotation - startRotation) % 4 + 4) % 4;
+    const ccwSteps = ((startRotation - targetRotation) % 4 + 4) % 4;
+    const useCW = cwSteps <= ccwSteps;
+    const steps = useCW ? cwSteps : ccwSteps;
+    const stepRad = (useCW ? 1 : -1) * (Math.PI / 2);
+
+    const ROT_DUR = 240;     // per-step tween duration
+    const ROT_PAUSE = 180;   // pause between steps
+    const MOVE_DUR = 420;
+
+    const finalize = () => {
+      ghost.destroy();
+      this.placed.set(factoryId, {
+        id: factoryId,
+        source: 'initial',
+        anchor: { row: toCell.row, col: toCell.col },
+        rotation: targetRotation,
+        baseCells, baseFunnels, converter,
+        locked: false,
+      });
+      // Keep the blueprint-side rotation in sync so if the player later
+      // picks the factory back up, it doesn't revert to an odd orientation.
+      const def = this.blueprintFactories.get(factoryId);
+      if (def) def.rotation = targetRotation;
+      this._renderAll();
+      this._renderBlueprint();
+      this._renderIconIsland();
+      done && done();
+    };
+
+    const slideToTarget = () => {
+      // Kick off any "blockers-return-to-blueprint" animations now, so they
+      // fly out of the way in parallel with the target sliding in.
+      if (opts.onBeforeSlide) opts.onBeforeSlide();
+      // Recompute target-side factory center using the SOLUTION rotation's
+      // cells (rotation 0), since that's the layout we'll render on drop.
+      const finalRot = rotateFactoryShape({ cells: baseCells, funnels: baseFunnels }, targetRotation);
+      const endCenter = this._boardCellFactoryWorldCenter(
+        { row: toCell.row, col: toCell.col },
+        finalRot.cells,
+      );
+      // The ghost root sits at (worldX - startLcx, worldY - startLcy). The
+      // visual pivot (wrap origin) is at root + (startLcx, startLcy) in
+      // world coords. To land the pivot on endCenter we shift root by
+      // (endCenter - startLcx, endCenter - startLcy) — same offset rule
+      // the builder used for the initial position.
+      this.tweens.add({
+        targets: ghost.root,
+        x: endCenter.x - ghost.lcx,
+        y: endCenter.y - ghost.lcy,
+        duration: MOVE_DUR,
+        ease: 'Cubic.InOut',
+        onComplete: finalize,
+      });
+    };
+
+    if (steps === 0) { slideToTarget(); return; }
+
+    let stepIdx = 0;
+    const ghostLabels = (ghost.body && ghost.body.labels) || [];
+    const doNextRotation = () => {
+      if (stepIdx >= steps) { slideToTarget(); return; }
+      this.tweens.add({
+        targets: [ghost.bodyWrap, ghost.funnelWrap],
+        rotation: `+=${stepRad}`,
+        duration: ROT_DUR,
+        ease: 'Sine.InOut',
+        onComplete: () => {
+          stepIdx++;
+          if (stepIdx >= steps) slideToTarget();
+          else this.time.delayedCall(ROT_PAUSE, doNextRotation);
+        },
+      });
+      if (ghostLabels.length) {
+        this.tweens.add({
+          targets: ghostLabels,
+          rotation: `-=${stepRad}`,
+          duration: ROT_DUR,
+          ease: 'Sine.InOut',
+        });
+      }
+    };
+    doNextRotation();
+  }
+
+  _startHintButtonGlow() {
+    if (this.titleBar && this.titleBar.startGentleFlash) this.titleBar.startGentleFlash();
+  }
+
+  _stopHintButtonGlow() {
+    if (this.titleBar && this.titleBar.stopGentleFlash) this.titleBar.stopGentleFlash();
+  }
+
+  // ===================================================================
+  //   Stuck-popup timer
+  // ===================================================================
+
+  // How long to wait (ms) before firing the first "Need a hand?" popup
+  // on the current level. Null → never fire (community levels).
+  _stuckPopupFirstDelayMs() {
+    // Community levels arrive via CommunityScene with no catalog number —
+    // skip the nudge there so imported/local levels don't nag the player.
+    const isCommunity = this.sourceLevel && (
+      this.sourceLevel.origin === 'local' || this.sourceLevel.origin === 'imported'
+    );
+    if (isCommunity) return null;
+    if (this._sourceLevelOriginal && this._sourceLevelOriginal.boss) return 60000;
+    const n = this.sourceLevel && this.sourceLevel.number;
+    if (typeof n !== 'number' || n <= 0) return null;  // sandbox or untagged
+    if (n >= 10) return 60000;
+    return 30000;
+  }
+
+  _startStuckPopupTimer() {
+    this._resetStuckPopup();
+    const first = this._stuckPopupFirstDelayMs();
+    if (first == null) return;
+    this._scheduleStuckPopup(first);
+  }
+
+  _scheduleStuckPopup(delayMs) {
+    this._stuckTimerEvent = this.time.delayedCall(delayMs, () => {
+      this._stuckTimerEvent = null;
+      // Suppress when a modal is up or the level is already beaten — just
+      // reschedule so the player gets nudged again next interval.
+      if (this.victory || this._hintModal || this._stuckPopup || this.simState === 'running') {
+        this._scheduleStuckPopup(300000);
+        return;
+      }
+      const anchor = this.titleBar && this.titleBar.getRightButtonCenter();
+      if (!anchor) { this._scheduleStuckPopup(300000); return; }
+      const anchorBottomY = anchor.y + TitleBar.HEIGHT / 2;
+      this._stuckPopup = new HintNudgePopup(this, {
+        anchorX: anchor.x, anchorY: anchorBottomY,
+        onDismiss: () => {
+          this._stuckPopup = null;
+          this._stopHintButtonGlow();
+          this._scheduleStuckPopup(300000);
+        },
+      });
+      // Kick off the gentle hint-button pulse the moment the popup appears
+      // so the player's eye is drawn from popup → button in one glance.
+      this._startHintButtonGlow();
+    });
+  }
+
+  _resetStuckPopup() {
+    if (this._stuckTimerEvent) { this._stuckTimerEvent.remove(false); this._stuckTimerEvent = null; }
+    if (this._stuckPopup) { this._stuckPopup.destroy(); this._stuckPopup = null; }
   }
 
   // ===================================================================
@@ -1070,6 +1560,7 @@ export default class PlayerScene extends Phaser.Scene {
   _canDrag(info) {
     if (!info) return false;
     if (this.simState !== 'idle' || this.victory) return false;
+    if (this._hintTweenBusy || this._rotateTweenBusy) return false;
     if (info.kind === 'board') return !!this._placedAtBoardCell(info.r, info.c);
     if (info.kind === 'blueprint') return !!this._findBlueprintFactoryAt(info.r, info.c);
     return false;
@@ -1078,6 +1569,7 @@ export default class PlayerScene extends Phaser.Scene {
   _onTapCell(info) {
     if (!info) return;
     if (this.simState !== 'idle' || this.victory) return;
+    if (this._rotateTweenBusy || this._hintTweenBusy) return;
     if (info.kind === 'board') {
       const placed = this._placedAtBoardCell(info.r, info.c);
       if (placed) this._rotatePlaced(placed);
@@ -1119,14 +1611,122 @@ export default class PlayerScene extends Phaser.Scene {
   _rotatePlaced(p) {
     const newRot = (p.rotation + 1) % 4;
     const rot = rotateFactoryShape({ cells: p.baseCells, funnels: p.baseFunnels }, newRot);
-    if (!this._cellsFitOnBoard(p.anchor.row, p.anchor.col, rot.cells, p.id)) return;
-    p.rotation = newRot;
-    this._renderAll();
+    const ref = this.factoryRefs.get(p.id);
+    if (!this._cellsFitOnBoard(p.anchor.row, p.anchor.col, rot.cells, p.id)) {
+      if (ref) this._shakeRefusal([ref.bodyWrap, ref.funnelWrap], (ref.body && ref.body.labels) || []);
+      return;
+    }
+    if (!ref || !ref.bodyWrap || !ref.funnelWrap) {
+      p.rotation = newRot;
+      this._renderAll();
+      return;
+    }
+    const newAbsCells = rot.cells.map((cc) => ({
+      ...cc, r: p.anchor.row + cc.r, c: p.anchor.col + cc.c,
+    }));
+    const [newCx, newCy] = factoryCenter(newAbsCells, this.pxCell, BOARD_GAP);
+    this._rotateTweenBusy = true;
+    this.tweens.add({
+      targets: [ref.bodyWrap, ref.funnelWrap],
+      rotation: `+=${Math.PI / 2}`,
+      x: newCx,
+      y: newCy,
+      duration: 220,
+      ease: 'Sine.InOut',
+      onComplete: () => {
+        p.rotation = newRot;
+        this._rotateTweenBusy = false;
+        this._renderAll();
+      },
+    });
+    // Counter-rotate the cell labels so their glyphs stay upright even
+    // while their position rotates around the bodyWrap origin.
+    const labels = (ref.body && ref.body.labels) || [];
+    if (labels.length) {
+      this.tweens.add({
+        targets: labels,
+        rotation: `-=${Math.PI / 2}`,
+        duration: 220,
+        ease: 'Sine.InOut',
+      });
+    }
   }
 
   _rotateBlueprint(def) {
-    def.rotation = (def.rotation + 1) % 4;
-    this._renderBlueprint();
+    const ref = this.blueprintRefs.get(def.id);
+    if (!ref || !ref.bodyWrap || !ref.funnelWrap) {
+      def.rotation = (def.rotation + 1) % 4;
+      this._renderBlueprint();
+      return;
+    }
+    const newRot = (def.rotation + 1) % 4;
+    const rot = rotateFactoryShape({ cells: def.baseCells, funnels: def.baseFunnels }, newRot);
+    const slotPx = this.slotPx;
+    const cellsLocal = rot.cells.map((c) => ({ ...c }));
+    const [cx, cy] = factoryCenter(cellsLocal, slotPx, 0);
+    const newWrapX = def.slot.c * slotPx + cx;
+    const newWrapY = def.slot.r * slotPx + cy;
+    this._rotateTweenBusy = true;
+    this.tweens.add({
+      targets: [ref.bodyWrap, ref.funnelWrap],
+      rotation: `+=${Math.PI / 2}`,
+      x: newWrapX,
+      y: newWrapY,
+      duration: 220,
+      ease: 'Sine.InOut',
+      onComplete: () => {
+        def.rotation = newRot;
+        this._rotateTweenBusy = false;
+        this._renderBlueprint();
+      },
+    });
+    const labels = (ref.body && ref.body.labels) || [];
+    if (labels.length) {
+      this.tweens.add({
+        targets: labels,
+        rotation: `-=${Math.PI / 2}`,
+        duration: 220,
+        ease: 'Sine.InOut',
+      });
+    }
+  }
+
+  // Rotational wobble played when a rotation can't fit on the board —
+  // reads as "the factory tried to turn and bounced back". Wobbles the
+  // bodyWrap + funnelWrap rotation by a small angle, yoyoed a few times.
+  // Labels (if provided) counter-wobble so their glyphs stay upright.
+  _shakeRefusal(targets, labels = []) {
+    if (!targets || !targets.length) return;
+    if (this._rotateTweenBusy) return;
+    this._rotateTweenBusy = true;
+    const amp = 0.12;   // ~6.9° — just enough to read as a wobble
+    const startRots = targets.map((t) => t.rotation || 0);
+    const startLblRots = labels.map((l) => l.rotation || 0);
+    this.tweens.add({
+      targets,
+      rotation: `+=${amp}`,
+      duration: 55,
+      yoyo: true,
+      repeat: 2,         // ~330ms total: 3 forward + 3 yoyo at 55ms each
+      ease: 'Sine.InOut',
+      onComplete: () => {
+        for (let i = 0; i < targets.length; i++) targets[i].rotation = startRots[i];
+        this._rotateTweenBusy = false;
+      },
+    });
+    if (labels.length) {
+      this.tweens.add({
+        targets: labels,
+        rotation: `-=${amp}`,
+        duration: 55,
+        yoyo: true,
+        repeat: 2,
+        ease: 'Sine.InOut',
+        onComplete: () => {
+          for (let i = 0; i < labels.length; i++) labels[i].rotation = startLblRots[i];
+        },
+      });
+    }
   }
 
   _onDragStart({ grabR, grabC, kind }) {
@@ -1192,6 +1792,7 @@ export default class PlayerScene extends Phaser.Scene {
     const body = renderFactoryBody(this, bWrap, {
       cells: rot.cells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
       caution: isObstacleFactory(rot.funnels),
+      rotation,
     });
     body.setPosition(-cx, -cy);
     this.ghostFlow = renderFlow(this, this.ghostContainer, {
@@ -1418,6 +2019,11 @@ export default class PlayerScene extends Phaser.Scene {
   }
 
   _resetPlay() {
+    // Drop any in-flight hint / rotation state — a live tween would land
+    // its factory into a scene that's about to be rebuilt.
+    if (this._hintModal) { this._hintModal.destroy(); this._hintModal = null; }
+    this._hintTweenBusy = false;
+    this._rotateTweenBusy = false;
     // Drop any in-flight victory visuals — reset means "start the level
     // over clean", including nuking the delayed "completed" banner.
     if (this._victoryTextBg)   { this._victoryTextBg.destroy();   this._victoryTextBg = null; }
@@ -1537,6 +2143,9 @@ export default class PlayerScene extends Phaser.Scene {
 
   _fireVictory() {
     if (this.victory) return;
+    // Victory cancels any pending stuck nudge regardless of boss/non-boss —
+    // intra-boss round resets schedule a fresh timer in _advanceBossRound.
+    this._resetStuckPopup();
     // Boss flow — advance to the next round instead of marking the level
     // beaten + transitioning. The final round falls through to the normal
     // victory path so beaten/credits/auto-advance still happen.
@@ -1566,6 +2175,8 @@ export default class PlayerScene extends Phaser.Scene {
   // increment the round, recompose the level, and re-init runtime + render.
   _advanceBossRound() {
     if (!this.scene || !this._isBossWithMoreRounds()) return;
+    if (this._hintModal) { this._hintModal.destroy(); this._hintModal = null; }
+    this._hintTweenBusy = false;
     const carry = [];
     for (const p of this.placed.values()) {
       if (p.locked) continue;       // pre-existing locked factories already in lockedFactories
@@ -1595,6 +2206,9 @@ export default class PlayerScene extends Phaser.Scene {
     this._renderBlueprint();
     this._renderIconIsland();
     if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.clearAll();
+    // Fresh round → reset the stuck timer so the popup respects the new
+    // round's clock instead of carrying over the prior round's schedule.
+    this._startStuckPopupTimer();
   }
 
   _showVictoryText() {
@@ -1669,6 +2283,7 @@ export default class PlayerScene extends Phaser.Scene {
     this._renderAll();
     this._renderBlueprint();
     this._renderIconIsland();
+    this._updateHintButtonState();
   }
 }
 

@@ -13,7 +13,7 @@ import { drawPuddle } from './shapes.js';
 const CAUTION_YELLOW = 0xd6a30b;
 const CAUTION_BLACK  = 0x1a1a1a;
 
-export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scale = SHAPE_SCALE, fill, stroke, invalid, caution }) {
+export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scale = SHAPE_SCALE, fill, stroke, invalid, caution, rotation = 0 }) {
   const gfx = scene.make.graphics({ add: false });
   // Invalid factories paint their perimeter in red so the author sees at a
   // glance which block needs fixing; the actual reason floats as text near
@@ -21,22 +21,67 @@ export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scal
   const effectiveStroke = invalid ? 0xd02020 : stroke;
   const effectiveFill = caution ? CAUTION_YELLOW : fill;
   drawFactoryBodyInto(gfx, cells, pxCell, pxGap, scale, { fill: effectiveFill, stroke: effectiveStroke });
-  // Caution factories: overlay 45° black hazard stripes directly into the
-  // body graphics. Stripes are drawn as polygon-clipped fills (per cell
-  // body-rect and per bridge rect) so they stay inside the merged body
-  // without needing Phaser's mask system (which doesn't reliably track
-  // container transforms here).
-  if (caution) drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale);
-  drawCellLabels(gfx, cells, pxCell, pxGap, scale);
+  // Caution factories: overlay single-direction 45° hazard stripes. Stripe
+  // direction follows rotation parity (even → `/`, odd → `\`) and the
+  // bands are centered on pitch multiples in factory-wrap-shifted coords,
+  // so the pattern is invariant under 90° / 180° rotations of the factory.
+  if (caution) drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale, rotation);
+
+  // Labels are returned as SEPARATE gfx objects so the caller can keep them
+  // oriented upright when the body rotates. Attached to `gfx.labels` — the
+  // primary return stays a Graphics so `body.setPosition(-cx, -cy)` and
+  // every existing caller keeps working unchanged.
+  gfx.labels = buildCellLabels(scene, cells, pxCell, pxGap, scale, container);
   container.add(gfx);
   return gfx;
 }
 
-// Paint 45°-angled hazard-tape stripes across the factory's body, clipped
-// per cell/bridge rect so the fills stay inside the merged body. Stripe
-// phase is keyed to absolute (x + y) world coordinates so adjacent cells'
-// stripes line up into continuous diagonal bands.
-function drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale) {
+// Create one Graphics per labeled cell, positioned in the body's wrap-local
+// coord system (so when the caller does `body.setPosition(-cx, -cy)`, the
+// labels already sit on the right cell centers — they don't need to be
+// moved). Each label draws its mini-form at its own origin (0, 0) so the
+// label's own `.rotation` can counter-rotate against a spinning bodyWrap
+// without translating the glyph.
+function buildCellLabels(scene, cells, pxCell, pxGap, scale, container) {
+  if (!cells || cells.length === 0) return [];
+  const step = pxCell + pxGap;
+  let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+  for (const cell of cells) {
+    if (cell.r < minR) minR = cell.r;
+    if (cell.r > maxR) maxR = cell.r;
+    if (cell.c < minC) minC = cell.c;
+    if (cell.c > maxC) maxC = cell.c;
+  }
+  const cx = ((minC + maxC) * step + pxCell) / 2;
+  const cy = ((minR + maxR) * step + pxCell) / 2;
+  const iconR = Math.max(4, Math.round(pxCell * scale * 0.22));
+  const strokeW = Math.max(1, Math.round(outlineWidth(pxCell) * 0.6));
+  const labels = [];
+  for (const cell of cells) {
+    if (!cell.label) continue;
+    const lblGfx = scene.make.graphics({ add: false });
+    lblGfx.lineStyle(strokeW, 0x000000, 0.9);
+    drawMiniForm(lblGfx, 0, 0, iconR, cell.label);
+    lblGfx.x = cell.c * step + pxCell / 2 - cx;
+    lblGfx.y = cell.r * step + pxCell / 2 - cy;
+    container.add(lblGfx);
+    labels.push(lblGfx);
+  }
+  return labels;
+}
+
+// Paint 45°-angled black hazard-tape stripes over the yellow body, clipped
+// per cell/bridge rect.
+//
+// Rotation-consistency trick:
+//   Stripe direction follows rotation parity — even rotations draw `/`,
+//   odd draw `\`. Bands are CENTERED on pitch multiples in factory-center-
+//   shifted coords (i.e. each stripe spans [k·pitch − sW/2, k·pitch + sW/2]
+//   around the line (x−cx)±(y−cy) = k·pitch). Centered bands at integer
+//   k·pitch are rotation-invariant: under any 90° rotation around the
+//   factory center the set of stripes maps onto itself, so the tween-end
+//   visual and the fresh re-render land on identical patterns.
+function drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale, rotation = 0) {
   if (!cells || cells.length === 0) return;
   const step = pxCell + pxGap;
   const inner = pxCell * scale;
@@ -44,12 +89,7 @@ function drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale) {
   const stripeW = Math.max(6, Math.round(pxCell * 0.24));
   const pitch = stripeW * 2; // equal-width yellow and black bands
 
-  // Collect convex rects covering the body: one per cell, one per bridge
-  // between adjacent cells (horizontal/vertical), and one at the center of
-  // every 2x2 block so a square of four tiled cells is fully covered (the
-  // four bridges form a "+" and leave a hole at the intersection otherwise).
-  // Stripes clip against each rect independently but share a single `d`
-  // phase keyed to world coords, so the overall pattern reads as continuous.
+  // Collect convex rects covering the body.
   const rects = [];
   const set = new Set(cells.map((c) => `${c.r},${c.c}`));
   for (const { r, c } of cells) {
@@ -66,25 +106,52 @@ function drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale) {
   }
   if (rects.length === 0) return;
 
+  // Factory center in gfx-local coords — matches `body.setPosition(-cx, -cy)`
+  // used by every caller, so (x − cx, y − cy) is wrap-origin-centered.
+  let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+  for (const cell of cells) {
+    if (cell.r < minR) minR = cell.r;
+    if (cell.r > maxR) maxR = cell.r;
+    if (cell.c < minC) minC = cell.c;
+    if (cell.c > maxC) maxC = cell.c;
+  }
+  const cx = ((minC + maxC) * step + pxCell) / 2;
+  const cy = ((minR + maxR) * step + pxCell) / 2;
+
+  const useBackslash = (((rotation % 4) + 4) % 4) % 2 === 1;
+  const dFn = useBackslash
+    ? (px, py) => (px - cx) - (py - cy)
+    : (px, py) => (px - cx) + (py - cy);
+
   let dcMin = Infinity, dcMax = -Infinity;
   for (const [x, y, w, h] of rects) {
-    if (x + y < dcMin) dcMin = x + y;
-    if (x + w + y + h > dcMax) dcMax = x + w + y + h;
+    for (const [px, py] of [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]) {
+      const dv = dFn(px, py);
+      if (dv < dcMin) dcMin = dv;
+      if (dv > dcMax) dcMax = dv;
+    }
   }
 
   gfx.fillStyle(CAUTION_BLACK, 1);
-  // Anchor the stripe phase to the factory's own top-left (dcMin) so the
-  // pattern stays fixed relative to the factory itself. Rounding dcMin to
-  // an absolute-coord pitch boundary would make the stripes jump by up to a
-  // full period whenever a factory is placed into a non-pitch-aligned cell.
-  const dStart = dcMin - pitch;
-  for (let d = dStart; d <= dcMax + pitch; d += pitch) {
-    const d1 = d, d2 = d + stripeW;
+  // Iterate every k·pitch line that could touch the shape. Each stripe is
+  // CENTERED on d = k·pitch, spanning [d − sW/2, d + sW/2].
+  const halfW = stripeW / 2;
+  const kStart = Math.floor((dcMin - halfW) / pitch) - 1;
+  const kEnd   = Math.ceil((dcMax + halfW) / pitch) + 1;
+  for (let k = kStart; k <= kEnd; k++) {
+    const d = k * pitch;
+    const d1 = d - halfW, d2 = d + halfW;
     for (const [x, y, w, h] of rects) {
-      if (x + w + y + h < d1 || x + y > d2) continue;
+      let rMin = Infinity, rMax = -Infinity;
+      for (const [px, py] of [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]) {
+        const dv = dFn(px, py);
+        if (dv < rMin) rMin = dv;
+        if (dv > rMax) rMax = dv;
+      }
+      if (rMax < d1 || rMin > d2) continue;
       const poly = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
-      let p = clipHalfPlane(poly, (px, py) => (px + py) - d1);
-      p = clipHalfPlane(p, (px, py) => d2 - (px + py));
+      let p = clipHalfPlane(poly, (px, py) => dFn(px, py) - d1);
+      p = clipHalfPlane(p, (px, py) => d2 - dFn(px, py));
       if (p.length < 3) continue;
       gfx.beginPath();
       gfx.moveTo(p[0][0], p[0][1]);
@@ -211,23 +278,6 @@ function sampleQuadratic(gfx, p0, p1, p2, steps) {
     const x = u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0];
     const y = u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1];
     gfx.lineTo(x, y);
-  }
-}
-
-// Per-cell labels — paint a single mini form+color glyph centered on each
-// labeled cell. Single-cell factories: the lone label means "wildcard input,
-// labeled output". Multi-cell: each labeled cell constrains its own funnels.
-function drawCellLabels(gfx, cells, pxCell, pxGap, scale) {
-  if (!cells || cells.length === 0) return;
-  const step = pxCell + pxGap;
-  const iconR = Math.max(4, Math.round(pxCell * scale * 0.22));
-  const strokeW = Math.max(1, Math.round(outlineWidth(pxCell) * 0.6));
-  for (const cell of cells) {
-    if (!cell.label) continue;
-    const cx = cell.c * step + pxCell / 2;
-    const cy = cell.r * step + pxCell / 2;
-    gfx.lineStyle(strokeW, 0x000000, 0.9);
-    drawMiniForm(gfx, cx, cy, iconR, cell.label);
   }
 }
 

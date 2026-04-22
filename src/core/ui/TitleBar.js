@@ -189,6 +189,8 @@ export class TitleBar {
       this.rightBox.lineStyle(2, HOME_STROKE, 1);
       this.rightBox.fillRoundedRect(rightX, y - TITLE_H / 2, RIGHT_BOX_W, TITLE_H, CORNER_R);
       this.rightBox.strokeRoundedRect(rightX, y - TITLE_H / 2, RIGHT_BOX_W, TITLE_H, CORNER_R);
+      this._rightBoxBounds = { x: rightX, y: y - TITLE_H / 2, w: RIGHT_BOX_W, h: TITLE_H };
+      this._rightBoxCenter = { x: rightX + RIGHT_BOX_W / 2, y };
       const iconCX = rightX + RIGHT_BOX_W / 2;
       const iconSize = Math.round(TITLE_H * 0.7);
       if (rb.kind === 'hint') {
@@ -203,14 +205,123 @@ export class TitleBar {
       this.homeHit = scene.add.rectangle(
         iconCX, y, RIGHT_BOX_W, TITLE_H, 0xffffff, 0,
       ).setInteractive({ useHandCursor: true }).setDepth(TITLE_DEPTH);
+
+      // Hover/press juice. Draw a translucent tint overlay on top of the
+      // box graphics (can't scale the graphics itself — it was drawn in
+      // absolute world coords) and, for container-based icons (hint kind),
+      // tween icon scale around the button center. For the home-icon
+      // graphics variant we skip scale because Graphics pivots around 0,0
+      // and would warp off-screen if scaled.
+      const tintOverlay = scene.add.graphics().setDepth(TITLE_DEPTH + 1);
+      tintOverlay.fillStyle(0xffffff, 1);
+      tintOverlay.fillRoundedRect(rightX, y - TITLE_H / 2, RIGHT_BOX_W, TITLE_H, CORNER_R);
+      tintOverlay.alpha = 0;
+      this._rightBoxTint = tintOverlay;
+
+      const iconTargets = [];
+      if (this._rightIconContainer) {
+        // Recenter the container at (iconCX, y) and shift its children so
+        // scaling the container pivots around the button center.
+        const c = this._rightIconContainer;
+        c.setPosition(iconCX, y);
+        for (const child of c.list) {
+          child.x -= iconCX;
+          child.y -= y;
+        }
+        iconTargets.push(c);
+      }
+
+      const setScale = (s, dur = 120, ease = 'Sine.Out') => {
+        if (!iconTargets.length) return;
+        scene.tweens.add({ targets: iconTargets, scaleX: s, scaleY: s, duration: dur, ease });
+      };
+      const setTint = (alpha, dur = 120) => {
+        scene.tweens.add({ targets: tintOverlay, alpha, duration: dur, ease: 'Sine.Out' });
+      };
+
+      this.homeHit.on('pointerover', () => { setScale(1.14); setTint(0.16); });
+      this.homeHit.on('pointerout',  () => { setScale(1.0);  setTint(0); });
+      this.homeHit.on('pointerdown', () => { setScale(0.86, 70); setTint(0.30, 70); });
+
       const handler = rb.onTap || onHome;
-      if (handler) this.homeHit.on('pointerup', handler);
+      this.homeHit.on('pointerup', () => {
+        if (iconTargets.length) {
+          scene.tweens.add({
+            targets: iconTargets,
+            scaleX: 1.14, scaleY: 1.14,
+            duration: 110, ease: 'Back.Out',
+            onComplete: () => { setScale(1.0, 120); setTint(0, 180); if (handler) handler(); },
+          });
+        } else {
+          setTint(0, 180);
+          if (handler) handler();
+        }
+      });
     }
   }
 
   setLevel(number, name) {
     if (this.pillText) this.pillText.setText(String(number ?? 0));
     if (this.nameText) this.nameText.setText(name || (this.designerMode ? 'untitled' : ''));
+  }
+
+  // Start a gentle, ongoing flash on the right-side button so the player
+  // notices the hint icon while the nudge popup is up. Paints a soft white
+  // overlay that slowly yoyos its alpha. Idempotent — calling twice does
+  // nothing the second time. Stop with stopGentleFlash().
+  startGentleFlash() {
+    if (!this.rightBox) return;
+    if (this._flashOverlay) return;  // already flashing
+    const bounds = this._rightBoxBounds;
+    if (!bounds) return;
+    const overlay = this.scene.add.graphics().setDepth(TITLE_DEPTH + 1);
+    overlay.fillStyle(0xffffff, 1);
+    overlay.fillRoundedRect(bounds.x, bounds.y, bounds.w, bounds.h, CORNER_R);
+    overlay.alpha = 0;
+    this._flashOverlay = overlay;
+    this._flashTween = this.scene.tweens.add({
+      targets: overlay,
+      alpha: { from: 0, to: 0.32 },
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.InOut',
+    });
+  }
+
+  // Toggle the right-side button between enabled (full opacity, interactive,
+  // hover/press juice live) and disabled (greyed, non-interactive). Used by
+  // PlayerScene to grey out the hint button when every factory is already
+  // in its solution spot. Also cancels any gentle flash when disabling.
+  setRightButtonEnabled(enabled) {
+    if (!this.rightBox) return;
+    const prev = this._rightEnabled !== false;
+    if (enabled === prev) return;   // idempotent
+    this._rightEnabled = !!enabled;
+    const alpha = enabled ? 1 : 0.4;
+    this.rightBox.alpha = alpha;
+    if (this._rightIconContainer) this._rightIconContainer.alpha = alpha;
+    if (this.homeIcon) this.homeIcon.alpha = alpha;
+    if (this.homeHit) {
+      if (enabled) this.homeHit.setInteractive({ useHandCursor: true });
+      else this.homeHit.disableInteractive();
+    }
+    if (!enabled) this.stopGentleFlash();
+  }
+
+  stopGentleFlash() {
+    if (this._flashTween) { this._flashTween.stop(); this._flashTween = null; }
+    if (this._flashOverlay) {
+      const overlay = this._flashOverlay;
+      this._flashOverlay = null;
+      this.scene.tweens.add({
+        targets: overlay,
+        alpha: 0,
+        duration: 220,
+        ease: 'Sine.Out',
+        onComplete: () => overlay.destroy(),
+      });
+    }
   }
 
   // Update the step-indicator states when the editor's progress changes.
@@ -241,6 +352,15 @@ export class TitleBar {
     if (this.homeIcon)  this.homeIcon.destroy();
     if (this.homeHit)   this.homeHit.destroy();
     if (this._rightIconContainer) this._rightIconContainer.destroy(true);
+    if (this._rightBoxTint) this._rightBoxTint.destroy();
+    if (this._flashTween) { this._flashTween.stop(); this._flashTween = null; }
+    if (this._flashOverlay) this._flashOverlay.destroy();
+  }
+
+  // World-coords center of the right-side button. Used by PlayerScene to
+  // anchor the stuck-nudge popup underneath the hint icon.
+  getRightButtonCenter() {
+    return this._rightBoxCenter ? { ...this._rightBoxCenter } : null;
   }
 }
 

@@ -1,15 +1,83 @@
 {
   "id": "level-15",
-  "name": "Triple spread",
+  "name": "Shaping corners",
   "number": 0,
   "board": {
-    "cols": 8,
-    "rows": 8
+    "cols": 7,
+    "rows": 7
   },
-  "factories": [],
+  "factories": [
+    {
+      "id": "fg0ie47u",
+      "anchor": {
+        "row": 3,
+        "col": 3
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "circle",
+            "color": "blue"
+          }
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "label": {
+            "color": "green",
+            "form": "triangle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 1,
+          "side": "right",
+          "role": "output"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        }
+      ]
+    },
+    {
+      "id": "f8hxqjm3",
+      "anchor": {
+        "row": 1,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        }
+      ],
+      "funnels": []
+    },
+    {
+      "id": "fgyujt5a",
+      "anchor": {
+        "row": 3,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        }
+      ],
+      "funnels": []
+    }
+  ],
   "initialFactories": [
     {
-      "id": "l15-0",
+      "id": "fab91dyg",
       "slot": {
         "row": 1,
         "col": 0
@@ -18,6 +86,227 @@
         {
           "r": 0,
           "c": 0
+        },
+        {
+          "r": 1,
+          "c": 0
+        },
+        {
+          "r": 2,
+          "c": 0
+        },
+        {
+          "r": 2,
+          "c": 1
+        },
+        {
+          "r": 2,
+          "c": 2
+        }
+      ],
+      "funnels": [],
+      "rotation": 1
+    },
+    {
+      "id": "fvt7fczn",
+      "slot": {
+        "row": 2,
+        "col": 2
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        },
+        {
+          "r": 1,
+          "c": 0
+        },
+        {
+          "r": 0,
+          "c": 1
+        }
+      ],
+      "funnels": [],
+      "rotation": 1
+    },
+    {
+      "id": "fxqjjfot",
+      "slot": {
+        "row": 2,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 1,
+          "c": 0
+        },
+        {
+          "r": 0,
+          "c": 0
+        },
+        {
+          "r": 1,
+          "c": 1
+        }
+      ],
+      "funnels": [],
+      "rotation": 0
+    },
+    {
+      "id": "fxnnifny",
+      "slot": {
+        "row": 3,
+        "col": 5
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "blue",
+            "form": "circle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "ffml7ul5",
+      "slot": {
+        "row": 2,
+        "col": 4
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "triangle",
+            "color": "green"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "output"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 1
+    },
+    {
+      "id": "ftno2rr0",
+      "slot": {
+        "row": 2,
+        "col": 5
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "red",
+            "form": "square"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
+          "role": "output"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "input"
+        }
+      ],
+      "rotation": 1
+    },
+    {
+      "id": "fw3mic9z",
+      "slot": {
+        "row": 3,
+        "col": 4
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "red",
+            "form": "square"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
+          "role": "output"
+        }
+      ],
+      "rotation": 2
+    },
+    {
+      "id": "fsq1ifrd",
+      "slot": {
+        "row": 1,
+        "col": 4
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "green",
+            "form": "triangle"
+          }
         }
       ],
       "funnels": [
@@ -32,92 +321,633 @@
           "c": 0,
           "side": "left",
           "role": "output"
+        }
+      ],
+      "rotation": 1
+    },
+    {
+      "id": "fejfxchh",
+      "slot": {
+        "row": 1,
+        "col": 5
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "blue",
+            "form": "circle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
         },
         {
           "r": 0,
           "c": 0,
+          "side": "top",
+          "role": "input"
+        }
+      ],
+      "rotation": 1
+    },
+    {
+      "id": "fqa3kj4r",
+      "slot": {
+        "row": 4,
+        "col": 4
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "blue",
+            "form": "circle"
+          }
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "label": {
+            "color": "green",
+            "form": "triangle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 2
+    },
+    {
+      "id": "flr4k0sr",
+      "slot": {
+        "row": 1,
+        "col": 3
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        }
+      ],
+      "funnels": [],
+      "rotation": 0
+    }
+  ],
+  "lockedFactories": [
+    {
+      "id": "fg0ie47u",
+      "anchor": {
+        "row": 3,
+        "col": 3
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "circle",
+            "color": "blue"
+          }
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "label": {
+            "color": "green",
+            "form": "triangle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 1,
           "side": "right",
           "role": "output"
         },
         {
           "r": 0,
           "c": 0,
-          "side": "bottom",
-          "role": "output"
+          "side": "top",
+          "role": "input"
+        }
+      ]
+    },
+    {
+      "id": "f8hxqjm3",
+      "anchor": {
+        "row": 1,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
         }
       ],
-      "rotation": 0
+      "funnels": []
+    },
+    {
+      "id": "fgyujt5a",
+      "anchor": {
+        "row": 3,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        }
+      ],
+      "funnels": []
     }
   ],
-  "lockedFactories": [],
   "border": {
     "funnels": [
       {
-        "r": 0,
+        "r": 6,
         "c": 3,
-        "side": "bottom",
-        "role": "input"
-      },
-      {
-        "r": 3,
-        "c": 0,
-        "side": "right",
+        "side": "top",
         "role": "output"
       },
       {
-        "r": 3,
-        "c": 7,
+        "r": 4,
+        "c": 6,
         "side": "left",
         "role": "output"
       },
       {
-        "r": 7,
-        "c": 3,
-        "side": "top",
+        "r": 2,
+        "c": 6,
+        "side": "left",
         "role": "output"
+      },
+      {
+        "r": 0,
+        "c": 2,
+        "side": "bottom",
+        "role": "input"
       }
     ]
   },
   "inputs": [
     {
       "r": 0,
-      "c": 3,
+      "c": 2,
       "side": "bottom",
       "type": {
         "form": "circle",
-        "color": "green"
+        "color": "blue"
       }
     }
   ],
   "outputs": [
     {
-      "r": 3,
-      "c": 0,
-      "side": "right",
-      "type": {
-        "form": "circle",
-        "color": "green"
-      }
-    },
-    {
-      "r": 3,
-      "c": 7,
-      "side": "left",
-      "type": {
-        "form": "circle",
-        "color": "green"
-      }
-    },
-    {
-      "r": 7,
+      "r": 6,
       "c": 3,
       "side": "top",
       "type": {
         "form": "circle",
-        "color": "green"
+        "color": "blue"
+      }
+    },
+    {
+      "r": 4,
+      "c": 6,
+      "side": "left",
+      "type": {
+        "form": "square",
+        "color": "red"
+      }
+    },
+    {
+      "r": 2,
+      "c": 6,
+      "side": "left",
+      "type": {
+        "form": "square",
+        "color": "red"
       }
     }
   ],
-  "instructionalText": "One input, many outputs — every output fires.",
-  "boss": null
+  "instructionalText": null,
+  "boss": null,
+  "author": "JayTeaGibs",
+  "solution": {
+    "factories": [
+      {
+        "id": "fab91dyg",
+        "anchor": {
+          "row": 2,
+          "col": 2
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0
+          },
+          {
+            "r": 1,
+            "c": 0
+          },
+          {
+            "r": 2,
+            "c": 0
+          },
+          {
+            "r": 2,
+            "c": 1
+          },
+          {
+            "r": 2,
+            "c": 2
+          }
+        ],
+        "funnels": []
+      },
+      {
+        "id": "fvt7fczn",
+        "anchor": {
+          "row": 1,
+          "col": 4
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0
+          },
+          {
+            "r": 1,
+            "c": 0
+          },
+          {
+            "r": 0,
+            "c": 1
+          }
+        ],
+        "funnels": []
+      },
+      {
+        "id": "fxqjjfot",
+        "anchor": {
+          "row": 4,
+          "col": 1
+        },
+        "cells": [
+          {
+            "r": 1,
+            "c": 0
+          },
+          {
+            "r": 0,
+            "c": 0
+          },
+          {
+            "r": 1,
+            "c": 1
+          }
+        ],
+        "funnels": []
+      },
+      {
+        "id": "fg0ie47u",
+        "anchor": {
+          "row": 3,
+          "col": 3
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "form": "circle",
+              "color": "blue"
+            }
+          },
+          {
+            "r": 0,
+            "c": 1,
+            "label": {
+              "color": "green",
+              "form": "triangle"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 1,
+            "side": "right",
+            "role": "output"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          }
+        ]
+      },
+      {
+        "id": "fxnnifny",
+        "anchor": {
+          "row": 5,
+          "col": 3
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "blue",
+              "form": "circle"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "right",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "ffml7ul5",
+        "anchor": {
+          "row": 3,
+          "col": 5
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "form": "triangle",
+              "color": "green"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "left",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "output"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "ftno2rr0",
+        "anchor": {
+          "row": 2,
+          "col": 5
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "red",
+              "form": "square"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "right",
+            "role": "output"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "input"
+          }
+        ]
+      },
+      {
+        "id": "fw3mic9z",
+        "anchor": {
+          "row": 4,
+          "col": 5
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "red",
+              "form": "square"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "right",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "fsq1ifrd",
+        "anchor": {
+          "row": 5,
+          "col": 5
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "green",
+              "form": "triangle"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "left",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "fejfxchh",
+        "anchor": {
+          "row": 2,
+          "col": 3
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "blue",
+              "form": "circle"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          }
+        ]
+      },
+      {
+        "id": "fqa3kj4r",
+        "anchor": {
+          "row": 1,
+          "col": 2
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "blue",
+              "form": "circle"
+            }
+          },
+          {
+            "r": 0,
+            "c": 1,
+            "label": {
+              "color": "green",
+              "form": "triangle"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 1,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "f8hxqjm3",
+        "anchor": {
+          "row": 1,
+          "col": 1
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0
+          }
+        ],
+        "funnels": []
+      },
+      {
+        "id": "fgyujt5a",
+        "anchor": {
+          "row": 3,
+          "col": 1
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0
+          }
+        ],
+        "funnels": []
+      },
+      {
+        "id": "flr4k0sr",
+        "anchor": {
+          "row": 2,
+          "col": 1
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0
+          }
+        ],
+        "funnels": []
+      }
+    ]
+  },
+  "likes": 0
 }
