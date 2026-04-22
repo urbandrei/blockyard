@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { loadLevel, genId } from '../model/level.js';
 import {
-  rotateFactoryShape, isBorderCell, normalizeFactory,
+  rotateFactoryShape, isBorderCell, normalizeFactory, isObstacleFactory,
 } from '../model/shape.js';
 import { renderBorder } from '../render/BorderRenderer.js';
 import { renderFactoryBody, renderLockedTint } from '../render/FactoryBodyRenderer.js';
@@ -10,6 +10,7 @@ import { renderFlow } from '../render/FlowRenderer.js';
 import { renderBufferLabels } from '../render/BufferLabelRenderer.js';
 import { renderInteriorFloor, renderExteriorCheckers, renderFrameShadow, renderFrameOutline } from '../render/PlayAreaFrame.js';
 import { ShapeRenderer } from '../render/ShapeRenderer.js';
+import { FunnelParticleSystem, collectFunnelsForParticles, collectFactoryFunnelsForParticles } from '../render/FunnelParticleSystem.js';
 import { BufferMarkerRenderer } from '../render/BufferMarkerRenderer.js';
 import { TitleBar } from '../ui/TitleBar.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
@@ -73,12 +74,16 @@ export default class PlayerScene extends Phaser.Scene {
     // factories sit under it via the cut-out trick.
     this.boardContainer       = this.add.container(0, 0).setDepth(0);
     this.shapeContainer       = this.add.container(0, 0).setDepth(10);
+    // Ambient funnel particles sit just below the funnel triangles so the
+    // dots read as drifting behind each funnel's face.
+    this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(13);
     this.funnelContainer      = this.add.container(0, 0).setDepth(15);
     this.interactiveContainer = this.add.container(0, 0).setDepth(20);
     // Flow dashes sit on top of the factory body (see EditorScene comment).
     this.flowContainer        = this.add.container(0, 0).setDepth(22);
     this.exteriorContainer    = this.add.container(0, 0).setDepth(25);
     this.shadowContainer       = this.add.container(0, 0).setDepth(140);
+    this.borderFunnelParticleContainer = this.add.container(0, 0).setDepth(143);
     this.borderFunnelContainer = this.add.container(0, 0).setDepth(145);
     this.labelContainer        = this.add.container(0, 0).setDepth(150);
     this.bufferMarkerContainer = this.add.container(0, 0).setDepth(155);
@@ -139,6 +144,9 @@ export default class PlayerScene extends Phaser.Scene {
         if (accepted && funnel.ownerId === 'border') this._onOutputSatisfied(funnel);
       },
     });
+    this.factoryFunnelParticles = new FunnelParticleSystem(this, this.factoryFunnelParticleContainer, { pxCell: this.pxCell });
+    this.borderFunnelParticles  = new FunnelParticleSystem(this, this.borderFunnelParticleContainer,  { pxCell: this.pxCell });
+    this._refreshFunnelParticles();
 
     this.dragCtrl = new DragController(this, {
       isOverCell:      (x, y) => this._cellAt(x, y),
@@ -165,6 +173,10 @@ export default class PlayerScene extends Phaser.Scene {
       this.sim && this.sim.stop();
       this.dragCtrl && this.dragCtrl.destroy();
       this._teardownBlueprintPlayButtons();
+      if (this.factoryFunnelParticles) { this.factoryFunnelParticles.destroy(); this.factoryFunnelParticles = null; }
+      if (this.borderFunnelParticles)  { this.borderFunnelParticles.destroy();  this.borderFunnelParticles  = null; }
+      if (this.ghostParticles) { this.ghostParticles.destroy(); this.ghostParticles = null; }
+      if (this.blueprintParticleSystems) { for (const s of this.blueprintParticleSystems) s.destroy(); this.blueprintParticleSystems = null; }
       if (this._victoryTextBg) { this._victoryTextBg.destroy(); this._victoryTextBg = null; }
       if (this._victoryTextName) { this._victoryTextName.destroy(); this._victoryTextName = null; }
       if (this._victoryTextSub)  { this._victoryTextSub.destroy();  this._victoryTextSub  = null; }
@@ -299,6 +311,18 @@ export default class PlayerScene extends Phaser.Scene {
   // Compose a "level" object the Simulation can consume from the current
   // runtime state. Combines locked + placed initial factories with their
   // rotated cells/funnels, plus the level's border / inputs / outputs.
+  // Repopulate the funnel particle systems from the current level state.
+  // Accepts an optional precomposed level to avoid a second _composeLevel.
+  _refreshFunnelParticles(lvl) {
+    if (!this.factoryFunnelParticles || !this.borderFunnelParticles) return;
+    const level = lvl || this._composeLevel();
+    const { factory, border } = collectFunnelsForParticles(
+      level, this.pxCell, BOARD_GAP, SHAPE_SCALE,
+    );
+    this.factoryFunnelParticles.setFunnels(factory);
+    this.borderFunnelParticles.setFunnels(border);
+  }
+
   _composeLevel() {
     const factories = [];
     for (const p of this.placed.values()) {
@@ -410,9 +434,11 @@ export default class PlayerScene extends Phaser.Scene {
     setPos(this.interactiveContainer,  this.boardOriginX, this.boardOriginY);
     setPos(this.flowContainer,         this.boardOriginX, this.boardOriginY);
     setPos(this.shapeContainer,        this.boardOriginX, this.boardOriginY);
+    if (this.factoryFunnelParticleContainer) setPos(this.factoryFunnelParticleContainer, this.boardOriginX, this.boardOriginY);
     setPos(this.funnelContainer,       this.boardOriginX, this.boardOriginY);
     setPos(this.exteriorContainer,     this.boardOriginX, this.boardOriginY);
     setPos(this.shadowContainer,       this.boardOriginX, this.boardOriginY);
+    if (this.borderFunnelParticleContainer) setPos(this.borderFunnelParticleContainer, this.boardOriginX, this.boardOriginY);
     setPos(this.borderFunnelContainer, this.boardOriginX, this.boardOriginY);
     setPos(this.frameContainer,        this.boardOriginX, this.boardOriginY);
     setPos(this.labelContainer,        this.boardOriginX, this.boardOriginY);
@@ -433,6 +459,7 @@ export default class PlayerScene extends Phaser.Scene {
   _renderAll() {
     this._clearBoardDynamic();
     const lvl = this._composeLevel();
+    this._refreshFunnelParticles(lvl);
     renderInteriorFloor(this, this.boardContainer, { board: lvl.board, pxCell: this.pxCell });
     const border = renderBorder(this, this.boardContainer, this.borderFunnelContainer, lvl, { pxCell: this.pxCell, pxGap: BOARD_GAP });
     this.borderFunnelWraps = border.wraps;
@@ -467,6 +494,7 @@ export default class PlayerScene extends Phaser.Scene {
     const body = renderFactoryBody(this, bodyWrap, {
       cells: absCells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
       converter: factory.converter,
+      caution: isObstacleFactory(factory.funnels),
     });
     body.setPosition(-cx, -cy);
     // Locked-only decoration: full-cell floor tint on boardContainer so
@@ -507,6 +535,14 @@ export default class PlayerScene extends Phaser.Scene {
     // Drop references to flow updaters whose gfx is about to be destroyed.
     if (this.blueprintFlows) this.blueprintFlows.length = 0;
     else this.blueprintFlows = [];
+    // Particle systems attached to the blueprint flow container must be
+    // torn down BEFORE the container wipe so their gfx is released first.
+    if (this.blueprintParticleSystems) {
+      for (const s of this.blueprintParticleSystems) s.destroy();
+      this.blueprintParticleSystems.length = 0;
+    } else {
+      this.blueprintParticleSystems = [];
+    }
     // PLAY + RESET tiles live in `blueprintOverlayContainer`, a persistent
     // container that is intentionally NOT torn down here — that's what lets
     // the tiles fade in/out across drag start/end without blinking. The
@@ -781,19 +817,30 @@ export default class PlayerScene extends Phaser.Scene {
     const body = renderFactoryBody(this, bodyWrap, {
       cells: cellsLocal, pxCell: slotPx, pxGap: 0, scale: SHAPE_SCALE,
       converter: def.converter,
+      caution: isObstacleFactory(funnelsLocal),
     });
     body.setPosition(-cx, -cy);
     if (isTop) {
       // Only the top of a stack draws its animated flow — fanned lower
       // layers would smear the playable preview otherwise. Track the flow
       // updater so the scene's update() loop animates the dashes.
+      const cellsAtSlot   = cellsLocal.map((c) => ({ ...c, r: c.r + def.slot.r, c: c.c + def.slot.c }));
+      const funnelsAtSlot = funnelsLocal.map((f) => ({ ...f, r: f.r + def.slot.r, c: f.c + def.slot.c }));
       const flow = renderFlow(this, this.blueprintFlowContainer, {
-        cells: cellsLocal.map((c) => ({ r: c.r + def.slot.r, c: c.c + def.slot.c })),
-        funnels: funnelsLocal.map((f) => ({ ...f, r: f.r + def.slot.r, c: f.c + def.slot.c })),
+        cells: cellsAtSlot, funnels: funnelsAtSlot,
         pxCell: slotPx, pxGap: 0, scale: SHAPE_SCALE,
       });
       if (!this.blueprintFlows) this.blueprintFlows = [];
       this.blueprintFlows.push(flow);
+      // Ambient funnel particles — into blueprintFlowContainer (depth 51,
+      // below blueprintBodyContainer at 52 so the dots read behind the
+      // factory body + funnels).
+      const slotParticles = new FunnelParticleSystem(this, this.blueprintFlowContainer, { pxCell: slotPx });
+      slotParticles.setFunnels(
+        collectFactoryFunnelsForParticles(cellsAtSlot, funnelsAtSlot, slotPx, 0, SHAPE_SCALE),
+      );
+      if (!this.blueprintParticleSystems) this.blueprintParticleSystems = [];
+      this.blueprintParticleSystems.push(slotParticles);
     }
     if (isTop) this.blueprintRefs.set(def.id, { bodyWrap, funnelWrap, body, funnels });
   }
@@ -949,6 +996,13 @@ export default class PlayerScene extends Phaser.Scene {
         this.shapeRenderer.update(shape, base * alongX, base * alongY);
       }
     }
+    // Ambient funnel particles always animate (play-time and idle) so the
+    // funnels read as live. Runs every frame — not gated on cosmetic tick —
+    // because the effect is subtle and stutter would be noticeable.
+    if (this.factoryFunnelParticles) this.factoryFunnelParticles.update(time);
+    if (this.borderFunnelParticles)  this.borderFunnelParticles.update(time);
+    if (this.ghostParticles)         this.ghostParticles.update(time);
+    if (this.blueprintParticleSystems) for (const s of this.blueprintParticleSystems) s.update(time);
   }
 
   // ===================================================================
@@ -1118,9 +1172,16 @@ export default class PlayerScene extends Phaser.Scene {
 
     // Build the ghost: body + funnels + animated flow at board scale so the
     // mid-drag preview shows the same dashed manifold as the final drop.
+    if (this.ghostParticles) { this.ghostParticles.destroy(); this.ghostParticles = null; }
     this.ghostContainer.removeAll(true);
     this.ghostFlow = null;
     const rot = rotateFactoryShape({ cells: baseCells, funnels: baseFunnels }, rotation);
+    // Ghost funnel particles — created FIRST so the gfx lands at the back
+    // of ghostContainer's child list (behind funnel/body/flow).
+    this.ghostParticles = new FunnelParticleSystem(this, this.ghostContainer, { pxCell: this.pxCell });
+    this.ghostParticles.setFunnels(
+      collectFactoryFunnelsForParticles(rot.cells, rot.funnels, this.pxCell, BOARD_GAP, SHAPE_SCALE),
+    );
     const [cx, cy] = factoryCenter(rot.cells, this.pxCell, BOARD_GAP);
     const fWrap = this.add.container(cx, cy);
     const bWrap = this.add.container(cx, cy);
@@ -1128,7 +1189,10 @@ export default class PlayerScene extends Phaser.Scene {
     this.ghostContainer.add(bWrap);
     const fns = renderFunnels(this, fWrap, rot.funnels, { pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE });
     fns.setPosition(-cx, -cy);
-    const body = renderFactoryBody(this, bWrap, { cells: rot.cells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE });
+    const body = renderFactoryBody(this, bWrap, {
+      cells: rot.cells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
+      caution: isObstacleFactory(rot.funnels),
+    });
     body.setPosition(-cx, -cy);
     this.ghostFlow = renderFlow(this, this.ghostContainer, {
       cells: rot.cells, funnels: rot.funnels,
@@ -1252,6 +1316,7 @@ export default class PlayerScene extends Phaser.Scene {
     this.drag = null;
     this.ghostPulse = null;
     this.ghostFlow = null;             // gfx destroyed by ghostContainer.removeAll
+    if (this.ghostParticles) { this.ghostParticles.destroy(); this.ghostParticles = null; }
     this.ghostContainer.removeAll(true);
     this.placementContainer.removeAll(true);
   }
@@ -1597,6 +1662,8 @@ export default class PlayerScene extends Phaser.Scene {
         if (accepted && funnel.ownerId === 'border') this._onOutputSatisfied(funnel);
       },
     });
+    if (this.factoryFunnelParticles) this.factoryFunnelParticles.resize(this.pxCell);
+    if (this.borderFunnelParticles)  this.borderFunnelParticles.resize(this.pxCell);
     if (this.titleBar) this.titleBar.destroy();
     this._buildToolbar();
     this._renderAll();

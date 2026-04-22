@@ -5,13 +5,14 @@ import {
   applyBossRoundToWorking, snapshotWorkingToBossRound,
 } from '../model/level.js';
 import { BossPhaseIndicator } from '../ui/BossPhaseIndicator.js';
+import { FunnelParticleSystem, collectFunnelsForParticles, collectFactoryFunnelsForParticles } from '../render/FunnelParticleSystem.js';
 import { getCommunityLevelById, saveLocal as saveCommunityLocal } from '../community.js';
 import { SaveMenu } from '../ui/SaveMenu.js';
 import { TextInputOverlay } from '../ui/TextInputOverlay.js';
 import {
   cellsToSet, isContiguous, isAdjacentToFactory, isPerimeterEdge,
   normalizeFactory, isBorderCell, innerSideOf, funnelPolyPoints,
-  validateFactory,
+  validateFactory, isObstacleFactory,
 } from '../model/shape.js';
 import { renderBorder } from '../render/BorderRenderer.js';
 import { renderFactoryBody, renderLockedTint } from '../render/FactoryBodyRenderer.js';
@@ -127,6 +128,10 @@ export default class EditorScene extends Phaser.Scene {
     //   frameContainer (30)     black frame + inner shadow + buffer labels
     this.boardContainer       = this.add.container(0, 0).setDepth(0);
     this.shapeContainer       = this.add.container(0, 0).setDepth(10);
+    // Ambient funnel-inhale/exhale dots sit just below the funnel triangles
+    // (factory funnels at 15, border funnels at 145) so the particles read
+    // as drifting behind each funnel's face.
+    this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(13);
     this.funnelContainer      = this.add.container(0, 0).setDepth(15);
     this.interactiveContainer = this.add.container(0, 0).setDepth(20);
     // Flow dashes sit on top of the factory body so the manifold pattern is
@@ -139,6 +144,7 @@ export default class EditorScene extends Phaser.Scene {
     // rendered UNDER the black edge, just like interior factories are
     // under the frame.
     this.shadowContainer       = this.add.container(0, 0).setDepth(140);
+    this.borderFunnelParticleContainer = this.add.container(0, 0).setDepth(143);
     this.borderFunnelContainer = this.add.container(0, 0).setDepth(145);
     this.labelContainer        = this.add.container(0, 0).setDepth(150);
     this.bufferMarkerContainer = this.add.container(0, 0).setDepth(155);
@@ -194,6 +200,9 @@ export default class EditorScene extends Phaser.Scene {
         }
       },
     });
+    this.factoryFunnelParticles = new FunnelParticleSystem(this, this.factoryFunnelParticleContainer, { pxCell: this.pxCell });
+    this.borderFunnelParticles  = new FunnelParticleSystem(this, this.borderFunnelParticleContainer,  { pxCell: this.pxCell });
+    this._refreshFunnelParticles();
 
     this._satisfiedOutputs = new Set();
     this._victoryReady = false;
@@ -264,6 +273,11 @@ export default class EditorScene extends Phaser.Scene {
       if (this.cellLabelPicker) { this.cellLabelPicker.close(); this.cellLabelPicker = null; }
       if (this.exportPanel)     { this.exportPanel.destroy();   this.exportPanel = null; }
       if (this.bossPhaseIndicator) { this.bossPhaseIndicator.destroy(); this.bossPhaseIndicator = null; }
+      if (this.factoryFunnelParticles) { this.factoryFunnelParticles.destroy(); this.factoryFunnelParticles = null; }
+      if (this.borderFunnelParticles)  { this.borderFunnelParticles.destroy();  this.borderFunnelParticles  = null; }
+      if (this.draftParticles) { this.draftParticles.destroy(); this.draftParticles = null; }
+      if (this.ghostParticles) { this.ghostParticles.destroy(); this.ghostParticles = null; }
+      if (this.slotParticleSystems) { for (const s of this.slotParticleSystems) s.destroy(); this.slotParticleSystems = null; }
       this._dismissStepAdvanceBanner && this._dismissStepAdvanceBanner();
       if (this._stepNew) this._stepNew.clear();
       this._lastStepReachable = null;
@@ -339,6 +353,11 @@ export default class EditorScene extends Phaser.Scene {
     }
 
     this.sim.update(time);
+    if (this.factoryFunnelParticles) this.factoryFunnelParticles.update(time);
+    if (this.borderFunnelParticles)  this.borderFunnelParticles.update(time);
+    if (this.draftParticles)         this.draftParticles.update(time);
+    if (this.ghostParticles)         this.ghostParticles.update(time);
+    if (this.slotParticleSystems) for (const s of this.slotParticleSystems) s.update(time);
     // Motion warp — stretch along direction of motion during fast phases,
     // no warp during slow plateaus. Amplitude tuned so fast peaks read as
     // a clear "squashed oval" without distorting the shape's identity.
@@ -361,12 +380,25 @@ export default class EditorScene extends Phaser.Scene {
     // Mutations may invalidate the previously-captured solution; force the
     // user to re-satisfy outputs before EXPORT lights up again.
     this._resetVictoryTracking && this._resetVictoryTracking();
+    this._refreshFunnelParticles();
     if (this._designerMode) {
       // Refresh the icon island so EXPORT dims back out after a mutation.
       this._renderIconIsland && this._renderIconIsland();
       this._setupIconSlotHandlers && this._setupIconSlotHandlers();
     }
     this.sim.start(this.level, this.time.now);
+  }
+
+  // Repopulate the two funnel particle systems from the current level state.
+  // Called whenever the level's funnel set changes (factory added/removed,
+  // border funnel cycled, board resized, etc.).
+  _refreshFunnelParticles() {
+    if (!this.factoryFunnelParticles || !this.borderFunnelParticles) return;
+    const { factory, border } = collectFunnelsForParticles(
+      this.level, this.pxCell, BOARD_GAP, SHAPE_SCALE,
+    );
+    this.factoryFunnelParticles.setFunnels(factory);
+    this.borderFunnelParticles.setFunnels(border);
   }
 
   // ---------- Designer-mode plumbing (Milestone G) ----------
@@ -827,6 +859,8 @@ export default class EditorScene extends Phaser.Scene {
     this.interactiveContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.flowContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.shapeContainer.setPosition(this.boardOriginX, this.boardOriginY);
+    if (this.factoryFunnelParticleContainer) this.factoryFunnelParticleContainer.setPosition(this.boardOriginX, this.boardOriginY);
+    if (this.borderFunnelParticleContainer)  this.borderFunnelParticleContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.funnelContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.exteriorContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.shadowContainer.setPosition(this.boardOriginX, this.boardOriginY);
@@ -912,6 +946,7 @@ export default class EditorScene extends Phaser.Scene {
     const body = renderFactoryBody(this, bodyWrap, {
       cells: absCells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
       invalid: !validity.valid,
+      caution: isObstacleFactory(factory.funnels),
     });
     body.setPosition(-cx, -cy);
     // Locked visual: full-cell floor tint below the body so the dim
@@ -996,9 +1031,16 @@ export default class EditorScene extends Phaser.Scene {
   _renderDrawGrid() {
     // Drop references to flow updaters whose gfx is about to be destroyed
     // by the container removeAll — the new draft / slotted-factory render
-    // re-creates them.
+    // re-creates them. Same story for any transient particle systems
+    // attached to drawGridContainer: destroy them explicitly before the
+    // container wipe so their gfx is safely released first.
     this.draftFlow = null;
     if (this.slotFlows) this.slotFlows.length = 0;
+    if (this.draftParticles) { this.draftParticles.destroy(); this.draftParticles = null; }
+    if (this.slotParticleSystems) {
+      for (const s of this.slotParticleSystems) s.destroy();
+      this.slotParticleSystems.length = 0;
+    }
     this.drawGridContainer.removeAll(true);
 
     // Blueprint = just the grid. Sized to match the playable interior so the
@@ -1046,6 +1088,7 @@ export default class EditorScene extends Phaser.Scene {
   _renderSlottedFactories() {
     const step = this.drawCellPx;
     if (!this.slotFlows) this.slotFlows = [];
+    if (!this.slotParticleSystems) this.slotParticleSystems = [];
     for (const [factoryId, assignment] of this._blueprintAssignments) {
       const fac = (this._solutionSnapshot || []).find((f) => f.id === factoryId);
       if (!fac) continue;
@@ -1059,6 +1102,15 @@ export default class EditorScene extends Phaser.Scene {
       const cellsAtSlot = cellsLocal.map((c) => ({ ...c, r: c.r + assignment.slot.r, c: c.c + assignment.slot.c }));
       const funnelsLocal = rot.funnels.map((f) => ({ ...f }));
       const funnelsAtSlot = funnelsLocal.map((f) => ({ ...f, r: f.r + assignment.slot.r, c: f.c + assignment.slot.c }));
+      // Per-slot funnel particle system — created FIRST so its gfx sits
+      // behind the funnel and body in the container's child order. Funnels
+      // are given in slot-offset absolute coords so particle origins land
+      // on each funnel's actual render position.
+      const slotParticles = new FunnelParticleSystem(this, this.drawGridContainer, { pxCell: step });
+      slotParticles.setFunnels(
+        collectFactoryFunnelsForParticles(cellsAtSlot, funnelsAtSlot, step, 0, SHAPE_SCALE),
+      );
+      this.slotParticleSystems.push(slotParticles);
       const [cx, cy] = this._factoryCenter(cellsLocal, step, 0);
       const funnelWrap = this.add.container(ox + cx, oy + cy);
       const bodyWrap   = this.add.container(ox + cx, oy + cy);
@@ -1068,6 +1120,7 @@ export default class EditorScene extends Phaser.Scene {
       funnels.setPosition(-cx, -cy);
       const body = renderFactoryBody(this, bodyWrap, {
         cells: cellsLocal, pxCell: step, pxGap: 0, scale: SHAPE_SCALE,
+        caution: isObstacleFactory(funnelsLocal),
       });
       body.setPosition(-cx, -cy);
       // Animated dashes for the slotted factory — same look as a placed body.
@@ -1146,6 +1199,13 @@ export default class EditorScene extends Phaser.Scene {
     // takes over; nothing to render here.
     if (this.drag) return;
 
+    // Ambient funnel particles — created FIRST so the gfx lands at the
+    // back of drawGridContainer's child list (behind the funnel triangles).
+    this.draftParticles = new FunnelParticleSystem(this, this.drawGridContainer, { pxCell: this.drawCellPx });
+    this.draftParticles.setFunnels(
+      collectFactoryFunnelsForParticles(this.draftCells, this.draftFunnels, this.drawCellPx, 0, SHAPE_SCALE),
+    );
+
     // Two pulseWraps at draft's center (draw-grid-local coords), same split
     // as a placed factory so the opposite-phase pulse works here too.
     const [cx, cy] = this._factoryCenter(this.draftCells, this.drawCellPx, 0);
@@ -1159,6 +1219,7 @@ export default class EditorScene extends Phaser.Scene {
     const body    = renderFactoryBody(this, bodyWrap, {
       cells: this.draftCells, pxCell: this.drawCellPx, pxGap: 0, scale: SHAPE_SCALE,
       invalid: !validity.valid,
+      caution: isObstacleFactory(this.draftFunnels),
     });
     body.setPosition(-cx, -cy);
     this.draftPulse = { bodyWrap, funnelWrap };
@@ -1664,8 +1725,15 @@ export default class EditorScene extends Phaser.Scene {
     // Build a ghost: body + funnels + animated flow at board scale (drop
     // preview look). Flow tracked separately so the scene update loop can
     // tick its dashes — without that the ghost would look "dead" mid-drag.
+    if (this.ghostParticles) { this.ghostParticles.destroy(); this.ghostParticles = null; }
     this.ghostContainer.removeAll(true);
     this.ghostFlow = null;
+    // Ghost funnel particles — create FIRST so the gfx lands at the back
+    // of ghostContainer's child list (behind funnel/body/flow).
+    this.ghostParticles = new FunnelParticleSystem(this, this.ghostContainer, { pxCell: this.pxCell });
+    this.ghostParticles.setFunnels(
+      collectFactoryFunnelsForParticles(shape.cells, shape.funnels, this.pxCell, BOARD_GAP, SHAPE_SCALE),
+    );
     const [cx, cy] = this._factoryCenter(shape.cells, this.pxCell, BOARD_GAP);
     const funnelWrap = this.add.container(cx, cy);
     const bodyWrap   = this.add.container(cx, cy);
@@ -1673,7 +1741,10 @@ export default class EditorScene extends Phaser.Scene {
     this.ghostContainer.add(bodyWrap);
     const funnels = renderFunnels(this, funnelWrap, shape.funnels, { pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE });
     funnels.setPosition(-cx, -cy);
-    const body    = renderFactoryBody(this, bodyWrap, { cells: shape.cells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE });
+    const body    = renderFactoryBody(this, bodyWrap, {
+      cells: shape.cells, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
+      caution: isObstacleFactory(shape.funnels),
+    });
     body.setPosition(-cx, -cy);
     this.ghostFlow = renderFlow(this, this.ghostContainer, {
       cells: shape.cells, funnels: shape.funnels,
@@ -1934,6 +2005,7 @@ export default class EditorScene extends Phaser.Scene {
     this.drag = null;
     this.ghostPulse = null;
     this.ghostFlow = null;             // gfx destroyed by ghostContainer.removeAll
+    if (this.ghostParticles) { this.ghostParticles.destroy(); this.ghostParticles = null; }
     this.ghostContainer.removeAll(true);
     this.placementContainer.removeAll(true);
     this._renderDrawGrid();
@@ -2578,6 +2650,8 @@ export default class EditorScene extends Phaser.Scene {
         }
       },
     });
+    if (this.factoryFunnelParticles) this.factoryFunnelParticles.resize(this.pxCell);
+    if (this.borderFunnelParticles)  this.borderFunnelParticles.resize(this.pxCell);
 
     if (this.iconSlotHits) for (const h of this.iconSlotHits) h.destroy();
     this._buildToolbar();
@@ -2640,6 +2714,8 @@ export default class EditorScene extends Phaser.Scene {
         }
       },
     });
+    if (this.factoryFunnelParticles) this.factoryFunnelParticles.resize(this.pxCell);
+    if (this.borderFunnelParticles)  this.borderFunnelParticles.resize(this.pxCell);
     if (this.titleBar) this.titleBar.destroy();
     if (this.iconSlotHits) for (const h of this.iconSlotHits) h.destroy();
     this._buildToolbar();

@@ -7,17 +7,111 @@ import { drawPuddle } from './shapes.js';
 // Gradient fills aren't in Phaser Graphics natively; we mix BLOCK_LIGHT and
 // BLOCK_DARK into a single mid-tone fill.
 
-export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scale = SHAPE_SCALE, fill, stroke, invalid }) {
+// Hazard-tape palette — applied when `caution` is set (a factory with no
+// funnels at all: pure obstacle). Diagonal black stripes on a bright yellow
+// base read as "this is a wall, not something the shape flows through".
+const CAUTION_YELLOW = 0xd6a30b;
+const CAUTION_BLACK  = 0x1a1a1a;
+
+export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scale = SHAPE_SCALE, fill, stroke, invalid, caution }) {
   const gfx = scene.make.graphics({ add: false });
   // Invalid factories paint their perimeter in red so the author sees at a
   // glance which block needs fixing; the actual reason floats as text near
   // the body (see EditorScene._drawFactory).
   const effectiveStroke = invalid ? 0xd02020 : stroke;
-  drawFactoryBodyInto(gfx, cells, pxCell, pxGap, scale, { fill, stroke: effectiveStroke });
-  // Per-cell labels — one mini form+color glyph centered on each labeled cell.
+  const effectiveFill = caution ? CAUTION_YELLOW : fill;
+  drawFactoryBodyInto(gfx, cells, pxCell, pxGap, scale, { fill: effectiveFill, stroke: effectiveStroke });
+  // Caution factories: overlay 45° black hazard stripes directly into the
+  // body graphics. Stripes are drawn as polygon-clipped fills (per cell
+  // body-rect and per bridge rect) so they stay inside the merged body
+  // without needing Phaser's mask system (which doesn't reliably track
+  // container transforms here).
+  if (caution) drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale);
   drawCellLabels(gfx, cells, pxCell, pxGap, scale);
   container.add(gfx);
   return gfx;
+}
+
+// Paint 45°-angled hazard-tape stripes across the factory's body, clipped
+// per cell/bridge rect so the fills stay inside the merged body. Stripe
+// phase is keyed to absolute (x + y) world coordinates so adjacent cells'
+// stripes line up into continuous diagonal bands.
+function drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale) {
+  if (!cells || cells.length === 0) return;
+  const step = pxCell + pxGap;
+  const inner = pxCell * scale;
+  const m = (pxCell - inner) / 2;
+  const stripeW = Math.max(6, Math.round(pxCell * 0.24));
+  const pitch = stripeW * 2; // equal-width yellow and black bands
+
+  // Collect convex rects covering the body: one per cell, one per bridge
+  // between adjacent cells (horizontal/vertical), and one at the center of
+  // every 2x2 block so a square of four tiled cells is fully covered (the
+  // four bridges form a "+" and leave a hole at the intersection otherwise).
+  // Stripes clip against each rect independently but share a single `d`
+  // phase keyed to world coords, so the overall pattern reads as continuous.
+  const rects = [];
+  const set = new Set(cells.map((c) => `${c.r},${c.c}`));
+  for (const { r, c } of cells) {
+    rects.push([c * step + m, r * step + m, inner, inner]);
+    if (set.has(`${r},${c + 1}`)) {
+      rects.push([c * step + m + inner, r * step + m, step - inner, inner]);
+    }
+    if (set.has(`${r + 1},${c}`)) {
+      rects.push([c * step + m, r * step + m + inner, inner, step - inner]);
+    }
+    if (set.has(`${r},${c + 1}`) && set.has(`${r + 1},${c}`) && set.has(`${r + 1},${c + 1}`)) {
+      rects.push([c * step + m + inner, r * step + m + inner, step - inner, step - inner]);
+    }
+  }
+  if (rects.length === 0) return;
+
+  let dcMin = Infinity, dcMax = -Infinity;
+  for (const [x, y, w, h] of rects) {
+    if (x + y < dcMin) dcMin = x + y;
+    if (x + w + y + h > dcMax) dcMax = x + w + y + h;
+  }
+
+  gfx.fillStyle(CAUTION_BLACK, 1);
+  // Anchor the stripe phase to the factory's own top-left (dcMin) so the
+  // pattern stays fixed relative to the factory itself. Rounding dcMin to
+  // an absolute-coord pitch boundary would make the stripes jump by up to a
+  // full period whenever a factory is placed into a non-pitch-aligned cell.
+  const dStart = dcMin - pitch;
+  for (let d = dStart; d <= dcMax + pitch; d += pitch) {
+    const d1 = d, d2 = d + stripeW;
+    for (const [x, y, w, h] of rects) {
+      if (x + w + y + h < d1 || x + y > d2) continue;
+      const poly = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+      let p = clipHalfPlane(poly, (px, py) => (px + py) - d1);
+      p = clipHalfPlane(p, (px, py) => d2 - (px + py));
+      if (p.length < 3) continue;
+      gfx.beginPath();
+      gfx.moveTo(p[0][0], p[0][1]);
+      for (let i = 1; i < p.length; i++) gfx.lineTo(p[i][0], p[i][1]);
+      gfx.closePath();
+      gfx.fillPath();
+    }
+  }
+}
+
+// Sutherland-Hodgman half-plane clip. `f(x,y) >= 0` is the keep-side; points
+// outside are trimmed, edges crossing the boundary are interpolated.
+function clipHalfPlane(poly, f) {
+  if (!poly || poly.length === 0) return [];
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const fa = f(a[0], a[1]);
+    const fb = f(b[0], b[1]);
+    if (fa >= 0) out.push(a);
+    if ((fa >= 0) !== (fb >= 0)) {
+      const t = fa / (fa - fb);
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+    }
+  }
+  return out;
 }
 
 // Paints the "locked" floor tint: a solid dim square covering each cell

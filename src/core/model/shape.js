@@ -152,6 +152,14 @@ export function hasAnyLabel(cells) {
 //     (output funnels on unlabeled cells are underspecified — we wouldn't
 //     know what shape to emit).
 //   • Single-cell labeled factories are always valid.
+// True when a factory has no funnels at all — it's a pure obstacle (a wall
+// that blocks shape flow without consuming or producing anything). The body
+// renderer paints these in hazard-tape yellow-and-black stripes so the
+// player reads them as "obstacle" rather than a normal factory.
+export function isObstacleFactory(funnels) {
+  return !Array.isArray(funnels) || funnels.length === 0;
+}
+
 export function validateFactory({ cells = [], funnels = [] } = {}) {
   const hasLabels = hasAnyLabel(cells);
   const inputs  = funnels.filter((f) => f.role !== 'output');

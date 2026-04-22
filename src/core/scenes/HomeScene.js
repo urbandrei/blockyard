@@ -13,6 +13,7 @@ import {
   renderInteriorFloor, renderExteriorCheckers, renderFrameShadow, renderFrameOutline,
 } from '../render/PlayAreaFrame.js';
 import { ShapeRenderer } from '../render/ShapeRenderer.js';
+import { FunnelParticleSystem, collectFunnelsForParticles } from '../render/FunnelParticleSystem.js';
 import { Simulation } from '../sim/Simulation.js';
 import { shapeSquash } from '../render/pulse.js';
 import { genId } from '../model/level.js';
@@ -85,11 +86,14 @@ export default class HomeScene extends Phaser.Scene {
     // outside of the board via the same cut-out trick.
     this.boardContainer        = this.add.container(0, 0).setDepth(0);
     this.shapeContainer        = this.add.container(0, 0).setDepth(10);
+    // Ambient funnel particles sit just below the funnel triangles.
+    this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(13);
     this.funnelContainer       = this.add.container(0, 0).setDepth(15);
     this.interactiveContainer  = this.add.container(0, 0).setDepth(20);
     this.flowContainer         = this.add.container(0, 0).setDepth(22);
     this.exteriorContainer     = this.add.container(0, 0).setDepth(25);
     this.shadowContainer       = this.add.container(0, 0).setDepth(140);
+    this.borderFunnelParticleContainer = this.add.container(0, 0).setDepth(143);
     this.borderFunnelContainer = this.add.container(0, 0).setDepth(145);
     this.labelContainer        = this.add.container(0, 0).setDepth(150);
     this.frameContainer        = this.add.container(0, 0).setDepth(160);
@@ -114,6 +118,8 @@ export default class HomeScene extends Phaser.Scene {
       this._destroyButtons();
       for (const f of this.flowUpdaters) { try { f.destroy && f.destroy(); } catch (e) {} }
       this.flowUpdaters = [];
+      if (this.factoryFunnelParticles) { this.factoryFunnelParticles.destroy(); this.factoryFunnelParticles = null; }
+      if (this.borderFunnelParticles)  { this.borderFunnelParticles.destroy();  this.borderFunnelParticles  = null; }
       if (this._titleTexts) for (const t of this._titleTexts) { try { t.destroy(); } catch (e) {} }
       this._titleTexts = null;
     });
@@ -218,11 +224,13 @@ export default class HomeScene extends Phaser.Scene {
     const setPos = (cnt, x, y) => cnt.setPosition(x, y);
     setPos(this.boardContainer,        L.boardOriginX, L.boardOriginY);
     setPos(this.shapeContainer,        L.boardOriginX, L.boardOriginY);
+    if (this.factoryFunnelParticleContainer) setPos(this.factoryFunnelParticleContainer, L.boardOriginX, L.boardOriginY);
     setPos(this.funnelContainer,       L.boardOriginX, L.boardOriginY);
     setPos(this.interactiveContainer,  L.boardOriginX, L.boardOriginY);
     setPos(this.flowContainer,         L.boardOriginX, L.boardOriginY);
     setPos(this.exteriorContainer,     L.boardOriginX, L.boardOriginY);
     setPos(this.shadowContainer,       L.boardOriginX, L.boardOriginY);
+    if (this.borderFunnelParticleContainer) setPos(this.borderFunnelParticleContainer, L.boardOriginX, L.boardOriginY);
     setPos(this.borderFunnelContainer, L.boardOriginX, L.boardOriginY);
     setPos(this.labelContainer,        L.boardOriginX, L.boardOriginY);
     setPos(this.frameContainer,        L.boardOriginX, L.boardOriginY);
@@ -290,6 +298,17 @@ export default class HomeScene extends Phaser.Scene {
     });
     this.simTime = 0;
     this.sim.start(this.level, 0);
+
+    // Ambient funnel particles — rebuilt/resized alongside the sim so
+    // sizing stays in sync with the current pxCell. Safe to call on every
+    // layout: destroy-and-recreate keeps the funnel list fresh.
+    if (this.factoryFunnelParticles) this.factoryFunnelParticles.destroy();
+    if (this.borderFunnelParticles)  this.borderFunnelParticles.destroy();
+    this.factoryFunnelParticles = new FunnelParticleSystem(this, this.factoryFunnelParticleContainer, { pxCell: this.pxCell });
+    this.borderFunnelParticles  = new FunnelParticleSystem(this, this.borderFunnelParticleContainer,  { pxCell: this.pxCell });
+    const { factory, border } = collectFunnelsForParticles(this.level, this.pxCell, BOARD_GAP, SHAPE_SCALE);
+    this.factoryFunnelParticles.setFunnels(factory);
+    this.borderFunnelParticles.setFunnels(border);
   }
 
   _renderBoard() {
@@ -595,6 +614,8 @@ export default class HomeScene extends Phaser.Scene {
         this.shapeRenderer.update(shape, base * alongX, base * alongY);
       }
     }
+    if (this.factoryFunnelParticles) this.factoryFunnelParticles.update(time);
+    if (this.borderFunnelParticles)  this.borderFunnelParticles.update(time);
   }
 }
 
