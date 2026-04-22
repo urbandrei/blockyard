@@ -128,11 +128,37 @@ export class Simulation {
   update(now) {
     if (!this.running || this.paused) return;
 
+    // Fire any cycle boundaries we crossed during the last frame BEFORE
+    // advancing positions — so newly-spawned shapes get positioned against
+    // their correct birth time in this frame's advance pass. Under severe
+    // lag we may cross multiple boundaries in a single frame; fire once per
+    // crossed boundary with its own timestamp so each spawn cohort's math
+    // stays accurate. (Pre-fix: only ever fired once even across multi-
+    // boundary skips, which silently dropped border emissions on mobile.)
+    const boundary = Math.floor((now - this.cycleStart) / CYCLE_MS);
+    // Cap catch-up at 10 boundaries to avoid runaway spawning if the tab
+    // was backgrounded for a long time without going through pause/resume
+    // (e.g. when the platform adapter can't wire Page Visibility hooks).
+    if (boundary - this.lastBoundary > 10) this.lastBoundary = boundary - 10;
+    while (this.lastBoundary < boundary) {
+      this.lastBoundary += 1;
+      this.hitsThisCycle.clear();
+      this.firedThisCycle.clear();
+      this.inputStamps.clear();
+      const boundaryTime = this.cycleStart + this.lastBoundary * CYCLE_MS;
+      this._fireBorderSources(boundaryTime);
+    }
+
     // Position each live shape on the absolute phase curve so motion stays
-    // aligned with the pulse / dash cycle.
+    // aligned with the pulse / dash cycle. Stash prevX/prevY first so the
+    // collision pass can test the full segment the shape traversed this
+    // frame (swept collision) — a single-point hit test can't catch funnel
+    // entries when a long frame moves the shape more than hitRadius.
     const dNow = cumulativeDistance(now / CYCLE_MS);
     for (const s of this.shapes) {
       if (s.dead) continue;
+      s.prevX = s.x;
+      s.prevY = s.y;
       const delta = (dNow - s.birthCycles) * this.cellStep;
       s.x = s.birthX + s.dx * delta;
       s.y = s.birthY + s.dy * delta;
@@ -170,16 +196,6 @@ export class Simulation {
       if (s.x < -200 || s.y < -200 || s.x > 5000 || s.y > 5000) this._kill(s, false);
     }
 
-    // Cycle boundary — reset per-cycle bookkeeping and emit border sources.
-    const boundary = Math.floor((now - this.cycleStart) / CYCLE_MS);
-    if (boundary > this.lastBoundary) {
-      this.lastBoundary = boundary;
-      this.hitsThisCycle.clear();
-      this.firedThisCycle.clear();
-      this.inputStamps.clear();
-      this._fireBorderSources(now);
-    }
-
     // Sweep dead shapes.
     if (this.shapes.some((s) => s.dead)) {
       this.shapes = this.shapes.filter((s) => !s.dead);
@@ -203,7 +219,18 @@ export class Simulation {
     const age = now - s.birthTime;
     const gT = Math.max(0, Math.min(1, age / GROW_MS));
     const growScale = 1 - (1 - gT) * (1 - gT);
-    const distAhead = this._distanceToNextSink(s);
+    // sinkDist is the along-axis distance from birth to the nearest sink in
+    // the direction of motion, precomputed at spawn. We recover the current
+    // distance-ahead via traveled = axial displacement from birth (shapes
+    // move strictly along dx/dy so this is exact). Swapping the former
+    // per-frame O(funnels) scan for O(1) arithmetic is a mobile-hot win.
+    let distAhead;
+    if (!Number.isFinite(s.sinkDist)) {
+      distAhead = Infinity;
+    } else {
+      const traveled = (s.x - s.birthX) * s.dx + (s.y - s.birthY) * s.dy;
+      distAhead = s.sinkDist - traveled;
+    }
     let shrinkScale = 1;
     if (distAhead < SHRINK_DIST) {
       shrinkScale = Math.max(0, distAhead / SHRINK_DIST);
@@ -296,41 +323,69 @@ export class Simulation {
     return map;
   }
 
+  // Swept funnel hit — tests whether the shape's motion this frame (segment
+  // from prevX/prevY to x/y) passes within `hitRadius` of any funnel center.
+  // Returns the EARLIEST hit along the segment so the shape enters the first
+  // funnel it crosses, not an arbitrary one. A point-only test misses
+  // tunneling: at low mobile frame rates the shape can jump past a funnel
+  // entirely in one frame, which is the root cause of "factories don't
+  // output" under lag.
   _funnelHit(s) {
     const R2 = this.hitRadius * this.hitRadius;
+    const ax = s.prevX != null ? s.prevX : s.x;
+    const ay = s.prevY != null ? s.prevY : s.y;
+    const bx = s.x, by = s.y;
+    const abx = bx - ax, aby = by - ay;
+    const abLen2 = abx * abx + aby * aby;
+    let bestT = Infinity;
+    let bestF = null;
     for (const f of this.funnels) {
       if (s.sourceKey === f.key) continue;
-      const dx = s.x - f.x, dy = s.y - f.y;
-      if (dx * dx + dy * dy < R2) return f;
+      let t, px, py;
+      if (abLen2 < 1e-6) {
+        t = 0; px = ax; py = ay;
+      } else {
+        t = ((f.x - ax) * abx + (f.y - ay) * aby) / abLen2;
+        if (t < 0) t = 0; else if (t > 1) t = 1;
+        px = ax + abx * t;
+        py = ay + aby * t;
+      }
+      const dx = px - f.x, dy = py - f.y;
+      if (dx * dx + dy * dy < R2 && t < bestT) {
+        bestT = t; bestF = f;
+      }
     }
-    return null;
+    return bestF;
   }
 
   _wallHit(s) {
+    // Swept wall test — sample the prev→curr segment at half-cell steps so
+    // fast shapes under mobile lag can't tunnel straight through a factory
+    // body. Shapes move axis-aligned so half-cell sampling is sufficient to
+    // land at least once inside any wall cell the segment traverses.
+    const ax = s.prevX != null ? s.prevX : s.x;
+    const ay = s.prevY != null ? s.prevY : s.y;
+    const dx = s.x - ax, dy = s.y - ay;
+    const dist = Math.abs(dx) + Math.abs(dy);
+    const stepSize = this.pxCell * 0.5;
+    const steps = Math.max(1, Math.ceil(dist / stepSize));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      if (this._wallHitAt(ax + dx * t, ay + dy * t)) return true;
+    }
+    return false;
+  }
+
+  _wallHitAt(x, y) {
     const step = this.cellStep;
-    const r = Math.floor(s.y / step);
-    const col = Math.floor(s.x / step);
+    const r = Math.floor(y / step);
+    const col = Math.floor(x / step);
     const wall = this.walls.get(`${r},${col}`);
     if (!wall) return false;
     const inner = this.pxCell * wall.scale;
     const m = (this.pxCell - inner) / 2;
-    const lx = s.x - col * step, ly = s.y - r * step;
+    const lx = x - col * step, ly = y - r * step;
     return lx >= m && ly >= m && lx <= m + inner && ly <= m + inner;
-  }
-
-  _distanceToNextSink(s) {
-    let best = Infinity;
-    for (const f of this.funnels) {
-      if (!isSink(f)) continue;
-      if (s.sourceKey === f.key) continue;
-      const toFx = f.x - s.x, toFy = f.y - s.y;
-      const along = toFx * s.dx + toFy * s.dy;
-      if (along <= 0) continue;
-      const perp = Math.abs(toFx * s.dy - toFy * s.dx);
-      if (perp > this.hitRadius) continue;
-      if (along < best) best = along;
-    }
-    return best;
   }
 
   // Record a sink hit and, if this was the LAST required sink for the factory
@@ -376,14 +431,35 @@ export class Simulation {
     const stamp = this.inputStamps && this.inputStamps.get(funnel.ownerId);
     const form  = (declared && declared.form)  || (stamp && stamp.form)  || DEFAULT_SHAPE_TYPE.form;
     const color = (declared && declared.color) || (stamp && stamp.color) || DEFAULT_SHAPE_TYPE.color;
+    // Precompute the axial distance from birth to the nearest sink ahead in
+    // the shape's direction of motion. shapeScale() uses this every frame
+    // to drive the shrink animation; caching here saves an O(funnels) scan
+    // per live shape per frame. Valid because dx/dy and the funnel set are
+    // both constant for the life of the shape.
+    let sinkDist = Infinity;
+    const R = this.hitRadius;
+    for (const f of this.funnels) {
+      if (!isSink(f)) continue;
+      if (f.key === funnel.key) continue;
+      const toFx = f.x - sx, toFy = f.y - sy;
+      const along = toFx * funnel.dx + toFy * funnel.dy;
+      if (along <= 0) continue;
+      const perp = toFx * funnel.dy - toFy * funnel.dx;
+      if ((perp < 0 ? -perp : perp) > R) continue;
+      if (along < sinkDist) sinkDist = along;
+    }
     const shape = {
       id: this.nextId++,
       x: sx, y: sy,
+      // Swept-collision reads prevX/prevY; seed to birth position so the
+      // first post-spawn frame tests the segment from birth → new position.
+      prevX: sx, prevY: sy,
       birthX: sx, birthY: sy,
       birthTime: now,
       birthCycles: cumulativeDistance(now / CYCLE_MS),
       dx: funnel.dx, dy: funnel.dy,
       sourceKey: funnel.key,
+      sinkDist,
       form, color,
       scale: 0,
       dead: false,

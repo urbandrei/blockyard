@@ -11,6 +11,16 @@ const DASH_COUNT_PER_CELL = 2.2; // how many dashes show up per board cell of pa
 export function renderFlow(scene, container, { cells, funnels, pxCell, pxGap, scale = SHAPE_SCALE }) {
   const segments = buildManifoldSegments(cells, funnels, pxCell, pxGap, scale);
   const sampled = segments.map((s) => sampleSegment(s));
+  // Precompute per-segment dash constants once — they depend only on
+  // totalLength and pxCell, which don't change across frames.
+  for (const seg of sampled) {
+    if (!seg.totalLength) { seg.dashCount = 0; continue; }
+    seg.dashCount = Math.max(1, Math.round(seg.totalLength / pxCell * DASH_COUNT_PER_CELL));
+    seg.dashStep  = seg.totalLength / seg.dashCount;
+    seg.dashLen   = Math.max(2, seg.dashStep * 0.45);
+    seg.fadeMargin = pxCell * 0.6;
+  }
+  const strokeW = outlineWidth(pxCell);
   const gfx = scene.make.graphics({ add: false });
   container.add(gfx);
   return {
@@ -18,7 +28,7 @@ export function renderFlow(scene, container, { cells, funnels, pxCell, pxGap, sc
     // `time` is the raw scene time in ms — we need monotonic input so the dash
     // advance doesn't wrap back to 0 at the cycle boundary (which was causing
     // the visible "jump" every cycle).
-    update(time) { paintFlow(gfx, sampled, time, pxCell); },
+    update(time) { paintFlow(gfx, sampled, time, pxCell, strokeW); },
   };
 }
 
@@ -90,40 +100,91 @@ function lerpAngle(a0, a1, t, sweep) {
   return a0 + d * t;
 }
 
-function paintFlow(gfx, segmentsSampled, time, pxCell) {
+function paintFlow(gfx, segmentsSampled, time, pxCell, strokeW) {
   gfx.clear();
-  const strokeW = outlineWidth(pxCell);
   // Linear constant-speed advance: one board cell per cycle, no plateau/ease.
   // Monotonic across cycle boundaries so there's no cycle-boundary jump.
   const advance = (time / CYCLE_MS) * pxCell;
+  // Collect faded edge dashes across all segments — we draw them after the
+  // full-alpha batch so each can carry its own alpha on its own strokePath.
+  // The batched full-alpha dashes all share one lineStyle + one strokePath
+  // per segment, which on mobile cuts a significant number of GL state
+  // flushes vs. one strokePath per dash.
+  let faded = null;
   for (const seg of segmentsSampled) {
-    if (!seg.totalLength) continue;
-    const dashCount = Math.max(1, Math.round(seg.totalLength / pxCell * DASH_COUNT_PER_CELL));
-    const dashStep = seg.totalLength / dashCount;
-    const dashLen = Math.max(2, dashStep * 0.45);
-    for (let i = 0; i < dashCount; i++) {
+    if (!seg.dashCount) continue;
+    const total = seg.totalLength;
+    const dashStep = seg.dashStep;
+    const dashLen = seg.dashLen;
+    const fadeMargin = seg.fadeMargin;
+    let anyFull = false;
+    gfx.lineStyle(strokeW, MANIFOLD_STROKE, 1);
+    gfx.beginPath();
+    for (let i = 0; i < seg.dashCount; i++) {
       // Dash midpoints are evenly spaced and advance together; that way fade
       // is computed on a stable-per-dash value and the dash's alpha changes
       // smoothly as it slides toward the funnel edge.
       const baseMid = i * dashStep + dashLen / 2;
-      const mid = ((baseMid + advance) % seg.totalLength + seg.totalLength) % seg.totalLength;
-      const start = (mid - dashLen / 2 + seg.totalLength) % seg.totalLength;
-      const end   = (mid + dashLen / 2) % seg.totalLength;
-      const alpha = endpointFade(mid, seg.totalLength, pxCell);
+      let mid = (baseMid + advance) % total;
+      if (mid < 0) mid += total;
+      const alpha = endpointFadeInline(mid, total, fadeMargin);
       if (alpha <= 0.01) continue;
-      drawDash(gfx, seg, start, end, strokeW, alpha);
+      let start = mid - dashLen / 2;
+      if (start < 0) start += total;
+      const end = (mid + dashLen / 2) % total;
+      if (alpha > 0.99) {
+        appendDashToPath(gfx, seg, start, end);
+        anyFull = true;
+      } else {
+        (faded || (faded = [])).push(seg, start, end, alpha);
+      }
+    }
+    if (anyFull) gfx.strokePath();
+  }
+  if (faded) {
+    for (let i = 0; i < faded.length; i += 4) {
+      drawDash(gfx, faded[i], faded[i + 1], faded[i + 2], strokeW, faded[i + 3]);
     }
   }
 }
 
-// Fade a dash near the segment's endpoints so the line doesn't punch into the
-// funnel's fill. Fades linearly over a margin of ~0.6 * pxCell from each end.
-function endpointFade(dist, total, pxCell) {
-  const margin = pxCell * 0.6;
-  if (total <= margin * 2) return Math.min(dist / margin, (total - dist) / margin, 1);
+function endpointFadeInline(dist, total, margin) {
+  if (total <= margin * 2) {
+    const a = dist / margin;
+    const b = (total - dist) / margin;
+    return Math.min(a < 1 ? a : 1, b < 1 ? b : 1);
+  }
   const fromStart = dist;
   const fromEnd   = total - dist;
-  return Math.max(0, Math.min(1, fromStart / margin, fromEnd / margin));
+  const m = fromStart < fromEnd ? fromStart : fromEnd;
+  if (m >= margin) return 1;
+  return m <= 0 ? 0 : m / margin;
+}
+
+function appendDashToPath(gfx, seg, start, end) {
+  if (end > start) {
+    appendSubPath(gfx, seg, start, end);
+    return;
+  }
+  appendSubPath(gfx, seg, start, seg.totalLength);
+  appendSubPath(gfx, seg, 0, end);
+}
+
+function appendSubPath(gfx, seg, from, to) {
+  if (to <= from) return;
+  const s = seg.samples;
+  const p0 = pointAt(seg, from);
+  gfx.moveTo(p0[0], p0[1]);
+  for (let i = 1; i < s.length; i++) {
+    if (s[i].cum <= from) continue;
+    if (s[i].cum >= to) {
+      const prev = s[i - 1];
+      const t = (to - prev.cum) / (s[i].cum - prev.cum || 1);
+      gfx.lineTo(prev.x + (s[i].x - prev.x) * t, prev.y + (s[i].y - prev.y) * t);
+      return;
+    }
+    gfx.lineTo(s[i].x, s[i].y);
+  }
 }
 
 function drawDash(gfx, seg, start, end, strokeW, alpha) {
