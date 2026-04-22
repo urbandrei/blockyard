@@ -889,39 +889,52 @@ export default class PlayerScene extends Phaser.Scene {
   update(time, delta) {
     if (!this.ready) return;
     if (this.simState === 'running') this.simTime += delta;
-    const t = (this.simTime % CYCLE_MS) / CYCLE_MS;
-    const sq = shapeSquash(t);
-    const applyPair = (entry) => {
-      if (entry.bodyWrap)   { entry.bodyWrap.scaleX   = sq.body.scaleX;    entry.bodyWrap.scaleY   = sq.body.scaleY; }
-      if (entry.funnelWrap) { entry.funnelWrap.scaleX = sq.funnels.scaleX; entry.funnelWrap.scaleY = sq.funnels.scaleY; }
-    };
-    // Locked factories dim to 0.65 when the sim isn't running so the player
-    // can read the dark grid-cell tint through the body; full alpha during
-    // play so the block reads as a firm wall.
-    const lockedAlpha = (this.simState === 'running') ? 1.0 : 0.65;
-    for (const entry of this.factoryRefs.values()) {
-      applyPair(entry);
-      if (entry.locked && entry.bodyWrap) entry.bodyWrap.alpha = lockedAlpha;
+    // 30fps cosmetic tick — flow repaint + squash/stretch are visual-only
+    // and don't need to run every frame. Halves per-frame GPU cost at 60fps;
+    // at <30fps (mobile lag) they fire every frame, same as before.
+    this._cosmeticAccum = (this._cosmeticAccum || 0) + (delta || 16);
+    const cosmeticTick = this._cosmeticAccum >= 32;
+    if (cosmeticTick) this._cosmeticAccum = 0;
+    if (cosmeticTick) {
+      const t = (this.simTime % CYCLE_MS) / CYCLE_MS;
+      const sq = shapeSquash(t);
+      const applyPair = (entry) => {
+        if (entry.bodyWrap)   { entry.bodyWrap.scaleX   = sq.body.scaleX;    entry.bodyWrap.scaleY   = sq.body.scaleY; }
+        if (entry.funnelWrap) { entry.funnelWrap.scaleX = sq.funnels.scaleX; entry.funnelWrap.scaleY = sq.funnels.scaleY; }
+      };
+      // Locked factories dim to 0.65 when the sim isn't running so the player
+      // can read the dark grid-cell tint through the body; full alpha during
+      // play so the block reads as a firm wall.
+      const lockedAlpha = (this.simState === 'running') ? 1.0 : 0.65;
+      for (const entry of this.factoryRefs.values()) {
+        applyPair(entry);
+        if (entry.locked && entry.bodyWrap) entry.bodyWrap.alpha = lockedAlpha;
+      }
+      for (const entry of this.blueprintRefs.values()) applyPair(entry);
+      if (this.ghostPulse) applyPair(this.ghostPulse);
+      if (this.borderFunnelWraps) {
+        for (const w of this.borderFunnelWraps) { w.scaleX = sq.funnels.scaleX; w.scaleY = sq.funnels.scaleY; }
+      }
+      if (this.bufferLabelWraps) {
+        for (const w of this.bufferLabelWraps) { w.scaleX = sq.body.scaleX; w.scaleY = sq.body.scaleY; }
+      }
+      // Pass raw `time` so the flow dashes animate even before/after the sim
+      // is running (idle and paused states still show movement). Animate every
+      // factory copy on screen — placed body, blueprint slot previews, ghost.
+      for (const f of this.flowUpdaters) f.update(time);
+      if (this.blueprintFlows) for (const f of this.blueprintFlows) f.update(time);
+      if (this.ghostFlow) this.ghostFlow.update(time);
     }
-    for (const entry of this.blueprintRefs.values()) applyPair(entry);
-    if (this.ghostPulse) applyPair(this.ghostPulse);
-    if (this.borderFunnelWraps) {
-      for (const w of this.borderFunnelWraps) { w.scaleX = sq.funnels.scaleX; w.scaleY = sq.funnels.scaleY; }
-    }
-    if (this.bufferLabelWraps) {
-      for (const w of this.bufferLabelWraps) { w.scaleX = sq.body.scaleX; w.scaleY = sq.body.scaleY; }
-    }
-    // Pass raw `time` so the flow dashes animate even before/after the sim
-    // is running (idle and paused states still show movement). Animate every
-    // factory copy on screen — placed body, blueprint slot previews, ghost.
-    for (const f of this.flowUpdaters) f.update(time);
-    if (this.blueprintFlows) for (const f of this.blueprintFlows) f.update(time);
-    if (this.ghostFlow) this.ghostFlow.update(time);
 
     if (this.drag) {
-      const smooth = 0.35;
-      this.ghostContainer.x += (this.ghostTargetX - this.ghostContainer.x) * smooth;
-      this.ghostContainer.y += (this.ghostTargetY - this.ghostContainer.y) * smooth;
+      // dt-based exponential smoothing — frame-rate-independent so the
+      // ghost doesn't visibly drag behind the pointer under mobile lag.
+      // tau = 60ms matches the old 35%-per-60fps-frame feel at 60fps and
+      // closes ~63% per 60ms regardless of actual frame rate.
+      const dtClamped = Math.min(100, delta || 16);
+      const alpha = 1 - Math.exp(-dtClamped / 60);
+      this.ghostContainer.x += (this.ghostTargetX - this.ghostContainer.x) * alpha;
+      this.ghostContainer.y += (this.ghostTargetY - this.ghostContainer.y) * alpha;
     }
 
     if (this.simState === 'running') {

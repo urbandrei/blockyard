@@ -1,15 +1,15 @@
 {
   "id": "level-11",
-  "name": "Repaint",
+  "name": "Chameleon",
   "number": 0,
   "board": {
-    "cols": 7,
-    "rows": 7
+    "cols": 5,
+    "rows": 5
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "l11-0",
+      "id": "fjr1xw0l",
       "slot": {
         "row": 1,
         "col": 0
@@ -19,7 +19,70 @@
           "r": 0,
           "c": 0,
           "label": {
-            "color": "blue"
+            "form": "square"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "fwdj2y4c",
+      "slot": {
+        "row": 1,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "green"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "fd6neelm",
+      "slot": {
+        "row": 1,
+        "col": 2
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "red",
+            "form": "circle"
           }
         }
       ],
@@ -45,12 +108,36 @@
     "funnels": [
       {
         "r": 0,
+        "c": 2,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 4,
+        "c": 2,
+        "side": "top",
+        "role": "output"
+      },
+      {
+        "r": 0,
+        "c": 1,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 0,
         "c": 3,
         "side": "bottom",
         "role": "input"
       },
       {
-        "r": 6,
+        "r": 4,
+        "c": 1,
+        "side": "top",
+        "role": "output"
+      },
+      {
+        "r": 4,
         "c": 3,
         "side": "top",
         "role": "output"
@@ -60,25 +147,158 @@
   "inputs": [
     {
       "r": 0,
+      "c": 2,
+      "side": "bottom",
+      "type": {
+        "form": "triangle",
+        "color": "red"
+      }
+    },
+    {
+      "r": 0,
+      "c": 1,
+      "side": "bottom",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    },
+    {
+      "r": 0,
       "c": 3,
       "side": "bottom",
       "type": {
         "form": "square",
-        "color": "red"
+        "color": "green"
       }
     }
   ],
   "outputs": [
     {
-      "r": 6,
-      "c": 3,
+      "r": 4,
+      "c": 2,
+      "side": "top",
+      "type": {
+        "form": "triangle",
+        "color": "green"
+      }
+    },
+    {
+      "r": 4,
+      "c": 1,
       "side": "top",
       "type": {
         "form": "square",
         "color": "blue"
       }
+    },
+    {
+      "r": 4,
+      "c": 3,
+      "side": "top",
+      "type": {
+        "form": "circle",
+        "color": "red"
+      }
     }
   ],
-  "instructionalText": "Puddle factories: any shape in, this color out.",
-  "boss": null
+  "instructionalText": "Color labels on factories change the color.",
+  "boss": null,
+  "author": null,
+  "solution": {
+    "factories": [
+      {
+        "id": "fjr1xw0l",
+        "anchor": {
+          "row": 2,
+          "col": 1
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "form": "square"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "fwdj2y4c",
+        "anchor": {
+          "row": 2,
+          "col": 2
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "green"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "fd6neelm",
+        "anchor": {
+          "row": 2,
+          "col": 3
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "red",
+              "form": "circle"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      }
+    ]
+  },
+  "likes": 0
 }

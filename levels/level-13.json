@@ -1,20 +1,28 @@
 {
   "id": "level-13",
-  "name": "Same cell",
+  "name": "Valid input",
   "number": 0,
   "board": {
-    "cols": 8,
-    "rows": 8
+    "cols": 6,
+    "rows": 6
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "l13-0",
+      "id": "f74mwviq",
       "slot": {
         "row": 1,
         "col": 0
       },
       "cells": [
+        {
+          "r": 0,
+          "c": 1,
+          "label": {
+            "form": "triangle",
+            "color": "blue"
+          }
+        },
         {
           "r": 0,
           "c": 0,
@@ -33,7 +41,7 @@
         },
         {
           "r": 0,
-          "c": 0,
+          "c": 1,
           "side": "bottom",
           "role": "output"
         }
@@ -45,41 +53,86 @@
   "border": {
     "funnels": [
       {
-        "r": 0,
-        "c": 3,
-        "side": "bottom",
-        "role": "input"
-      },
-      {
-        "r": 7,
+        "r": 5,
         "c": 3,
         "side": "top",
         "role": "output"
+      },
+      {
+        "r": 0,
+        "c": 2,
+        "side": "bottom",
+        "role": "input"
       }
     ]
   },
   "inputs": [
     {
       "r": 0,
-      "c": 3,
+      "c": 2,
       "side": "bottom",
-      "type": {
-        "form": "circle",
-        "color": "blue"
-      }
-    }
-  ],
-  "outputs": [
-    {
-      "r": 7,
-      "c": 3,
-      "side": "top",
       "type": {
         "form": "square",
         "color": "red"
       }
     }
   ],
-  "instructionalText": "In and out can sit on the same cell.",
-  "boss": null
+  "outputs": [
+    {
+      "r": 5,
+      "c": 3,
+      "side": "top",
+      "type": {
+        "form": "triangle",
+        "color": "blue"
+      }
+    }
+  ],
+  "instructionalText": "Inputs can have requirement labels",
+  "boss": null,
+  "author": null,
+  "solution": {
+    "factories": [
+      {
+        "id": "f74mwviq",
+        "anchor": {
+          "row": 2,
+          "col": 2
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 1,
+            "label": {
+              "form": "triangle",
+              "color": "blue"
+            }
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "form": "square",
+              "color": "red"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 1,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      }
+    ]
+  },
+  "likes": 0
 }

@@ -1,15 +1,15 @@
 {
   "id": "level-16",
-  "name": "Sort and spin",
+  "name": "Multi-input",
   "number": 0,
   "board": {
-    "cols": 8,
-    "rows": 8
+    "cols": 7,
+    "rows": 7
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "l16-0",
+      "id": "f2lc7cxf",
       "slot": {
         "row": 1,
         "col": 0
@@ -17,74 +17,26 @@
       "cells": [
         {
           "r": 0,
-          "c": 0
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        }
-      ],
-      "rotation": 0
-    },
-    {
-      "id": "l16-1",
-      "slot": {
-        "row": 1,
-        "col": 1
-      },
-      "cells": [
-        {
-          "r": 0,
           "c": 0,
           "label": {
+            "color": "red",
+            "form": "square"
+          }
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "label": {
+            "color": "blue",
             "form": "circle"
           }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
         },
         {
           "r": 0,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        }
-      ],
-      "rotation": 0
-    },
-    {
-      "id": "l16-2",
-      "slot": {
-        "row": 1,
-        "col": 2
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0,
+          "c": 2,
           "label": {
-            "color": "blue"
+            "form": "triangle",
+            "color": "green"
           }
         }
       ],
@@ -97,7 +49,13 @@
         },
         {
           "r": 0,
-          "c": 0,
+          "c": 2,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 1,
           "side": "bottom",
           "role": "output"
         }
@@ -109,56 +67,115 @@
   "border": {
     "funnels": [
       {
-        "r": 0,
+        "r": 6,
         "c": 3,
+        "side": "top",
+        "role": "output"
+      },
+      {
+        "r": 0,
+        "c": 2,
         "side": "bottom",
         "role": "input"
       },
       {
-        "r": 3,
-        "c": 0,
-        "side": "right",
-        "role": "output"
-      },
-      {
-        "r": 7,
-        "c": 3,
-        "side": "top",
-        "role": "output"
+        "r": 0,
+        "c": 4,
+        "side": "bottom",
+        "role": "input"
       }
     ]
   },
   "inputs": [
     {
       "r": 0,
-      "c": 3,
+      "c": 2,
       "side": "bottom",
       "type": {
         "form": "square",
         "color": "red"
       }
+    },
+    {
+      "r": 0,
+      "c": 4,
+      "side": "bottom",
+      "type": {
+        "form": "triangle",
+        "color": "green"
+      }
     }
   ],
   "outputs": [
     {
-      "r": 3,
-      "c": 0,
-      "side": "right",
-      "type": {
-        "form": "circle",
-        "color": "red"
-      }
-    },
-    {
-      "r": 7,
+      "r": 6,
       "c": 3,
       "side": "top",
       "type": {
-        "form": "square",
+        "form": "circle",
         "color": "blue"
       }
     }
   ],
-  "instructionalText": null,
-  "boss": null
+  "instructionalText": "All inputs must be valid to get the output.",
+  "boss": null,
+  "author": null,
+  "solution": {
+    "factories": [
+      {
+        "id": "f2lc7cxf",
+        "anchor": {
+          "row": 3,
+          "col": 2
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "red",
+              "form": "square"
+            }
+          },
+          {
+            "r": 0,
+            "c": 1,
+            "label": {
+              "color": "blue",
+              "form": "circle"
+            }
+          },
+          {
+            "r": 0,
+            "c": 2,
+            "label": {
+              "form": "triangle",
+              "color": "green"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 2,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 1,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      }
+    ]
+  },
+  "likes": 0
 }

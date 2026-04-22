@@ -275,51 +275,67 @@ export default class EditorScene extends Phaser.Scene {
 
   update(time) {
     if (!this.ready) return;
-    const t = (time % CYCLE_MS) / CYCLE_MS;
-    // Subtle squash-and-stretch. Each factory has two wrap containers
-    // positioned at the factory's center: one for the body, one for the
-    // funnels. The funnels run in opposite phase so they react against the
-    // body as it deforms. Both wraps scale around their shared center so
-    // nothing drifts.
-    const sq = shapeSquash(t);
-    const applyPair = (entry) => {
-      if (entry.bodyWrap)   { entry.bodyWrap.scaleX   = sq.body.scaleX;    entry.bodyWrap.scaleY   = sq.body.scaleY; }
-      if (entry.funnelWrap) { entry.funnelWrap.scaleX = sq.funnels.scaleX; entry.funnelWrap.scaleY = sq.funnels.scaleY; }
-    };
-    for (const entry of this.factoryRefs.values()) applyPair(entry);
-    if (this.draftPulse) applyPair(this.draftPulse);
-    if (this.ghostPulse) applyPair(this.ghostPulse);
-    // Border funnel triangles pulse like factory funnels; buffer label
-    // boxes pulse like factory BODIES — so the triangle and its label box
-    // alternate the same way a factory's body and its funnels do.
-    if (this.borderFunnelWraps) {
-      for (const w of this.borderFunnelWraps) {
-        w.scaleX = sq.funnels.scaleX;
-        w.scaleY = sq.funnels.scaleY;
+    const dt = this._lastUpdateTime != null ? Math.min(100, time - this._lastUpdateTime) : 16;
+    this._lastUpdateTime = time;
+    // 30fps cosmetic tick — flow repaint and the squash/stretch sweep are
+    // purely visual and don't need to run every frame. Gate them on an
+    // accumulator so at 60fps they fire every other frame (still smooth),
+    // and at <30fps they fire every frame (no worse than before). Cuts
+    // per-frame mobile GPU cost roughly in half.
+    this._cosmeticAccum = (this._cosmeticAccum || 0) + dt;
+    const cosmeticTick = this._cosmeticAccum >= 32;
+    if (cosmeticTick) this._cosmeticAccum = 0;
+    if (cosmeticTick) {
+      const t = (time % CYCLE_MS) / CYCLE_MS;
+      // Subtle squash-and-stretch. Each factory has two wrap containers
+      // positioned at the factory's center: one for the body, one for the
+      // funnels. The funnels run in opposite phase so they react against
+      // the body as it deforms. Both wraps scale around their shared
+      // center so nothing drifts.
+      const sq = shapeSquash(t);
+      const applyPair = (entry) => {
+        if (entry.bodyWrap)   { entry.bodyWrap.scaleX   = sq.body.scaleX;    entry.bodyWrap.scaleY   = sq.body.scaleY; }
+        if (entry.funnelWrap) { entry.funnelWrap.scaleX = sq.funnels.scaleX; entry.funnelWrap.scaleY = sq.funnels.scaleY; }
+      };
+      for (const entry of this.factoryRefs.values()) applyPair(entry);
+      if (this.draftPulse) applyPair(this.draftPulse);
+      if (this.ghostPulse) applyPair(this.ghostPulse);
+      // Border funnel triangles pulse like factory funnels; buffer label
+      // boxes pulse like factory BODIES — so the triangle and its label
+      // box alternate the same way a factory's body and its funnels do.
+      if (this.borderFunnelWraps) {
+        for (const w of this.borderFunnelWraps) {
+          w.scaleX = sq.funnels.scaleX;
+          w.scaleY = sq.funnels.scaleY;
+        }
       }
-    }
-    if (this.bufferLabelWraps) {
-      for (const w of this.bufferLabelWraps) {
-        w.scaleX = sq.body.scaleX;
-        w.scaleY = sq.body.scaleY;
+      if (this.bufferLabelWraps) {
+        for (const w of this.bufferLabelWraps) {
+          w.scaleX = sq.body.scaleX;
+          w.scaleY = sq.body.scaleY;
+        }
       }
+
+      // Pass raw `time` so the dash pattern is monotonic (no cycle-boundary
+      // jump). Animate every factory copy on screen — placed body, draft
+      // composer, ghost during drag, and blueprint-setup slot previews —
+      // even when the sim isn't actively spawning shapes.
+      for (const f of this.flowUpdaters) f.update(time);
+      if (this.draftFlow) this.draftFlow.update(time);
+      if (this.ghostFlow) this.ghostFlow.update(time);
+      if (this.slotFlows) for (const f of this.slotFlows) f.update(time);
     }
 
-    // Pass raw `time` so the dash pattern is monotonic (no cycle-boundary jump).
-    // Animate every factory copy on screen — placed body, draft composer,
-    // ghost during drag, and blueprint-setup slot previews — even when the
-    // sim isn't actively spawning shapes.
-    for (const f of this.flowUpdaters) f.update(time);
-    if (this.draftFlow) this.draftFlow.update(time);
-    if (this.ghostFlow) this.ghostFlow.update(time);
-    if (this.slotFlows) for (const f of this.slotFlows) f.update(time);
-
-    // Smooth-lerp the drag ghost toward its target so snap-to-cell and
-    // snap-between-cells transitions feel fluid instead of jumpy.
+    // Smooth-lerp the drag ghost toward its target using a dt-based
+    // exponential: alpha = 1 - exp(-dt / tau). `tau` is the time constant
+    // in ms — how long it takes the ghost to close ~63% of the remaining
+    // distance. Frame-rate-independent: at 60fps this lerps ~24% per frame
+    // (matching the old feel), and at 10fps it lerps ~63% per frame so the
+    // ghost doesn't visibly drag behind the pointer under mobile lag.
     if (this.drag) {
-      const smooth = 0.35;
-      this.ghostContainer.x += (this.ghostTargetX - this.ghostContainer.x) * smooth;
-      this.ghostContainer.y += (this.ghostTargetY - this.ghostContainer.y) * smooth;
+      const alpha = 1 - Math.exp(-dt / 60);
+      this.ghostContainer.x += (this.ghostTargetX - this.ghostContainer.x) * alpha;
+      this.ghostContainer.y += (this.ghostTargetY - this.ghostContainer.y) * alpha;
     }
 
     this.sim.update(time);
