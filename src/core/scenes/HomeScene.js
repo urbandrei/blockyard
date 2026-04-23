@@ -392,7 +392,10 @@ export default class HomeScene extends Phaser.Scene {
       return 'COMMUNITY';
     };
     const onTapFor = (idx) => {
-      if (idx === 0) return () => { if (this._next) fadeTo(this, 'Player', { levelId: this._next.id }); };
+      if (idx === 0) return () => {
+        if (this._allComplete) { fadeTo(this, 'LevelSelect'); return; }
+        if (this._next) fadeTo(this, 'Player', { levelId: this._next.id });
+      };
       if (idx === 1) return () => fadeTo(this, 'LevelSelect');
       return () => fadeTo(this, 'Community');
     };

@@ -24,6 +24,10 @@ import { ShapeRenderer } from '../render/ShapeRenderer.js';
 import { LaserRenderer } from '../render/LaserRenderer.js';
 import { BufferMarkerRenderer } from '../render/BufferMarkerRenderer.js';
 import { TitleBar } from '../ui/TitleBar.js';
+import { StagePillStrip } from '../ui/StagePillStrip.js';
+import {
+  stageColor, CURRENT_STAGE_COLOR, FUTURE_STAGE_ALPHA, PAST_STAGE_ALPHA, CELL_TINT_ALPHA,
+} from '../ui/stageColors.js';
 import { renderAcidPits } from '../render/AcidPitRenderer.js';
 import { ExportPanel } from '../ui/ExportPanel.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
@@ -1082,7 +1086,12 @@ export default class EditorScene extends Phaser.Scene {
     // centered on the cell so they breathe with the factory funnels. They
     // live in `borderFunnelContainer` (between shadow and frame outline)
     // so they read on top of the inner shadow but under the frame.
-    const border = renderBorder(this, this.boardContainer, this.borderFunnelContainer, this.level, { pxCell: this.pxCell, pxGap: BOARD_GAP });
+    let border;
+    if (this._bossMode && this.level.boss && Array.isArray(this.level.boss.rounds)) {
+      border = this._renderBossBorderEditor();
+    } else {
+      border = renderBorder(this, this.boardContainer, this.borderFunnelContainer, this.level, { pxCell: this.pxCell, pxGap: BOARD_GAP });
+    }
     this.borderFunnelWraps = border.wraps;
     for (const factory of this.level.factories) {
       const entry = this._drawFactory(factory);
@@ -1100,6 +1109,48 @@ export default class EditorScene extends Phaser.Scene {
     renderFrameOutline(this, this.frameContainer, { board: this.level.board, pxCell: this.pxCell });
     // Buffer-funnel labels in their own high-depth container.
     this._renderBorderFunnelLabels();
+  }
+
+  // Render every stage's border funnels with stage-colored cell tints. The
+  // current stage is fully opaque; other stages render dimmed as read-only
+  // locked previews. The authoring `applyBossRoundToWorking` only loads the
+  // current stage's border into the working level, so this method also
+  // includes other stages' funnels as decorative overlays.
+  _renderBossBorderEditor() {
+    const rounds = (this.level.boss && this.level.boss.rounds) || [];
+    const currentIdx = this._bossStageIdx | 0;
+    const keyOf = (f) => `${f.r},${f.c},${f.side},${f.role}`;
+    const display = [];
+    const stageByKey = new Map();
+    // Current stage = what's currently in `this.level.border` (working slots).
+    for (const f of ((this.level.border && this.level.border.funnels) || [])) {
+      const k = keyOf(f);
+      if (stageByKey.has(k)) continue;
+      stageByKey.set(k, currentIdx);
+      display.push(f);
+    }
+    for (let i = 0; i < rounds.length; i++) {
+      if (i === currentIdx) continue;
+      const fs = (rounds[i] && rounds[i].border && rounds[i].border.funnels) || [];
+      for (const f of fs) {
+        const k = keyOf(f);
+        if (stageByKey.has(k)) continue;
+        stageByKey.set(k, i);
+        display.push(f);
+      }
+    }
+    const getOpts = (f) => {
+      const sIdx = stageByKey.get(keyOf(f));
+      const isCurrent = sIdx === currentIdx;
+      const stageBg = isCurrent ? CURRENT_STAGE_COLOR : stageColor(sIdx != null ? sIdx : 0);
+      const alpha = isCurrent ? 1 : (sIdx < currentIdx ? PAST_STAGE_ALPHA : FUTURE_STAGE_ALPHA);
+      return { stageBg, stageBgAlpha: CELL_TINT_ALPHA, alpha };
+    };
+    return renderBorder(this, this.boardContainer, this.borderFunnelContainer, this.level, {
+      pxCell: this.pxCell, pxGap: BOARD_GAP,
+      funnels: display,
+      getOpts,
+    });
   }
 
   // Label each buffer funnel with a form+color icon showing the typed shape
@@ -1269,6 +1320,35 @@ export default class EditorScene extends Phaser.Scene {
       this._renderSlottedFactories();
     } else {
       this._renderDraftShape();
+    }
+
+    // Boss-mode: overlay the stage pill strip on the blueprint's top row.
+    // No boss levels use row 0 for blueprint slots, so this strip visually
+    // claims that row without colliding with author data.
+    if (this._bossStagePills) { this._bossStagePills.destroy(); this._bossStagePills = null; }
+    if (this._bossMode && this.level.boss && Array.isArray(this.level.boss.rounds)) {
+      const currentIdx = this._bossStageIdx | 0;
+      const stripHost = this.add.container(0, 0);
+      this.drawGridContainer.add(stripHost);
+      this._bossStagePills = new StagePillStrip(this, {
+        x: 0, y: 0, width: dgW, height: step,
+        stageCount: this.level.boss.rounds.length,
+        currentIdx,
+        hintText: (this.level.instructionalText || ''),
+        hintVisible: false,
+        parent: stripHost,
+        pillsInteractive: true,
+        onPillTap: (idx) => this._bossJumpToStage(idx),
+      });
+    }
+  }
+
+  _bossJumpToStage(idx) {
+    if (!this._bossMode || !this.level.boss) return;
+    if (idx < 0 || idx >= (this.level.boss.rounds || []).length) return;
+    if (idx === this._bossStageIdx) return;
+    if (typeof this._bossEnterStage === 'function') {
+      this._bossEnterStage(idx);
     }
   }
 

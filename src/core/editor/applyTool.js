@@ -276,6 +276,20 @@ function _applyBoardPiece(scene, tool, target) {
   if (payload.kind === 'borderFunnel') {
     if (target.kind !== 'borderEdge') return { mutated: false };
     const { r, c, side } = target;
+    // Cross-round collision: in boss editor mode, reject placement when
+    // another round already claims this (r,c,side) slot for any funnel
+    // role. "You can't stack border items on top of each other" across
+    // rounds — each slot is owned by exactly one stage.
+    if (scene._bossMode && scene.level.boss && Array.isArray(scene.level.boss.rounds)) {
+      const currentIdx = scene._bossStageIdx | 0;
+      for (let i = 0; i < scene.level.boss.rounds.length; i++) {
+        if (i === currentIdx) continue;
+        const fs = (scene.level.boss.rounds[i].border && scene.level.boss.rounds[i].border.funnels) || [];
+        if (fs.some((f) => f.r === r && f.c === c && f.side === side)) {
+          return { mutated: false, rejectReason: 'borderSlotClaimed' };
+        }
+      }
+    }
     if (!scene.level.border) scene.level.border = { funnels: [] };
     const arr = scene.level.border.funnels;
     const existingIdx = arr.findIndex((f) => f.r === r && f.c === c && f.side === side);

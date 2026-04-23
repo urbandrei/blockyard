@@ -158,8 +158,10 @@ export default class LevelSelectScene extends Phaser.Scene {
       const rows = Math.max(1, Math.ceil(lvls.length / cols));
       y += rows * btnSize + Math.max(0, rows - 1) * BLOCK_GAP + BLOCK_GAP;
 
-      this._drawBossTile(centerX, y + BOSS_H / 2, bpW, BOSS_H, section);
-      y += BOSS_H;
+      if (section.boss) {
+        this._drawBossTile(centerX, y + BOSS_H / 2, bpW, BOSS_H, section);
+        y += BOSS_H;
+      }
       if (si < SECTIONS.length - 1) y += BLOCK_GAP;
     }
 

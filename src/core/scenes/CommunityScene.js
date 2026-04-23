@@ -151,7 +151,7 @@ export default class CommunityScene extends Phaser.Scene {
 
     this._makeButton(centerX, y + BTN_H / 2, bpW, BTN_H, 'LEVEL DESIGNER',
       PRIMARY_FILL, PRIMARY_STROKE, PRIMARY_TEXT,
-      () => this._openEditorModePicker());
+      () => fadeTo(this, 'Editor', { designerMode: true, bossMode: false, stageCount: 1 }));
     y += BTN_H + BLOCK_GAP;
 
     // Search + filter row.

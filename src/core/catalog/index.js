@@ -14,6 +14,12 @@ const modules = import.meta.glob('../../../levels/*.json', { eager: true });
 const REGULAR_RE = /level-(\d+)\.json$/;
 const BOSS_RE    = /boss-(\d+)\.json$/;
 
+// Bosses are stubbed out of the shipping campaign for now. Boss JSON lives
+// under `levels/_bosses/` (outside this glob) and this flag is the explicit
+// re-enable knob. Flip to `true` and move the JSON back into `levels/` to
+// restore boss routing through `LEVELS` and `SECTIONS`.
+const BOSSES_ENABLED = false;
+
 function fileIdx(path, re) {
   const m = re.exec(path);
   return m ? parseInt(m[1], 10) : 1e9;
@@ -54,7 +60,7 @@ function buildOrdered() {
     const slice = REGULARS.slice(regIdx, regIdx + SECTION_SIZE);
     for (const r of slice) out.push(r);
     regIdx += slice.length;
-    if (bossIdx < BOSSES.length) {
+    if (BOSSES_ENABLED && bossIdx < BOSSES.length) {
       out.push(BOSSES[bossIdx]);
       bossIdx += 1;
     }
@@ -70,7 +76,7 @@ function buildSections() {
   const out = [];
   for (let s = 0; s * SECTION_SIZE < REGULARS.length; s++) {
     const slice = REGULARS.slice(s * SECTION_SIZE, (s + 1) * SECTION_SIZE);
-    const boss = BOSSES[s] || null;
+    const boss = BOSSES_ENABLED ? (BOSSES[s] || null) : null;
     out.push({ id: `s${s + 1}`, name: `Section ${s + 1}`, levels: slice, boss });
   }
   return out;

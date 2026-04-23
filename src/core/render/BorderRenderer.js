@@ -6,16 +6,19 @@ import { SHAPE_SCALE } from '../constants.js';
 // `shapeSquash().funnels` per frame — making border funnels breathe in
 // lockstep with factory funnels.
 //
-// The ring body is gone (Milestone B). The unused `bodyContainer` argument
-// is kept in the signature for one beat so callers don't need to rewire.
+// Accepts:
+//   funnels:  explicit list (optional — defaults to level.border.funnels)
+//   getOpts:  (f) => { alpha?, fill?, stroke?, stageBg?, stageBgAlpha?, hidden? }
+//             optional per-funnel styling override (see FunnelRenderer).
 //
-// Returns `{ wraps: Container[], destroy }` — scenes stash `wraps` and pulse
-// each wrap's scaleX/Y from their update loop.
+// Returns `{ wraps, funnels, destroy }`. `funnels` is the list that was
+// rendered (same length as wraps, index-aligned).
 
-export function renderBorder(scene, _bodyContainer, funnelContainer, level, { pxCell, pxGap }) {
+export function renderBorder(scene, _bodyContainer, funnelContainer, level, opts) {
+  const { pxCell, pxGap, funnels: overrideFunnels, getOpts } = opts || {};
   const wraps = [];
-  const funnels = (level.border && level.border.funnels) || [];
-  if (funnels.length === 0) return { wraps, destroy() {} };
+  const funnels = overrideFunnels || (level.border && level.border.funnels) || [];
+  if (funnels.length === 0) return { wraps, funnels, destroy() {} };
 
   const step = pxCell + pxGap;
   for (const f of funnels) {
@@ -27,7 +30,7 @@ export function renderBorder(scene, _bodyContainer, funnelContainer, level, { px
     // Render at SHAPE_SCALE — same scale as the buffer label tile — so the
     // triangle / emitter glyph protrudes from the tile edge exactly like a
     // factory funnel protrudes from a factory body edge.
-    drawFunnelsInto(gfx, [f], pxCell, pxGap, SHAPE_SCALE, /* isBorder */ true);
+    drawFunnelsInto(gfx, [f], pxCell, pxGap, SHAPE_SCALE, /* isBorder */ true, getOpts);
     gfx.setPosition(-cx, -cy);
     wrap.add(gfx);
     wraps.push(wrap);
@@ -35,6 +38,7 @@ export function renderBorder(scene, _bodyContainer, funnelContainer, level, { px
 
   return {
     wraps,
+    funnels,
     destroy() { for (const w of wraps) w.destroy(); },
   };
 }

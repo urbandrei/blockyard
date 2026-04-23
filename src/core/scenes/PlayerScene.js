@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { loadLevel, genId } from '../model/level.js';
+import { loadLevel, genId, bossRoundLevel } from '../model/level.js';
 import {
   rotateFactoryShape, isBorderCell, normalizeFactory, isObstacleFactory,
 } from '../model/shape.js';
@@ -15,6 +15,12 @@ import { LaserRenderer } from '../render/LaserRenderer.js';
 import { FunnelParticleSystem, collectFunnelsForParticles, collectFactoryFunnelsForParticles } from '../render/FunnelParticleSystem.js';
 import { BufferMarkerRenderer } from '../render/BufferMarkerRenderer.js';
 import { TitleBar } from '../ui/TitleBar.js';
+import { StagePillStrip } from '../ui/StagePillStrip.js';
+import {
+  stageColor, CURRENT_STAGE_COLOR,
+  PAST_STAGE_ALPHA, FUTURE_STAGE_ALPHA, CELL_TINT_ALPHA,
+} from '../ui/stageColors.js';
+import { spawnFunnelFirework } from '../render/FunnelFirework.js';
 import { HintConfirmModal } from '../ui/HintConfirmModal.js';
 import { HintNudgePopup } from '../ui/HintNudgePopup.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
@@ -110,6 +116,9 @@ export default class PlayerScene extends Phaser.Scene {
     this.iconIslandContainer   = this.add.container(0, 0).setDepth(54);
     this.ghostContainer        = this.add.container(0, 0).setDepth(70);
     this.placementContainer    = this.add.container(0, 0).setDepth(80);
+    // Persistent effects container — particles/bursts that should outlive
+    // a _clearBoardDynamic sweep (e.g. the boss round-transition firework).
+    this.fxContainer           = this.add.container(0, 0).setDepth(200);
 
     // Resolve the level. Priority: inline level (from CommunityScene) →
     // catalog level by id → editor sandbox fallback.
@@ -122,10 +131,12 @@ export default class PlayerScene extends Phaser.Scene {
     if (source && source.boss) {
       this._sourceLevelOriginal = source;
       this._bossState = { roundIdx: 0, locked: [] };
+      this._bossHintAutoShow = true;
       this.sourceLevel = bossRoundLevel(source, 0, []);
     } else {
       this._sourceLevelOriginal = source;
       this._bossState = null;
+      this._bossHintAutoShow = false;
       this.sourceLevel = source;
     }
 
@@ -223,6 +234,19 @@ export default class PlayerScene extends Phaser.Scene {
   //   Runtime state
   // ===================================================================
 
+  _isBossLevel() {
+    return !!this._bossState;
+  }
+
+  _currentStageIdx() {
+    return this._bossState ? this._bossState.roundIdx : -1;
+  }
+
+  _bossStageCount() {
+    if (!this._sourceLevelOriginal || !this._sourceLevelOriginal.boss) return 0;
+    return (this._sourceLevelOriginal.boss.rounds || []).length;
+  }
+
   _initRuntime() {
     const lvl = this.sourceLevel;
     // Each placed factory is { id, source:'locked'|'initial', anchor, rotation,
@@ -249,6 +273,8 @@ export default class PlayerScene extends Phaser.Scene {
       });
     }
 
+    const currentIdx = this._currentStageIdx();
+
     // Initial factories — start in their declared blueprint slots. If two
     // declare the same slot, spread the second into the next free slot
     // (per D5: no overlap on the player's initial layout). Internally slots
@@ -266,10 +292,40 @@ export default class PlayerScene extends Phaser.Scene {
         defaultSlot: { ...slot },     // remembered for RESET
         rotation: it.rotation || 0,
         defaultRotation: it.rotation || 0,
+        stageIdx: currentIdx,
+        interactable: true,
       };
       this.blueprintFactories.set(id, def);
       this._pushToSlot(slot, id);
       this.startingState.blueprint.push({ id, slot: { ...slot }, rotation: def.rotation });
+    }
+
+    // Boss levels: also seed FUTURE rounds' initialFactories as read-only,
+    // greyed, stage-colored previews in free blueprint slots. Past rounds
+    // are already on the board as locked carry, so we skip them here.
+    if (this._bossState && this._sourceLevelOriginal && this._sourceLevelOriginal.boss) {
+      const rounds = this._sourceLevelOriginal.boss.rounds || [];
+      for (let i = currentIdx + 1; i < rounds.length; i++) {
+        const iFs = (rounds[i] && rounds[i].initialFactories) || [];
+        for (const it of iFs) {
+          const id = `preview:${i}:${it.id || genId()}`;
+          const norm = normalizeFactory(it.cells, it.funnels || []);
+          const requested = it.slot ? { r: it.slot.row, c: it.slot.col } : { r: 0, c: 0 };
+          const slot = this._claimFreeSlot(requested);
+          this.blueprintFactories.set(id, {
+            id,
+            baseCells: norm.cells, baseFunnels: norm.funnels,
+            converter: it.converter,
+            slot,
+            defaultSlot: { ...slot },
+            rotation: it.rotation || 0,
+            defaultRotation: it.rotation || 0,
+            stageIdx: i,
+            interactable: false,
+          });
+          this._pushToSlot(slot, id);
+        }
+      }
     }
 
     // Community-level fallback: editor-authored levels keep their factories
@@ -300,18 +356,22 @@ export default class PlayerScene extends Phaser.Scene {
   }
 
   // Find a free slot starting from the requested one, scanning row-major.
+  // Row 0 is reserved when the blueprint has a hint pill or a boss stage
+  // pill strip in the top row.
   _claimFreeSlot(requested) {
     const rows = this._slotRows();
     const cols = this._slotCols();
-    const startR = Math.max(0, Math.min(rows - 1, (requested && requested.r) || 0));
+    const topReserved = !!this._instructionText() || this._isBossLevel();
+    const rowFloor = topReserved ? 1 : 0;
+    const startR = Math.max(rowFloor, Math.min(rows - 1, (requested && requested.r) || rowFloor));
     const startC = Math.max(0, Math.min(cols - 1, (requested && requested.c) || 0));
     if (!this._slotOccupied(startR, startC)) return { r: startR, c: startC };
-    for (let r = 0; r < rows; r++) {
+    for (let r = rowFloor; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         if (!this._slotOccupied(r, c)) return { r, c };
       }
     }
-    return { r: 0, c: 0 };  // last-resort fallback (will stack)
+    return { r: rowFloor, c: 0 };  // last-resort fallback (will stack)
   }
 
   _slotRows() {
@@ -502,7 +562,12 @@ export default class PlayerScene extends Phaser.Scene {
     this._acidPits = renderAcidPits(this, this.acidPitContainer, this.sourceLevel, {
       pxCell: this.pxCell, pxGap: BOARD_GAP,
     });
-    const border = renderBorder(this, this.boardContainer, this.borderFunnelContainer, lvl, { pxCell: this.pxCell, pxGap: BOARD_GAP });
+    let border;
+    if (this._isBossLevel() && this._sourceLevelOriginal && this._sourceLevelOriginal.boss) {
+      border = this._renderBossBorder(lvl);
+    } else {
+      border = renderBorder(this, this.boardContainer, this.borderFunnelContainer, lvl, { pxCell: this.pxCell, pxGap: BOARD_GAP });
+    }
     this.borderFunnelWraps = border.wraps;
     for (const fac of lvl.factories) {
       const entry = this._drawFactory(fac);
@@ -554,6 +619,64 @@ export default class PlayerScene extends Phaser.Scene {
     });
     this.flowUpdaters.push(flow);
     return { bodyWrap, funnelWrap, body, funnels, tintGfx, locked: !!factory.locked, factoryId: factory.id };
+  }
+
+  // Render every stage's border funnels with stage-colored cell tints. The
+  // sim level `lvl` already carries the *active* subset (current + carried
+  // greens) via bossRoundLevel — this method renders that active set PLUS
+  // a visual-only preview of FUTURE stages' funnels (dimmed, stage colored).
+  _renderBossBorder(lvl) {
+    const rounds = (this._sourceLevelOriginal.boss && this._sourceLevelOriginal.boss.rounds) || [];
+    const currentIdx = this._currentStageIdx();
+    const activeFunnels = (lvl.border && lvl.border.funnels) || [];
+    // Tag every active funnel with its authoring stage idx (look it up in
+    // the original rounds — match by r,c,side,role).
+    const key = (f) => `${f.r},${f.c},${f.side},${f.role}`;
+    const originByKey = new Map();
+    for (let i = 0; i < rounds.length; i++) {
+      const fs = (rounds[i] && rounds[i].border && rounds[i].border.funnels) || [];
+      for (const f of fs) {
+        const k = key(f);
+        if (!originByKey.has(k)) originByKey.set(k, i);
+      }
+    }
+    const stageIdxFor = (f) => {
+      const v = originByKey.get(key(f));
+      return v == null ? currentIdx : v;
+    };
+
+    const display = [];
+    const seen = new Set();
+    for (const f of activeFunnels) {
+      display.push(f);
+      seen.add(key(f));
+    }
+    // Future rounds (> currentIdx): everything visible but dimmed.
+    for (let i = currentIdx + 1; i < rounds.length; i++) {
+      const fs = (rounds[i] && rounds[i].border && rounds[i].border.funnels) || [];
+      for (const f of fs) {
+        if (seen.has(key(f))) continue;
+        display.push(f);
+        seen.add(key(f));
+      }
+    }
+
+    const getOpts = (f) => {
+      const sIdx = stageIdxFor(f);
+      const isCurrent = sIdx === currentIdx;
+      const isFuture = sIdx > currentIdx;
+      const stageBg = isCurrent ? CURRENT_STAGE_COLOR : stageColor(sIdx);
+      // Active funnels (current round all + prior greens) render fully
+      // opaque; future round previews are dimmed.
+      const alpha = isFuture ? FUTURE_STAGE_ALPHA : 1;
+      return { stageBg, stageBgAlpha: CELL_TINT_ALPHA, alpha };
+    };
+
+    return renderBorder(this, this.boardContainer, this.borderFunnelContainer, lvl, {
+      pxCell: this.pxCell, pxGap: BOARD_GAP,
+      funnels: display,
+      getOpts,
+    });
   }
 
   _clearBoardDynamic() {
@@ -612,8 +735,11 @@ export default class PlayerScene extends Phaser.Scene {
     // If the level (or current boss round) carries instructional text, the
     // top row of the blueprint is reserved for the hint pill instead of
     // slot dots. _slotAt also rejects placements at r === 0 in this case.
+    // Boss levels ALWAYS reserve the top row for the stage pill strip,
+    // whether or not the active round has instructional text.
     const hint = this._instructionText();
-    const reservedRow = hint ? 1 : 0;
+    const isBoss = this._isBossLevel();
+    const reservedRow = (hint || isBoss) ? 1 : 0;
 
     const dots = this.make.graphics({ add: false });
     dots.fillStyle(BLUEPRINT_DOT, 0.9);
@@ -635,10 +761,29 @@ export default class PlayerScene extends Phaser.Scene {
     }
     this.blueprintContainer.add(dots);
 
-    // Hint pill — white rounded box across the reserved top row with the
-    // text centered. Sits inside the blueprintContainer so it scales with
-    // the blueprint's local positioning.
-    if (hint) {
+    // Tear down any previous pill strip from the last render pass.
+    if (this._stagePillStrip) { this._stagePillStrip.destroy(); this._stagePillStrip = null; }
+
+    if (isBoss) {
+      // Stage pill strip across the reserved top row. The strip draws
+      // into a dedicated child container of blueprintContainer so the
+      // usual blueprintContainer.removeAll(true) on re-render wipes it
+      // along with everything else.
+      const stripHost = this.add.container(0, 0);
+      this.blueprintContainer.add(stripHost);
+      const currentIdx = this._currentStageIdx();
+      const showAutoHint =
+        this._bossHintAutoShow !== false && !!this._instructionText();
+      this._stagePillStrip = new StagePillStrip(this, {
+        x: 0, y: 0, width: dgW, height: slotPx,
+        stageCount: this._bossStageCount(),
+        currentIdx,
+        hintText: this._instructionText() || '',
+        hintVisible: showAutoHint,
+        parent: stripHost,
+        pillsInteractive: false,
+      });
+    } else if (hint) {
       const pad = Math.max(4, Math.round(slotPx * 0.12));
       const pillW = dgW - pad * 2;
       const pillH = slotPx - pad * 2;
@@ -851,9 +996,34 @@ export default class PlayerScene extends Phaser.Scene {
     const cellsLocal = rot.cells.map((c) => ({ ...c }));
     const funnelsLocal = rot.funnels.map((f) => ({ ...f }));
     const [cx, cy] = factoryCenter(cellsLocal, slotPx, 0);
+
+    // Boss levels: paint a stage-color tint on each cell the factory occupies
+    // (under the factory body so the dotted grid + body sit on top). Current
+    // stage → blue; non-current → that stage's color at lower alpha.
+    const currentIdx = this._currentStageIdx();
+    const isCurrentStage = def.stageIdx == null || def.stageIdx === currentIdx;
+    if (this._isBossLevel() && def.stageIdx != null && isTop) {
+      const tint = isCurrentStage ? CURRENT_STAGE_COLOR : stageColor(def.stageIdx);
+      const tintAlpha = isCurrentStage ? CELL_TINT_ALPHA + 0.15 : CELL_TINT_ALPHA;
+      const tintGfx = this.make.graphics({ add: false });
+      tintGfx.fillStyle(tint, tintAlpha);
+      const r = Math.max(4, Math.round(slotPx * 0.1));
+      for (const c of cellsLocal) {
+        const tx = (def.slot.c + c.c) * slotPx + layerFromTop * FAN_OFFSET;
+        const ty = (def.slot.r + c.r) * slotPx + layerFromTop * FAN_OFFSET;
+        tintGfx.fillRoundedRect(tx + 2, ty + 2, slotPx - 4, slotPx - 4, r);
+      }
+      this.blueprintContainer.add(tintGfx);
+    }
+
     const funnelWrap = this.add.container(ox + cx, oy + cy);
     const bodyWrap   = this.add.container(ox + cx, oy + cy);
+    // Non-current stage factories render transparent + non-interactive.
     if (!isTop) { funnelWrap.setAlpha(0.55); bodyWrap.setAlpha(0.55); }
+    else if (!isCurrentStage) {
+      const a = def.stageIdx < currentIdx ? PAST_STAGE_ALPHA : FUTURE_STAGE_ALPHA;
+      funnelWrap.setAlpha(a); bodyWrap.setAlpha(a);
+    }
     // Funnels first → they render BELOW the body (matches the board +
     // ghost stack, where funnelContainer sits below interactiveContainer).
     this.blueprintBodyContainer.add(funnelWrap);
@@ -1591,10 +1761,10 @@ export default class PlayerScene extends Phaser.Scene {
     const c = Math.floor(lx / this.slotPx);
     const r = Math.floor(ly / this.slotPx);
     if (r < 0 || c < 0 || r >= this._slotRows() || c >= this._slotCols()) return null;
-    // Top row is reserved for the instructional text box (when present) —
-    // reject placements there so the player can't drop a factory under
-    // the hint.
-    if (this._instructionText() && r === 0) return null;
+    // Top row is reserved for the instructional text box (when present) or
+    // the boss stage-pill strip — reject placements there so the player
+    // can't drop a factory under the hint/pills.
+    if ((this._instructionText() || this._isBossLevel()) && r === 0) return null;
     return { r, c };
   }
 
@@ -1626,7 +1796,13 @@ export default class PlayerScene extends Phaser.Scene {
     if (this.simState !== 'idle' || this.victory) return false;
     if (this._hintTweenBusy || this._rotateTweenBusy) return false;
     if (info.kind === 'board') return !!this._placedAtBoardCell(info.r, info.c);
-    if (info.kind === 'blueprint') return !!this._findBlueprintFactoryAt(info.r, info.c);
+    if (info.kind === 'blueprint') {
+      const hit = this._findBlueprintFactoryAt(info.r, info.c);
+      if (!hit) return false;
+      const def = this.blueprintFactories.get(hit.factoryId);
+      if (def && def.interactable === false) return false;
+      return true;
+    }
     return false;
   }
 
@@ -1641,7 +1817,9 @@ export default class PlayerScene extends Phaser.Scene {
       const hit = this._findBlueprintFactoryAt(info.r, info.c);
       if (!hit) return;
       const def = this.blueprintFactories.get(hit.factoryId);
-      if (def) this._rotateBlueprint(def);
+      if (!def) return;
+      if (def.interactable === false) return;
+      this._rotateBlueprint(def);
     }
   }
 
@@ -2104,6 +2282,7 @@ export default class PlayerScene extends Phaser.Scene {
     // locked carry, then fall through to the standard reset below.
     if (this._bossState && this._sourceLevelOriginal && this._sourceLevelOriginal.boss) {
       this._bossState = { roundIdx: 0, locked: [] };
+      this._bossHintAutoShow = true;
       this.sourceLevel = bossRoundLevel(this._sourceLevelOriginal, 0, []);
       this.sim && this.sim.stop();
       if (this.shapeRenderer) this.shapeRenderer.clearAll();
@@ -2292,10 +2471,25 @@ export default class PlayerScene extends Phaser.Scene {
 
   // Snapshot every non-locked placed factory into the boss-locked carry,
   // increment the round, recompose the level, and re-init runtime + render.
+  // The transition plays a celebratory firework at each destroyed red
+  // (output) funnel from the round that just cleared, pauses ~600ms, then
+  // boots the next round.
   _advanceBossRound() {
     if (!this.scene || !this._isBossWithMoreRounds()) return;
     if (this._hintModal) { this._hintModal.destroy(); this._hintModal = null; }
     this._hintTweenBusy = false;
+
+    // Fire fireworks at every red funnel from the round we're leaving.
+    this._playBossRedFireworks(this._bossState.roundIdx);
+    // First-clear: hint auto-hides for the remainder of the session.
+    this._bossHintAutoShow = false;
+
+    // Hold for one celebratory beat, then swap to the next round.
+    this.time.delayedCall(600, () => this._commitBossRoundAdvance());
+  }
+
+  _commitBossRoundAdvance() {
+    if (!this.scene || !this._bossState) return;
     const carry = [];
     for (const p of this.placed.values()) {
       if (p.locked) continue;       // pre-existing locked factories already in lockedFactories
@@ -2329,6 +2523,30 @@ export default class PlayerScene extends Phaser.Scene {
     // Fresh round → reset the stuck timer so the popup respects the new
     // round's clock instead of carrying over the prior round's schedule.
     this._startStuckPopupTimer();
+  }
+
+  // Spawn a firework burst at each red (output) funnel of the round whose
+  // idx is `roundIdx`. Particle container is the border funnel wrap, so
+  // effects layer correctly above the exterior checker and below the
+  // frame outline.
+  _playBossRedFireworks(roundIdx) {
+    if (!this._sourceLevelOriginal || !this._sourceLevelOriginal.boss) return;
+    const rounds = this._sourceLevelOriginal.boss.rounds || [];
+    const fs = (rounds[roundIdx] && rounds[roundIdx].border && rounds[roundIdx].border.funnels) || [];
+    const reds = fs.filter((f) => f.role === 'output');
+    if (reds.length === 0 || !this.fxContainer) return;
+    const step = this.pxCell + BOARD_GAP;
+    const radius = Math.max(18, Math.round(this.pxCell * 0.55));
+    for (const f of reds) {
+      // World-space center of the border cell. Using the persistent
+      // fxContainer (not borderFunnelContainer) so the burst survives
+      // _clearBoardDynamic when the next round boots.
+      const cx = this.boardOriginX + f.c * step + this.pxCell / 2;
+      const cy = this.boardOriginY + f.r * step + this.pxCell / 2;
+      spawnFunnelFirework(this, this.fxContainer, {
+        x: cx, y: cy, radius, count: 14,
+      });
+    }
   }
 
   _showVictoryText() {
@@ -2427,28 +2645,6 @@ function factoryCenter(cells, pxCell, pxGap) {
     ((minC + maxC) * step + pxCell) / 2,
     ((minR + maxR) * step + pxCell) / 2,
   ];
-}
-
-// Build the level snapshot for boss round `roundIdx`. The shared `board`
-// + `name` carry over; per-round `border / inputs / outputs /
-// initialFactories / instructionalText` come from boss.rounds[roundIdx].
-// `lockedCarry` is the array of factories the player placed in earlier
-// rounds — they're appended to the level's `lockedFactories` so they
-// render with the lock pin + darken tint and are immovable.
-function bossRoundLevel(srcLevel, roundIdx, lockedCarry) {
-  const r = (srcLevel.boss && srcLevel.boss.rounds && srcLevel.boss.rounds[roundIdx]) || {};
-  return {
-    ...srcLevel,
-    border: r.border || { funnels: [] },
-    inputs: r.inputs || [],
-    outputs: r.outputs || [],
-    initialFactories: r.initialFactories || [],
-    lockedFactories: [...(srcLevel.lockedFactories || []), ...lockedCarry],
-    instructionalText: r.instructionalText || null,
-    // Strip `boss` so the per-round snapshot can't trigger another boss
-    // composition recursively (e.g. after _composeLevel persists state).
-    boss: null,
-  };
 }
 
 function stampEdge(gfx, x1, y1, x2, y2, spacing) {

@@ -188,6 +188,119 @@ export function snapshotWorkingToBossRound(level, roundIdx) {
   r.solution = { factories: ownFactories };
 }
 
+// -----------------------------------------------------------------------
+//   Boss round composition (shared by PlayerScene + EditorScene)
+// -----------------------------------------------------------------------
+
+function funnelKey(f) { return `${f.r},${f.c},${f.side}`; }
+
+/** Build the level snapshot for boss round `roundIdx`. The shared `board`
+ *  + `name` carry over; per-round `border / inputs / outputs /
+ *  initialFactories / instructionalText` come from boss.rounds[roundIdx].
+ *  `lockedCarry` is the array of factories the player placed in earlier
+ *  rounds — they're appended to the level's `lockedFactories` so they
+ *  render with the lock pin + darken tint and are immovable.
+ *
+ *  GREEN (input) funnels from earlier rounds are unioned into the active
+ *  border + inputs list (they persist once introduced); RED (output)
+ *  funnels come from the current round only (past reds are destroyed
+ *  between rounds, per the boss spec). */
+export function bossRoundLevel(srcLevel, roundIdx, lockedCarry) {
+  const rounds = (srcLevel.boss && srcLevel.boss.rounds) || [];
+  const r = rounds[roundIdx] || {};
+  const roundFunnels = (r.border && r.border.funnels) || [];
+  const roundInputs  = r.inputs  || [];
+  // Carry forward every green (input) funnel from earlier rounds, deduped
+  // by (r,c,side). Output funnels do NOT carry forward.
+  const seen = new Set(roundFunnels.map(funnelKey));
+  const priorGreens = [];
+  const priorInputs = [];
+  for (let i = 0; i < roundIdx; i++) {
+    const pr = rounds[i];
+    const pfs = (pr && pr.border && pr.border.funnels) || [];
+    const pins = (pr && pr.inputs) || [];
+    for (const f of pfs) {
+      if (f.role !== 'input') continue;
+      const k = funnelKey(f);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      priorGreens.push({ ...f });
+    }
+    for (const inp of pins) {
+      const k = funnelKey(inp);
+      if (priorInputs.some((q) => funnelKey(q) === k)) continue;
+      // Don't re-add if the current round redefines this slot.
+      if (roundInputs.some((q) => funnelKey(q) === k)) continue;
+      priorInputs.push({ ...inp, type: { ...(inp.type || {}) } });
+    }
+  }
+  return {
+    ...srcLevel,
+    border: { funnels: [...priorGreens, ...roundFunnels] },
+    inputs: [...priorInputs, ...roundInputs],
+    outputs: r.outputs || [],
+    initialFactories: r.initialFactories || [],
+    lockedFactories: [...(srcLevel.lockedFactories || []), ...(lockedCarry || [])],
+    instructionalText: r.instructionalText || null,
+    // Strip `boss` so the per-round snapshot can't trigger another boss
+    // composition recursively.
+    boss: null,
+  };
+}
+
+/** Pure, read-only view of every stage in a boss level. Consumers use this
+ *  to render the cross-stage blueprint / border overlay. `idx` is the
+ *  0-based round index. When `currentIdx` is given, the returned specs also
+ *  include an `isCurrent/isPast/isFuture` boolean for convenience. */
+export function bossAllStageSpecs(level, currentIdx = -1) {
+  const rounds = (level && level.boss && level.boss.rounds) || [];
+  return rounds.map((r, idx) => ({
+    idx,
+    funnels:  ((r.border && r.border.funnels) || []).map((f) => ({ ...f })),
+    greens:   ((r.border && r.border.funnels) || []).filter((f) => f.role === 'input' ).map((f) => ({ ...f })),
+    reds:     ((r.border && r.border.funnels) || []).filter((f) => f.role === 'output').map((f) => ({ ...f })),
+    inputs:   (r.inputs  || []).map((f) => ({ ...f, type: { ...(f.type || {}) } })),
+    outputs:  (r.outputs || []).map((f) => ({ ...f, type: { ...(f.type || {}) } })),
+    blueprint: (r.initialFactories || []).map((f) => JSON.parse(JSON.stringify(f))),
+    solution:  ((r.solution && r.solution.factories) || []).map((f) => JSON.parse(JSON.stringify(f))),
+    instructionalText: r.instructionalText || null,
+    isCurrent: idx === currentIdx,
+    isPast:    idx < currentIdx,
+    isFuture:  idx > currentIdx,
+  }));
+}
+
+/** Returns the set of funnel keys (r,c,side) that are "active" (participate
+ *  in the simulation) for round `roundIdx`, plus convenience lists:
+ *    - priorGreens: input funnels carried in from earlier rounds
+ *    - currentReds: output funnels of the current round (they will be
+ *      destroyed at transition)
+ *    - priorReds:   output funnels from strictly earlier rounds (visually
+ *      absent in the current round — already destroyed)
+ */
+export function bossActiveBorderSet(level, roundIdx) {
+  const rounds = (level && level.boss && level.boss.rounds) || [];
+  const active = new Set();
+  const priorGreens = [];
+  const priorReds = [];
+  let currentReds = [];
+  for (let i = 0; i < rounds.length; i++) {
+    const fs = (rounds[i].border && rounds[i].border.funnels) || [];
+    for (const f of fs) {
+      if (i === roundIdx) {
+        active.add(funnelKey(f));
+        if (f.role === 'output') currentReds.push({ ...f });
+      } else if (i < roundIdx && f.role === 'input') {
+        active.add(funnelKey(f));
+        priorGreens.push({ ...f });
+      } else if (i < roundIdx && f.role === 'output') {
+        priorReds.push({ ...f });
+      }
+    }
+  }
+  return { active, priorGreens, currentReds, priorReds };
+}
+
 /** Reset the level's funnel/factory state to a single blue-circle input at
  *  the top-center buffer cell and a matching output at the bottom. Used on
  *  initial creation and after a board resize (for testing). */
