@@ -4,12 +4,14 @@ import {
   rotateFactoryShape, isBorderCell, normalizeFactory, isObstacleFactory,
 } from '../model/shape.js';
 import { renderBorder } from '../render/BorderRenderer.js';
-import { renderFactoryBody, renderLockedTint } from '../render/FactoryBodyRenderer.js';
+import { renderFactoryBody, renderLockedTint, drawBoltInto } from '../render/FactoryBodyRenderer.js';
+import { renderAcidPits } from '../render/AcidPitRenderer.js';
 import { renderFunnels } from '../render/FunnelRenderer.js';
 import { renderFlow } from '../render/FlowRenderer.js';
 import { renderBufferLabels } from '../render/BufferLabelRenderer.js';
 import { renderInteriorFloor, renderExteriorCheckers, renderFrameShadow, renderFrameOutline } from '../render/PlayAreaFrame.js';
 import { ShapeRenderer } from '../render/ShapeRenderer.js';
+import { LaserRenderer } from '../render/LaserRenderer.js';
 import { FunnelParticleSystem, collectFunnelsForParticles, collectFactoryFunnelsForParticles } from '../render/FunnelParticleSystem.js';
 import { BufferMarkerRenderer } from '../render/BufferMarkerRenderer.js';
 import { TitleBar } from '../ui/TitleBar.js';
@@ -67,29 +69,35 @@ export default class PlayerScene extends Phaser.Scene {
     this.simState = 'idle';        // 'idle' | 'running' | 'paused'
     this.simTime  = 0;             // virtual clock — only advances when running
     this.satisfiedOutputs = new Set();
+    this.satisfiedCollectors = new Set();
     this.victory = null;
     this.factoryRefs = new Map();  // id → { bodyWrap, funnelWrap }
     this.blueprintRefs = new Map();// id → { bodyWrap, funnelWrap }
     this.flowUpdaters = [];
 
-    // Layer order. Mirrors EditorScene: brown checker covers buffer + outside,
-    // factories sit under it via the cut-out trick.
-    this.boardContainer       = this.add.container(0, 0).setDepth(0);
-    this.shapeContainer       = this.add.container(0, 0).setDepth(10);
-    // Ambient funnel particles sit just below the funnel triangles so the
-    // dots read as drifting behind each funnel's face.
+    // Back-drop chrome (brown exterior, inner shadow, black frame outline)
+    // sits at LOW depths so shapes + laser beams render on top of the black
+    // border and the brown buffer checker. Factories/funnels still layer
+    // above shapes/lasers — the relative play-area z-order is preserved.
+    this.boardContainer        = this.add.container(0, 0).setDepth(0);
+    this.exteriorContainer     = this.add.container(0, 0).setDepth(2);
+    this.shadowContainer       = this.add.container(0, 0).setDepth(4);
+    this.frameContainer        = this.add.container(0, 0).setDepth(5);
+    this.acidPitContainer      = this.add.container(0, 0).setDepth(7);
+    this.shapeContainer        = this.add.container(0, 0).setDepth(10);
+    this.laserContainer        = this.add.container(0, 0).setDepth(12);
     this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(13);
-    this.funnelContainer      = this.add.container(0, 0).setDepth(15);
-    this.interactiveContainer = this.add.container(0, 0).setDepth(20);
-    // Flow dashes sit on top of the factory body (see EditorScene comment).
-    this.flowContainer        = this.add.container(0, 0).setDepth(22);
-    this.exteriorContainer    = this.add.container(0, 0).setDepth(25);
-    this.shadowContainer       = this.add.container(0, 0).setDepth(140);
-    this.borderFunnelParticleContainer = this.add.container(0, 0).setDepth(143);
-    this.borderFunnelContainer = this.add.container(0, 0).setDepth(145);
-    this.labelContainer        = this.add.container(0, 0).setDepth(150);
-    this.bufferMarkerContainer = this.add.container(0, 0).setDepth(155);
-    this.frameContainer        = this.add.container(0, 0).setDepth(160);
+    this.borderFunnelParticleContainer  = this.add.container(0, 0).setDepth(14);
+    this.funnelContainer       = this.add.container(0, 0).setDepth(15);
+    this.interactiveContainer  = this.add.container(0, 0).setDepth(20);
+    this.flowContainer         = this.add.container(0, 0).setDepth(22);
+    // Border funnels + emitter glyphs, buffer label tiles, and sink-resolve
+    // markers all render ABOVE the black frame outline so the centered box
+    // cluster (triangle + tile + marker) reads as ONE piece on top of the
+    // border line — rather than the frame cutting through each of them.
+    this.borderFunnelContainer = this.add.container(0, 0).setDepth(163);
+    this.labelContainer        = this.add.container(0, 0).setDepth(165);
+    this.bufferMarkerContainer = this.add.container(0, 0).setDepth(168);
     this.blueprintContainer    = this.add.container(0, 0).setDepth(50);
     this.blueprintFlowContainer= this.add.container(0, 0).setDepth(51);
     this.blueprintBodyContainer= this.add.container(0, 0).setDepth(52);
@@ -148,7 +156,13 @@ export default class PlayerScene extends Phaser.Scene {
         this.bufferMarkerRenderer.mark(funnel, accepted);
         if (accepted && funnel.ownerId === 'border') this._onOutputSatisfied(funnel);
       },
+      onCollectorSatisfied: (c) => this._onCollectorSatisfied(c),
     });
+    // Populate laser state without starting the sim so each emitter renders
+    // its idle charge animation before the player presses Play.
+    this.sim.prepEntities(this._composeLevel());
+    if (this.laserRenderer) this.laserRenderer.destroy();
+    this.laserRenderer = new LaserRenderer(this, this.laserContainer, { pxCell: this.pxCell });
     this.factoryFunnelParticles = new FunnelParticleSystem(this, this.factoryFunnelParticleContainer, { pxCell: this.pxCell });
     this.borderFunnelParticles  = new FunnelParticleSystem(this, this.borderFunnelParticleContainer,  { pxCell: this.pxCell });
     this._refreshFunnelParticles();
@@ -189,7 +203,15 @@ export default class PlayerScene extends Phaser.Scene {
       if (this._victoryTextBg) { this._victoryTextBg.destroy(); this._victoryTextBg = null; }
       if (this._victoryTextName) { this._victoryTextName.destroy(); this._victoryTextName = null; }
       if (this._victoryTextSub)  { this._victoryTextSub.destroy();  this._victoryTextSub  = null; }
+      if (this._acidPits)        { this._acidPits.destroy();        this._acidPits        = null; }
       if (this._onScaleResize) this.scale.off('resize', this._onScaleResize);
+      // Phaser reuses the scene instance across scene.start() transitions,
+      // so properties survive into the next create(). The first _renderAll()
+      // of the next run would otherwise see the old titleBar (with destroyed
+      // children) and crash when we try to toggle its hit region.
+      this.titleBar = null;
+      this.factoryRefs && this.factoryRefs.clear && this.factoryRefs.clear();
+      this.blueprintRefs && this.blueprintRefs.clear && this.blueprintRefs.clear();
     });
 
     this.ready = true;
@@ -354,6 +376,7 @@ export default class PlayerScene extends Phaser.Scene {
       border: this.sourceLevel.border,
       inputs: this.sourceLevel.inputs,
       outputs: this.sourceLevel.outputs,
+      acidPits: this.sourceLevel.acidPits || [],
     };
   }
 
@@ -441,11 +464,13 @@ export default class PlayerScene extends Phaser.Scene {
 
     const setPos = (cnt, x, y) => cnt.setPosition(x, y);
     setPos(this.boardContainer,        this.boardOriginX, this.boardOriginY);
+    if (this.acidPitContainer) setPos(this.acidPitContainer, this.boardOriginX, this.boardOriginY);
     setPos(this.interactiveContainer,  this.boardOriginX, this.boardOriginY);
     setPos(this.flowContainer,         this.boardOriginX, this.boardOriginY);
     setPos(this.shapeContainer,        this.boardOriginX, this.boardOriginY);
     if (this.factoryFunnelParticleContainer) setPos(this.factoryFunnelParticleContainer, this.boardOriginX, this.boardOriginY);
     setPos(this.funnelContainer,       this.boardOriginX, this.boardOriginY);
+    if (this.laserContainer) setPos(this.laserContainer, this.boardOriginX, this.boardOriginY);
     setPos(this.exteriorContainer,     this.boardOriginX, this.boardOriginY);
     setPos(this.shadowContainer,       this.boardOriginX, this.boardOriginY);
     if (this.borderFunnelParticleContainer) setPos(this.borderFunnelParticleContainer, this.boardOriginX, this.boardOriginY);
@@ -471,6 +496,10 @@ export default class PlayerScene extends Phaser.Scene {
     const lvl = this._composeLevel();
     this._refreshFunnelParticles(lvl);
     renderInteriorFloor(this, this.boardContainer, { board: lvl.board, pxCell: this.pxCell });
+    if (this._acidPits) { this._acidPits.destroy(); this._acidPits = null; }
+    this._acidPits = renderAcidPits(this, this.acidPitContainer, this.sourceLevel, {
+      pxCell: this.pxCell, pxGap: BOARD_GAP,
+    });
     const border = renderBorder(this, this.boardContainer, this.borderFunnelContainer, lvl, { pxCell: this.pxCell, pxGap: BOARD_GAP });
     this.borderFunnelWraps = border.wraps;
     for (const fac of lvl.factories) {
@@ -522,7 +551,7 @@ export default class PlayerScene extends Phaser.Scene {
       cells: absCells, funnels: absFunnels, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
     });
     this.flowUpdaters.push(flow);
-    return { bodyWrap, funnelWrap, body, funnels, tintGfx, locked: !!factory.locked };
+    return { bodyWrap, funnelWrap, body, funnels, tintGfx, locked: !!factory.locked, factoryId: factory.id };
   }
 
   _clearBoardDynamic() {
@@ -823,8 +852,10 @@ export default class PlayerScene extends Phaser.Scene {
     const funnelWrap = this.add.container(ox + cx, oy + cy);
     const bodyWrap   = this.add.container(ox + cx, oy + cy);
     if (!isTop) { funnelWrap.setAlpha(0.55); bodyWrap.setAlpha(0.55); }
-    this.blueprintBodyContainer.add(bodyWrap);
+    // Funnels first → they render BELOW the body (matches the board +
+    // ghost stack, where funnelContainer sits below interactiveContainer).
     this.blueprintBodyContainer.add(funnelWrap);
+    this.blueprintBodyContainer.add(bodyWrap);
     const funnels = renderFunnels(this, funnelWrap, funnelsLocal, { pxCell: slotPx, pxGap: 0, scale: SHAPE_SCALE });
     funnels.setPosition(-cx, -cy);
     const body = renderFactoryBody(this, bodyWrap, {
@@ -840,7 +871,10 @@ export default class PlayerScene extends Phaser.Scene {
       // updater so the scene's update() loop animates the dashes.
       const cellsAtSlot   = cellsLocal.map((c) => ({ ...c, r: c.r + def.slot.r, c: c.c + def.slot.c }));
       const funnelsAtSlot = funnelsLocal.map((f) => ({ ...f, r: f.r + def.slot.r, c: f.c + def.slot.c }));
-      const flow = renderFlow(this, this.blueprintFlowContainer, {
+      // Flow dashes render into blueprintBodyContainer AFTER the body so
+      // they sit ON TOP of the factory body (same stacking as the board,
+      // where flowContainer at depth 22 sits above interactiveContainer at 20).
+      const flow = renderFlow(this, this.blueprintBodyContainer, {
         cells: cellsAtSlot, funnels: funnelsAtSlot,
         pxCell: slotPx, pxGap: 0, scale: SHAPE_SCALE,
       });
@@ -1397,6 +1431,14 @@ export default class PlayerScene extends Phaser.Scene {
         this._scheduleStuckPopup(300000);
         return;
       }
+      // Don't nudge when there's nothing the hint button could do — every
+      // factory is already at its solution spot (or the level has no
+      // solution data). Retry on the next interval in case the player
+      // moves a factory out of position.
+      if (!this._hintTargetPlan()) {
+        this._scheduleStuckPopup(300000);
+        return;
+      }
       const anchor = this.titleBar && this.titleBar.getRightButtonCenter();
       if (!anchor) { this._scheduleStuckPopup(300000); return; }
       const anchorBottomY = anchor.y + TitleBar.HEIGHT / 2;
@@ -1436,8 +1478,18 @@ export default class PlayerScene extends Phaser.Scene {
       const t = (this.simTime % CYCLE_MS) / CYCLE_MS;
       const sq = shapeSquash(t);
       const applyPair = (entry) => {
-        if (entry.bodyWrap)   { entry.bodyWrap.scaleX   = sq.body.scaleX;    entry.bodyWrap.scaleY   = sq.body.scaleY; }
-        if (entry.funnelWrap) { entry.funnelWrap.scaleX = sq.funnels.scaleX; entry.funnelWrap.scaleY = sq.funnels.scaleY; }
+        // Powered-type factories sit still until fully powered — breathing
+        // starts only once every bolt on the factory is fully lit.
+        const powered = entry.body && entry.body.poweredGlow;
+        const idlePowered = powered && entry.body.poweredGlow.alpha < 1;
+        if (entry.bodyWrap) {
+          entry.bodyWrap.scaleX = idlePowered ? 1 : sq.body.scaleX;
+          entry.bodyWrap.scaleY = idlePowered ? 1 : sq.body.scaleY;
+        }
+        if (entry.funnelWrap) {
+          entry.funnelWrap.scaleX = idlePowered ? 1 : sq.funnels.scaleX;
+          entry.funnelWrap.scaleY = idlePowered ? 1 : sq.funnels.scaleY;
+        }
       };
       // Locked factories dim to 0.65 when the sim isn't running so the player
       // can read the dark grid-cell tint through the body; full alpha during
@@ -1461,6 +1513,7 @@ export default class PlayerScene extends Phaser.Scene {
       for (const f of this.flowUpdaters) f.update(time);
       if (this.blueprintFlows) for (const f of this.blueprintFlows) f.update(time);
       if (this.ghostFlow) this.ghostFlow.update(time);
+      if (this._acidPits) this._acidPits.tick(time);
     }
 
     if (this.drag) {
@@ -1486,6 +1539,15 @@ export default class PlayerScene extends Phaser.Scene {
         this.shapeRenderer.update(shape, base * alongX, base * alongY);
       }
     }
+    // Lasers + bolt pulse always refresh (they clear themselves when the
+    // sim isn't running, since sim.lasers is empty and boltPowered is a
+    // cleared Map after sim.stop()).
+    if (this.laserRenderer) {
+      const lasers   = (this.sim && this.sim.lasers) || [];
+      const emitters = (this.sim && this.sim.emitters) || [];
+      this.laserRenderer.update(this.simTime || time, lasers, emitters);
+    }
+    this._updateBoltVisuals();
     // Ambient funnel particles always animate (play-time and idle) so the
     // funnels read as live. Runs every frame — not gated on cosmetic tick —
     // because the effect is subtle and stutter would be noticeable.
@@ -1941,6 +2003,10 @@ export default class PlayerScene extends Phaser.Scene {
       const rot = rotateFactoryShape({ cells: p.baseCells, funnels: p.baseFunnels }, p.rotation);
       for (const { r, c } of rot.cells) set.add(`${p.anchor.row + r},${p.anchor.col + c}`);
     }
+    // Acid pits are immovable terrain — factories can't drop on them.
+    for (const pit of (this.sourceLevel.acidPits || [])) {
+      set.add(`${pit.r},${pit.c}`);
+    }
     return set;
   }
 
@@ -1998,6 +2064,7 @@ export default class PlayerScene extends Phaser.Scene {
   _startPlay() {
     if (!this._canPlay()) return;
     this.satisfiedOutputs.clear();
+    this.satisfiedCollectors.clear();
     this.simTime = 0;
     this.sim.start(this._composeLevel(), this.simTime);
     this.simState = 'running';
@@ -2040,6 +2107,7 @@ export default class PlayerScene extends Phaser.Scene {
       if (this.shapeRenderer) this.shapeRenderer.clearAll();
       if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.clearAll();
       this.satisfiedOutputs && this.satisfiedOutputs.clear();
+      this.satisfiedCollectors && this.satisfiedCollectors.clear();
       this.simState = 'idle';
       this.simTime = 0;
       this._initRuntime();
@@ -2052,6 +2120,7 @@ export default class PlayerScene extends Phaser.Scene {
     if (this.shapeRenderer) this.shapeRenderer.clearAll();
     if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.clearAll();
     this.satisfiedOutputs.clear();
+    this.satisfiedCollectors.clear();
     this.simState = 'idle';
     this.simTime = 0;
     // Restore: every initial factory back to its starting slot + rotation;
@@ -2130,14 +2199,62 @@ export default class PlayerScene extends Phaser.Scene {
   //   Victory
   // ===================================================================
 
+  // Lerp each bolt's `glow` toward the sim's powered target over CYCLE_MS,
+  // redraw each bolt, and drive the factory perimeter electricity off the
+  // aggregate (max) glow on the factory.
+  _updateBoltVisuals() {
+    if (!this.sim || !this.factoryRefs) return;
+    const powered = this.sim.boltPowered || new Map();
+    const now = this.time.now;
+    const dt = Math.max(0, Math.min(60, this.game.loop.delta || 16));
+    const step = dt / CYCLE_MS;
+    for (const entry of this.factoryRefs.values()) {
+      const bolts = entry.body && entry.body.bolts;
+      if (!bolts) continue;
+      let minGlow = 1;
+      for (const b of bolts) {
+        const key = `${entry.factoryId}:${b.cellR},${b.cellC}`;
+        const target = powered.get(key) ? 1 : 0;
+        if      (b.glow < target) b.glow = Math.min(target, b.glow + step);
+        else if (b.glow > target) b.glow = Math.max(target, b.glow - step);
+        drawBoltInto(b.gfx, b.size, b.glow, now);
+        if (b.glow < minGlow) minGlow = b.glow;
+      }
+      if (entry.body && entry.body.poweredGlow) {
+        // Body goes lit only when EVERY bolt is fully powered — a single
+        // dark bolt keeps the whole factory inert.
+        entry.body.poweredGlow.alpha = minGlow >= 1 ? 1 : 0;
+      }
+    }
+  }
+
   _onOutputSatisfied(funnel) {
     this.satisfiedOutputs.add(funnel.key);
-    const required = (this.sourceLevel.outputs || []);
-    if (required.length === 0) return;
-    for (const o of required) {
+    this._checkVictory();
+  }
+
+  _onCollectorSatisfied(collector) {
+    this.satisfiedCollectors.add(collector.key);
+    // Stamp the green check on the collector's buffer tile — same visual
+    // language as a matched typed-sink hit.
+    if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(collector, true);
+    this._checkVictory();
+  }
+
+  _checkVictory() {
+    const outputs = (this.sourceLevel.outputs || []);
+    for (const o of outputs) {
       const k = `border:${o.r},${o.c},${o.side}`;
       if (!this.satisfiedOutputs.has(k)) return;
     }
+    // Collectors are AUTHORED in border.funnels with role:'collector'.
+    const level = this._composeLevel();
+    const collectors = ((level.border && level.border.funnels) || []).filter((f) => f.role === 'collector');
+    for (const c of collectors) {
+      const k = `border:${c.r},${c.c},${c.side}`;
+      if (!this.satisfiedCollectors.has(k)) return;
+    }
+    if (outputs.length === 0 && collectors.length === 0) return;
     this._fireVictory();
   }
 
@@ -2196,6 +2313,7 @@ export default class PlayerScene extends Phaser.Scene {
     this.simState = 'idle';
     this.simTime = 0;
     this.satisfiedOutputs && this.satisfiedOutputs.clear();
+    this.satisfiedCollectors && this.satisfiedCollectors.clear();
     this.sourceLevel = bossRoundLevel(
       this._sourceLevelOriginal,
       this._bossState.roundIdx,
@@ -2275,7 +2393,13 @@ export default class PlayerScene extends Phaser.Scene {
         this.bufferMarkerRenderer.mark(funnel, accepted);
         if (accepted && funnel.ownerId === 'border') this._onOutputSatisfied(funnel);
       },
+      onCollectorSatisfied: (c) => this._onCollectorSatisfied(c),
     });
+    // Populate laser state without starting the sim so each emitter renders
+    // its idle charge animation before the player presses Play.
+    this.sim.prepEntities(this._composeLevel());
+    if (this.laserRenderer) this.laserRenderer.destroy();
+    this.laserRenderer = new LaserRenderer(this, this.laserContainer, { pxCell: this.pxCell });
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.resize(this.pxCell);
     if (this.borderFunnelParticles)  this.borderFunnelParticles.resize(this.pxCell);
     if (this.titleBar) this.titleBar.destroy();

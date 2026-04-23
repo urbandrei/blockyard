@@ -2,6 +2,7 @@ import { FORMS, COLORS, COLOR_HEX, DEFAULT_SHAPE_TYPE } from '../model/shape.js'
 import {
   FUNNEL_INPUT_FILL, FUNNEL_INPUT_STROKE,
   FUNNEL_OUTPUT_FILL, FUNNEL_OUTPUT_STROKE,
+  EMITTER_FILL, EMITTER_STROKE, COLLECTOR_FILL, COLLECTOR_STROKE,
 } from '../constants.js';
 
 // Floating editor for a buffer-region funnel: form (circle/square/triangle)
@@ -36,7 +37,11 @@ export class FunnelTypePicker {
     this.scene = scene;
     this.opts = opts;
     this.type = { ...(opts.type || DEFAULT_SHAPE_TYPE) };
-    this.role = opts.role === 'output' ? 'output' : 'input';
+    // Role may be input/output/emitter/collector; collector is BORDER-only,
+    // emitter is available on both borders and factory funnels. Caller may
+    // pass `allowCollector: false` to hide that option (factory context).
+    this.role = opts.role || 'input';
+    this.allowCollector = opts.allowCollector !== false;
     this._build();
   }
 
@@ -138,25 +143,27 @@ export class FunnelTypePicker {
 
   _buildRoleRow(cx, cy) {
     const buttons = [];
-    const w = SWATCH * 2.2;
-    // Role-picker colors match the board triangles: INPUT uses the input
-    // palette, OUTPUT uses the output palette. Kept consistent with
-    // FunnelRenderer + BufferLabelRenderer so the picker reads as the
-    // same convention as the live funnel on the board.
+    // 4 roles — INPUT / OUTPUT share the shape-flow palette; EMIT uses
+    // black and COLLECT uses white so they read as the laser species.
     const opts = [
-      { role: 'input',  label: 'INPUT',  fill: FUNNEL_INPUT_FILL,  stroke: FUNNEL_INPUT_STROKE  },
-      { role: 'output', label: 'OUTPUT', fill: FUNNEL_OUTPUT_FILL, stroke: FUNNEL_OUTPUT_STROKE },
-    ];
+      { role: 'input',     label: 'IN',    fill: FUNNEL_INPUT_FILL,  stroke: FUNNEL_INPUT_STROKE,  textColor: '#ffffff' },
+      { role: 'output',    label: 'OUT',   fill: FUNNEL_OUTPUT_FILL, stroke: FUNNEL_OUTPUT_STROKE, textColor: '#ffffff' },
+      { role: 'emitter',   label: 'EMIT',  fill: EMITTER_FILL,       stroke: EMITTER_STROKE,       textColor: '#ffffff' },
+      { role: 'collector', label: 'CATCH', fill: COLLECTOR_FILL,     stroke: COLLECTOR_STROKE,     textColor: '#111111' },
+    ].filter((o) => this.allowCollector || o.role !== 'collector');
+    const count = opts.length;
+    const w = (PANEL_W - 28) / count;
+    const startX = cx - ((count - 1) * w) / 2;
     opts.forEach((o, i) => {
-      const x = cx + (i === 0 ? -w / 2 - 2 : w / 2 + 2);
+      const x = startX + i * w;
       const btn = this.scene.add.container(x, cy);
       const bg = this.scene.add.graphics();
       bg.fillStyle(o.fill, 1);
       bg.lineStyle(2, o.stroke, 1);
-      bg.fillRoundedRect(-w / 2, -SWATCH / 2 + 4, w, SWATCH - 8, 8);
-      bg.strokeRoundedRect(-w / 2, -SWATCH / 2 + 4, w, SWATCH - 8, 8);
+      bg.fillRoundedRect(-w / 2 + 2, -SWATCH / 2 + 4, w - 4, SWATCH - 8, 8);
+      bg.strokeRoundedRect(-w / 2 + 2, -SWATCH / 2 + 4, w - 4, SWATCH - 8, 8);
       const txt = this.scene.add.text(0, 0, o.label, {
-        fontFamily: 'monospace', fontSize: '14px', color: '#ffffff',
+        fontFamily: 'monospace', fontSize: '12px', color: o.textColor || '#ffffff',
       }).setOrigin(0.5);
       btn.add([bg, txt]);
       const hit = this.scene.add.rectangle(0, 0, w, SWATCH - 8, 0xffffff, 0.001)
@@ -218,16 +225,22 @@ export class FunnelTypePicker {
   }
 
   _refreshSelections() {
+    // Emitter / collector funnels carry no shape type — dim the form+color
+    // rows when either is selected so the player sees they're inactive.
+    const typeless = this.role === 'emitter' || this.role === 'collector';
+    const typeAlpha = typeless ? 0.25 : 1;
     for (const b of this.formRow || []) {
+      b.alpha = typeAlpha;
       b._ring.clear();
-      if (b._form === this.type.form) {
+      if (!typeless && b._form === this.type.form) {
         b._ring.lineStyle(3, 0x000000, 1);
         b._ring.strokeRoundedRect(-SWATCH / 2, -SWATCH / 2, SWATCH, SWATCH, 8);
       }
     }
     for (const b of this.colorRow || []) {
+      b.alpha = typeAlpha;
       b._ring.clear();
-      if (b._color === this.type.color) {
+      if (!typeless && b._color === this.type.color) {
         b._ring.lineStyle(3, 0x000000, 1);
         b._ring.strokeRoundedRect(-SWATCH / 2, -SWATCH / 2, SWATCH, SWATCH, 8);
       }
@@ -238,8 +251,8 @@ export class FunnelTypePicker {
       const alpha = selected ? 1 : 0.45;
       b._bg.fillStyle(b._txtFill, alpha);
       b._bg.lineStyle(selected ? 3 : 2, b._txtStroke, 1);
-      b._bg.fillRoundedRect(-b._w / 2, -SWATCH / 2 + 4, b._w, SWATCH - 8, 8);
-      b._bg.strokeRoundedRect(-b._w / 2, -SWATCH / 2 + 4, b._w, SWATCH - 8, 8);
+      b._bg.fillRoundedRect(-b._w / 2 + 2, -SWATCH / 2 + 4, b._w - 4, SWATCH - 8, 8);
+      b._bg.strokeRoundedRect(-b._w / 2 + 2, -SWATCH / 2 + 4, b._w - 4, SWATCH - 8, 8);
     }
   }
 }

@@ -1,5 +1,5 @@
 import { traceFactoryLoops, unitVec, COLOR_HEX, DEFAULT_SHAPE_TYPE } from '../model/shape.js';
-import { SHAPE_SCALE, BLOCK_LIGHT, BLOCK_DARK, BLOCK_STROKE, outlineWidth } from '../constants.js';
+import { SHAPE_SCALE, BLOCK_LIGHT, BLOCK_DARK, BLOCK_STROKE, SINGLE_CELL_FILL, outlineWidth } from '../constants.js';
 import { drawPuddle } from './shapes.js';
 
 // Renders a factory body (one or more cells, merged) as a Phaser Graphics
@@ -13,27 +13,173 @@ import { drawPuddle } from './shapes.js';
 const CAUTION_YELLOW = 0xd6a30b;
 const CAUTION_BLACK  = 0x1a1a1a;
 
+// Powered-factory palette — any factory carrying a lightning bolt renders
+// in dark green when idle and brightens to the lit shade as its bolts
+// power up. The scene drives this via an overlay gfx whose alpha tracks
+// the factory's max bolt glow.
+const CIRCUIT_BG     = 0x1a3d2a;   // unpowered (dark green)
+const CIRCUIT_BG_LIT = 0x4ea96b;   // fully powered (lighter green)
+
+function hasAnyBolt(cells) {
+  if (!Array.isArray(cells)) return false;
+  for (const cell of cells) if (cell.bolt) return true;
+  return false;
+}
+
 export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scale = SHAPE_SCALE, fill, stroke, invalid, caution, rotation = 0 }) {
   const gfx = scene.make.graphics({ add: false });
   // Invalid factories paint their perimeter in red so the author sees at a
   // glance which block needs fixing; the actual reason floats as text near
   // the body (see EditorScene._drawFactory).
   const effectiveStroke = invalid ? 0xd02020 : stroke;
-  const effectiveFill = caution ? CAUTION_YELLOW : fill;
+  // Powered (laser-gated) factories render as a circuit board: dark green
+  // substrate + silver traces. Caution + explicit `fill` overrides still
+  // win so obstacles and special tints aren't clobbered.
+  const isPowered = hasAnyBolt(cells) && !caution;
+  let effectiveFill;
+  if (caution)                           effectiveFill = CAUTION_YELLOW;
+  else if (fill != null)                 effectiveFill = fill;
+  else if (isPowered)                    effectiveFill = CIRCUIT_BG;
+  else if (cells && cells.length === 1)  effectiveFill = SINGLE_CELL_FILL;
   drawFactoryBodyInto(gfx, cells, pxCell, pxGap, scale, { fill: effectiveFill, stroke: effectiveStroke });
-  // Caution factories: overlay single-direction 45° hazard stripes. Stripe
-  // direction follows rotation parity (even → `/`, odd → `\`) and the
-  // bands are centered on pitch multiples in factory-wrap-shifted coords,
-  // so the pattern is invariant under 90° / 180° rotations of the factory.
   if (caution) drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale, rotation);
 
-  // Labels are returned as SEPARATE gfx objects so the caller can keep them
-  // oriented upright when the body rotates. Attached to `gfx.labels` — the
-  // primary return stays a Graphics so `body.setPosition(-cx, -cy)` and
-  // every existing caller keeps working unchanged.
-  gfx.labels = buildCellLabels(scene, cells, pxCell, pxGap, scale, container);
+  // Body goes in FIRST so the later-added labels render ON TOP (Phaser
+  // containers draw in insertion order).
   container.add(gfx);
+
+  // Lit-green overlay for powered factories — identical silhouette painted
+  // in CIRCUIT_BG_LIT. The scene drives its alpha from the factory's max
+  // bolt glow so the body visibly brightens as it powers on.
+  if (isPowered) {
+    const [cx, cy] = factoryCellsCenter(cells, pxCell, pxGap);
+    const litGfx = scene.make.graphics({ add: false });
+    drawFactoryBodyInto(litGfx, cells, pxCell, pxGap, scale, { fill: CIRCUIT_BG_LIT, stroke: effectiveStroke });
+    litGfx.setPosition(-cx, -cy);
+    litGfx.alpha = 0;
+    container.add(litGfx);
+    gfx.poweredGlow = litGfx;
+  }
+
+  gfx.labels = buildCellLabels(scene, cells, pxCell, pxGap, scale, container);
+  gfx.bolts  = buildBoltGlyphs(scene, cells, pxCell, pxGap, scale, container);
   return gfx;
+}
+
+function factoryCellsCenter(cells, pxCell, pxGap) {
+  let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+  for (const cell of cells) {
+    if (cell.r < minR) minR = cell.r; if (cell.r > maxR) maxR = cell.r;
+    if (cell.c < minC) minC = cell.c; if (cell.c > maxC) maxC = cell.c;
+  }
+  const step = pxCell + pxGap;
+  return [
+    ((minC + maxC) * step + pxCell) / 2,
+    ((minR + maxR) * step + pxCell) / 2,
+  ];
+}
+
+// Lightning-bolt glyphs for cells that carry the `bolt` flag. Rendered as a
+// separate gfx per cell so scenes can pulse/dim each one independently as
+// its power state flips. Callers stash a handle on `gfx.bolts` and update
+// `bolt.powered` from the sim each frame.
+function buildBoltGlyphs(scene, cells, pxCell, pxGap, scale, container) {
+  if (!cells || cells.length === 0) return [];
+  const step = pxCell + pxGap;
+  let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+  for (const cell of cells) {
+    if (cell.r < minR) minR = cell.r;
+    if (cell.r > maxR) maxR = cell.r;
+    if (cell.c < minC) minC = cell.c;
+    if (cell.c > maxC) maxC = cell.c;
+  }
+  const cx = ((minC + maxC) * step + pxCell) / 2;
+  const cy = ((minR + maxR) * step + pxCell) / 2;
+  const size = Math.max(8, Math.round(pxCell * scale * 0.34));
+  const bolts = [];
+  for (const cell of cells) {
+    if (!cell.bolt) continue;
+    const g = scene.make.graphics({ add: false });
+    g.x = cell.c * step + pxCell / 2 - cx;
+    g.y = cell.r * step + pxCell / 2 - cy;
+    container.add(g);
+    // Initial draw at glow=0 (unpowered: white-outlined silhouette).
+    drawBoltInto(g, size, 0, 0);
+    bolts.push({ gfx: g, cellR: cell.r, cellC: cell.c, size, glow: 0 });
+  }
+  return bolts;
+}
+
+// Bolt polygon. `size` is the rough half-height; width ~size*0.55. Centered
+// at (cx, cy). Pulled into its own helper so the per-frame draw can reuse
+// the same vertex set for clipping / stroking / fill.
+export function boltPolygonPoints(cx, cy, size) {
+  const h = size;
+  const w = size * 0.85;   // widened silhouette — reads bigger on a powered cell
+  return [
+    [ cx + w * 0.15, cy - h        ],
+    [ cx - w * 0.60, cy - h * 0.15 ],
+    [ cx - w * 0.10, cy - h * 0.15 ],
+    [ cx - w * 0.35, cy + h        ],
+    [ cx + w * 0.70, cy + h * 0.05 ],
+    [ cx + w * 0.15, cy + h * 0.05 ],
+    [ cx + w * 0.55, cy - h * 0.65 ],
+    [ cx + w * 0.05, cy - h * 0.65 ],
+  ];
+}
+
+// Draw a lightning bolt at three states driven by `glow ∈ [0, 1]`:
+//   glow = 0       → white-outlined silhouette, no fill ("off").
+//   0 < glow < 1   → yellow fills from the bottom up ("powering up").
+//   glow ≥ 1       → solid bright yellow + wavy electricity arcs around.
+// `timeMs` drives the wavy-arc animation at full power.
+export function drawBoltInto(gfx, size, glow, timeMs) {
+  gfx.clear();
+  const pts = boltPolygonPoints(0, 0, size);
+  let minY = Infinity, maxY = -Infinity;
+  for (const [, py] of pts) {
+    if (py < minY) minY = py;
+    if (py > maxY) maxY = py;
+  }
+  const h = maxY - minY;
+  const strokeW = Math.max(1, Math.round(size * 0.14));
+
+  // Grey silhouette, always on — so the shape reads even when unpowered.
+  gfx.fillStyle(0x3a3a3a, 0.85);
+  gfx.lineStyle(strokeW, 0xa0a4aa, 1);
+  tracePoly(gfx, pts);
+  gfx.fillPath();
+  gfx.strokePath();
+
+  // Yellow fill, clipped to the bottom `glow * h` portion — draws the
+  // "filling up" animation as a rising yellow silhouette inside the outline.
+  if (glow > 0) {
+    const fillY = maxY - h * Math.min(1, glow);
+    const lower = clipHalfPlane(pts, (_x, y) => y - fillY);
+    if (lower.length >= 3) {
+      gfx.fillStyle(0xffd84a, 1);
+      gfx.lineStyle(0, 0, 0);
+      tracePoly(gfx, lower);
+      gfx.fillPath();
+    }
+  }
+
+  // Full-power juice: bright inner stroke, fades in over the top 20% of
+  // glow so it doesn't pop on. The lively "electricity" now animates on
+  // the factory body's perimeter instead of on the bolt itself.
+  if (glow > 0.8) {
+    const brightness = Math.min(1, (glow - 0.8) / 0.2);
+    gfx.lineStyle(Math.max(1, Math.round(strokeW * 0.7)), 0xfff27a, brightness);
+    tracePoly(gfx, pts);
+    gfx.strokePath();
+  }
+}
+
+function tracePoly(gfx, pts) {
+  gfx.beginPath();
+  gfx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) gfx.lineTo(pts[i][0], pts[i][1]);
+  gfx.closePath();
 }
 
 // Create one Graphics per labeled cell, positioned in the body's wrap-local

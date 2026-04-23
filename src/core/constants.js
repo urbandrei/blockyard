@@ -13,6 +13,20 @@ export const BOARD_GAP = 3;             // px gap between board grid cells
 export const BLOCK_LIGHT    = 0x5a5f66;
 export const BLOCK_DARK     = 0x2e3238;
 export const BLOCK_STROKE   = 0x14161a;
+// 1x1 factories are highlighted with a darker-orange fill so they read
+// as a distinct "single cell unit" against both multi-cell grey factories
+// and the peach interior floor.
+export const SINGLE_CELL_FILL = 0x8c4a1f;
+// Acid-pit palette. Labeled pits reuse the shape-color palette (red/green/
+// blue) from shape.js so the pit color and the label'd shape color match.
+// Unlabeled pits fall back to ACID_WHITE (slightly cool off-white, stands
+// out against the peach interior floor).
+export const ACID_WHITE        = 0xE8EDF2;
+export const ACID_EDGE_STROKE  = 0x1a2332;
+// Roughly how much "travel distance" (in cell-widths) the shape takes to
+// fully lerp from its current color to the acid label. ~1 means one full
+// cell crossing swaps the color; smaller values snap faster.
+export const ACID_CROSS_CELLS  = 1.0;
 // Border funnel palette — unchanged (green = input into play area, red =
 // output out of play area, from the player's perspective).
 export const FUNNEL_INPUT_FILL   = 0x6fcf7b;
@@ -27,6 +41,18 @@ export const FACTORY_FUNNEL_INPUT_STROKE  = 0x7a2a10;
 export const FACTORY_FUNNEL_OUTPUT_FILL   = 0x6fcf7b;
 export const FACTORY_FUNNEL_OUTPUT_STROKE = 0x1f5a2a;
 export const MANIFOLD_STROKE = 0xffffff;
+
+// Laser palette. Emitters render with a black body + a central gap where the
+// beam exits; collectors have the same silhouette but rendered in white so
+// they read as the "catch" end of a beam. The beam itself pulses between a
+// deep red core and a bright pink glow on the sine-wave overlay.
+export const EMITTER_FILL     = 0x3a3a3a;   // lighter dark grey (was near-black)
+export const EMITTER_STROKE   = 0xa0a4aa;   // medium grey outline (was black)
+export const COLLECTOR_FILL   = 0xffffff;
+export const COLLECTOR_STROKE = 0x8a8e94;   // mid grey — reads on white fill
+export const LASER_CORE       = 0x8a0505;   // dark red — core beam pulse floor
+export const LASER_BRIGHT     = 0xff4040;   // lighter red — core beam pulse ceiling
+export const LASER_GLOW       = 0xc21e1e;   // mid red — flanking wavy lines
 
 // Scene clear color (Phaser game `backgroundColor`). Dark brown per the
 // polish pass; HTML body background matches so the letterbox is seamless.

@@ -12,7 +12,10 @@ import { computeBufferLabelBox } from './BufferLabelRenderer.js';
 
 const X_COLOR     = 0xd02020;
 const CHECK_COLOR = 0x2ea84a;
-const STROKE_W    = 4;
+// Chunky strokes that fill most of the tile — reads clearly at a glance.
+// Width scales with box size so the marker stays proportionate on resize.
+const STROKE_FRAC = 0.18;   // stroke width = STROKE_FRAC * boxSize
+const EXTENT_FRAC = 0.48;   // marker extends EXTENT_FRAC * boxSize from center
 
 export class BufferMarkerRenderer {
   constructor(scene, container, level, { pxCell, pxGap }) {
@@ -49,8 +52,9 @@ export class BufferMarkerRenderer {
 }
 
 function drawX(gfx, boxSize) {
-  const half = boxSize * 0.42;
-  gfx.lineStyle(STROKE_W, X_COLOR, 1);
+  const half = boxSize * EXTENT_FRAC;
+  const w    = Math.max(3, Math.round(boxSize * STROKE_FRAC));
+  gfx.lineStyle(w, X_COLOR, 1);
   gfx.beginPath();
   gfx.moveTo(-half, -half);
   gfx.lineTo( half,  half);
@@ -60,13 +64,13 @@ function drawX(gfx, boxSize) {
 }
 
 function drawCheck(gfx, boxSize) {
-  // Three-point checkmark fitted inside the label box. Sized similarly to
-  // the X for visual parity. Anchored on the box center.
-  const r = boxSize * 0.42;
-  gfx.lineStyle(STROKE_W, CHECK_COLOR, 1);
+  // Chunky three-point checkmark fitted inside the label box.
+  const r = boxSize * EXTENT_FRAC;
+  const w = Math.max(3, Math.round(boxSize * STROKE_FRAC));
+  gfx.lineStyle(w, CHECK_COLOR, 1);
   gfx.beginPath();
-  gfx.moveTo(-r,           r * 0.05);
-  gfx.lineTo(-r * 0.25,    r * 0.6);
-  gfx.lineTo( r * 0.85,   -r * 0.55);
+  gfx.moveTo(-r,           r * 0.08);
+  gfx.lineTo(-r * 0.20,    r * 0.70);
+  gfx.lineTo( r * 0.95,   -r * 0.65);
   gfx.strokePath();
 }

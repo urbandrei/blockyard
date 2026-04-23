@@ -294,15 +294,15 @@ export class TitleBar {
   // PlayerScene to grey out the hint button when every factory is already
   // in its solution spot. Also cancels any gentle flash when disabling.
   setRightButtonEnabled(enabled) {
-    if (!this.rightBox) return;
+    if (!this.rightBox || !this.rightBox.scene) return;
     const prev = this._rightEnabled !== false;
     if (enabled === prev) return;   // idempotent
     this._rightEnabled = !!enabled;
     const alpha = enabled ? 1 : 0.4;
     this.rightBox.alpha = alpha;
-    if (this._rightIconContainer) this._rightIconContainer.alpha = alpha;
-    if (this.homeIcon) this.homeIcon.alpha = alpha;
-    if (this.homeHit) {
+    if (this._rightIconContainer && this._rightIconContainer.scene) this._rightIconContainer.alpha = alpha;
+    if (this.homeIcon && this.homeIcon.scene) this.homeIcon.alpha = alpha;
+    if (this.homeHit && this.homeHit.scene) {
       if (enabled) this.homeHit.setInteractive({ useHandCursor: true });
       else this.homeHit.disableInteractive();
     }

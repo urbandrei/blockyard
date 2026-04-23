@@ -13,8 +13,8 @@ import { FORMS, COLORS, COLOR_HEX } from '../model/shape.js';
 // language is consistent. Live commits each pick via opts.onChange.
 
 const PANEL_W = 260;
-const PANEL_H = 256;
-const PANEL_H_NO_REMOVE = 200;
+const PANEL_H = 312;
+const PANEL_H_NO_REMOVE = 256;
 const ROW_H = 56;
 const SWATCH = 44;
 
@@ -38,6 +38,7 @@ export class CellLabelPicker {
     // Empty object = "no label yet" / "both axes cleared". Existing
     // labels may be partial (form-only or color-only) — preserve as-is.
     this.label = { ...(opts.label || {}) };
+    this.bolt = !!opts.bolt;
     this._showRemove = !!opts.onRemove;
     this._build();
   }
@@ -81,9 +82,10 @@ export class CellLabelPicker {
     const topY = -panelH / 2 + ROW_H / 2 + 6;
     this.formRow  = this._buildFormRow(0, topY);
     this.colorRow = this._buildColorRow(0, topY + ROW_H);
-    this.clearBtn = this._buildClear(0, topY + ROW_H * 2);
+    this.boltBtn  = this._buildBolt(0, topY + ROW_H * 2);
+    this.clearBtn = this._buildClear(0, topY + ROW_H * 3);
     if (this._showRemove) {
-      this.removeBtn = this._buildRemove(0, topY + ROW_H * 3);
+      this.removeBtn = this._buildRemove(0, topY + ROW_H * 4);
     }
     // Paint initial selection rings so the picker opens showing the
     // cell's current label state (partial or full).
@@ -164,8 +166,47 @@ export class CellLabelPicker {
     }
   }
 
+  _buildBolt(cx, cy) {
+    // Lightning-bolt toggle. Activates an "unpowered unless adjacent emitter
+    // is struck" gate on the cell's factory output spawning — orthogonal to
+    // the form/color label (lasers ignore form/color labels entirely).
+    const w = SWATCH * 4.4;
+    const btn = this.scene.add.container(cx, cy);
+    const bg = this.scene.add.graphics();
+    const repaint = () => {
+      bg.clear();
+      const on = this.bolt;
+      bg.fillStyle(on ? 0xffd84a : 0xeeeeee, 1);
+      bg.lineStyle(2, on ? 0x8c6a10 : 0x666666, 1);
+      bg.fillRoundedRect(-w / 2, -SWATCH / 2 + 4, w, SWATCH - 8, 8);
+      bg.strokeRoundedRect(-w / 2, -SWATCH / 2 + 4, w, SWATCH - 8, 8);
+    };
+    const txt = this.scene.add.text(0, 0, '\u26A1 LIGHTNING BOLT', {
+      fontFamily: 'monospace', fontSize: '14px', color: '#111111',
+    }).setOrigin(0.5);
+    btn.add([bg, txt]);
+    const hit = this.scene.add.rectangle(0, 0, w, SWATCH - 8, 0xffffff, 0.001)
+      .setInteractive({ useHandCursor: true });
+    hit.on('pointerdown', (_p, _lx, _ly, e) => {
+      e.stopPropagation();
+      this.bolt = !this.bolt;
+      repaint();
+      this.opts.onBoltChange && this.opts.onBoltChange(this.bolt);
+    });
+    btn.add(hit);
+    this.root.add(btn);
+    repaint();
+    return btn;
+  }
+
   _buildClear(cx, cy) {
     return this._buildActionRow(cx, cy, 'CLEAR LABEL', '#a01010', () => {
+      // Clear both the form/color label AND the lightning bolt in one action —
+      // "CLEAR LABEL" reads as "drop every label this cell carries".
+      if (this.bolt) {
+        this.bolt = false;
+        this.opts.onBoltChange && this.opts.onBoltChange(false);
+      }
       this.opts.onClear && this.opts.onClear();
       this.close();
     });

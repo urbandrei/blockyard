@@ -7,8 +7,8 @@
 //     number: int,                                     // level # within section (0 = sandbox)
 //     factories: [                                     // factories placed on the board (editor authoring)
 //       { id, anchor:{row,col},
-//         cells:[{r,c, label?: PartialShapeType},...], // per-cell label (form+color, OR just one)
-//         funnels:[{r,c,side,role}], locked?:bool }
+//         cells:[{r,c, label?: PartialShapeType, bolt?:true },...], // per-cell label + optional lightning-bolt gate
+//         funnels:[{r,c,side,role}], locked?:bool }    // role: 'input'|'output'|'emitter'
 //     ],
 //     initialFactories: [                              // factories the player starts with in the blueprint
 //       { id, slot:{row,col}, cells, funnels, rotation?, locked?:false }
@@ -16,7 +16,7 @@
 //     lockedFactories: [                               // factories anchored to the play area (cannot move)
 //       { id, anchor:{row,col}, cells, funnels }
 //     ],
-//     border: { funnels: [{r,c,side,role}] },          // legacy: role-only funnels on buffer
+//     border: { funnels: [{r,c,side,role}] },          // role: 'input'|'output'|'emitter'|'collector'
 //     inputs:  [{r,c,side, type: ShapeType}],          // typed spawn points on the buffer
 //     outputs: [{r,c,side, type: ShapeType}],          // typed expected drops on the buffer
 //     instructionalText?: string,                       // optional one-liner pinned to the
@@ -78,6 +78,7 @@ export function defaultLevel() {
     inputs: [],
     outputs: [],
     instructionalText: null,
+    acidPits: [],
     boss: null,
   };
   seedDefaultFunnels(level);
@@ -101,6 +102,7 @@ export function defaultBossLevel(stageCount) {
     inputs: [],
     outputs: [],
     instructionalText: null,
+    acidPits: [],
     boss: { rounds: [] },
   };
   for (let i = 0; i < n; i++) {
@@ -272,7 +274,17 @@ function migrate(parsed) {
   // / `level.boss` without crashing on legacy saves.
   if (next.instructionalText === undefined) next.instructionalText = null;
   if (next.boss === undefined) next.boss = null;
+  if (!Array.isArray(next.acidPits)) next.acidPits = [];
   return next;
+}
+
+/** Return the acid-pit label for the cell at (r, c) — `{color}` or null. */
+export function pitLabelAt(level, r, c) {
+  const pits = (level && level.acidPits) || [];
+  for (const p of pits) {
+    if (p.r === r && p.c === c) return p.label || null;
+  }
+  return null;
 }
 
 function backfillRoles(level) {

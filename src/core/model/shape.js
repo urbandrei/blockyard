@@ -162,8 +162,11 @@ export function isObstacleFactory(funnels) {
 
 export function validateFactory({ cells = [], funnels = [] } = {}) {
   const hasLabels = hasAnyLabel(cells);
-  const inputs  = funnels.filter((f) => f.role !== 'output');
-  const outputs = funnels.filter((f) => f.role === 'output');
+  // Emitters / collectors are laser entities and don't participate in the
+  // shape-flow contract — ignore them here.
+  const shapeFunnels = funnels.filter((f) => f.role === 'input' || f.role === 'output');
+  const inputs  = shapeFunnels.filter((f) => f.role !== 'output');
+  const outputs = shapeFunnels.filter((f) => f.role === 'output');
 
   if (!hasLabels) {
     if (inputs.length === 0 && outputs.length === 0) return { valid: true };   // no funnels yet — still authoring
@@ -336,8 +339,11 @@ export function cellCenterPx(r, c, pxCell, pxGap) {
 // ---------- Manifold flow-path tracing (input→output) ----------
 
 export function buildManifoldSegments(cells, funnels, pxCell, pxGap, scale) {
-  const inputs = funnels.filter((f) => f.role !== 'output');
-  const outputs = funnels.filter((f) => f.role === 'output');
+  // Emitters / collectors are laser entities, not part of shape flow —
+  // exclude them from the manifold input/output pairing.
+  const shapeFunnels = funnels.filter((f) => f.role === 'input' || f.role === 'output');
+  const inputs = shapeFunnels.filter((f) => f.role !== 'output');
+  const outputs = shapeFunnels.filter((f) => f.role === 'output');
   if (inputs.length === 0 || outputs.length === 0) return [];
 
   const arcR = pxCell * scale * 0.3;

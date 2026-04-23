@@ -1,4 +1,5 @@
 import { drawFunnelsInto } from './FunnelRenderer.js';
+import { SHAPE_SCALE } from '../constants.js';
 
 // Renders buffer-funnel triangles. Each funnel gets its OWN pulseWrap
 // container, centered on the buffer cell's center, so scenes can apply
@@ -23,7 +24,10 @@ export function renderBorder(scene, _bodyContainer, funnelContainer, level, { px
     const wrap = scene.add.container(cx, cy);
     funnelContainer.add(wrap);
     const gfx = scene.make.graphics({ add: false });
-    drawFunnelsInto(gfx, [f], pxCell, pxGap, 1, /* isBorder */ true);
+    // Render at SHAPE_SCALE — same scale as the buffer label tile — so the
+    // triangle / emitter glyph protrudes from the tile edge exactly like a
+    // factory funnel protrudes from a factory body edge.
+    drawFunnelsInto(gfx, [f], pxCell, pxGap, SHAPE_SCALE, /* isBorder */ true);
     gfx.setPosition(-cx, -cy);
     wrap.add(gfx);
     wraps.push(wrap);

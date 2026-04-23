@@ -7,6 +7,7 @@ import {
   FACTORY_FUNNEL_OUTPUT_FILL, FACTORY_FUNNEL_OUTPUT_STROKE,
   outlineWidth,
 } from '../constants.js';
+import { drawEmittersInto } from './EmitterGlyph.js';
 
 export function renderFunnels(scene, container, funnels, { pxCell, pxGap, scale = SHAPE_SCALE, isBorder = false }) {
   // make (not add) so the gfx starts outside the scene display list — we only
@@ -27,7 +28,14 @@ export function drawFunnelsInto(gfx, funnels, pxCell, pxGap, scale, isBorder = f
   const inputStroke = isBorder ? FUNNEL_INPUT_STROKE : FACTORY_FUNNEL_INPUT_STROKE;
   const outFill     = isBorder ? FUNNEL_OUTPUT_FILL   : FACTORY_FUNNEL_OUTPUT_FILL;
   const outStroke   = isBorder ? FUNNEL_OUTPUT_STROKE : FACTORY_FUNNEL_OUTPUT_STROKE;
+  // Emitter / collector funnels delegate to the flipped-funnel glyph.
+  const laserFunnels = [];
+  const shapeFunnels = [];
   for (const f of funnels) {
+    if (f.role === 'emitter' || f.role === 'collector') laserFunnels.push(f);
+    else                                                 shapeFunnels.push(f);
+  }
+  for (const f of shapeFunnels) {
     const pts = funnelPolyPoints(f.r, f.c, f.side, pxCell, pxGap, scale);
     if (pts.length < 3) continue;
     const isInput = f.role !== 'output';
@@ -41,4 +49,5 @@ export function drawFunnelsInto(gfx, funnels, pxCell, pxGap, scale, isBorder = f
     gfx.fillPath();
     gfx.strokePath();
   }
+  if (laserFunnels.length) drawEmittersInto(gfx, laserFunnels, pxCell, pxGap, scale, isBorder);
 }

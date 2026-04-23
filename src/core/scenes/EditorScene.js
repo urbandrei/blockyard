@@ -15,16 +15,19 @@ import {
   validateFactory, isObstacleFactory,
 } from '../model/shape.js';
 import { renderBorder } from '../render/BorderRenderer.js';
-import { renderFactoryBody, renderLockedTint } from '../render/FactoryBodyRenderer.js';
+import { renderFactoryBody, renderLockedTint, drawBoltInto } from '../render/FactoryBodyRenderer.js';
 import { renderFunnels } from '../render/FunnelRenderer.js';
 import { renderFlow } from '../render/FlowRenderer.js';
 import { renderBufferLabels, computeBufferLabelBox } from '../render/BufferLabelRenderer.js';
 import { renderInteriorFloor, renderExteriorCheckers, renderFrameShadow, renderFrameOutline } from '../render/PlayAreaFrame.js';
 import { ShapeRenderer } from '../render/ShapeRenderer.js';
+import { LaserRenderer } from '../render/LaserRenderer.js';
 import { BufferMarkerRenderer } from '../render/BufferMarkerRenderer.js';
 import { TitleBar } from '../ui/TitleBar.js';
 import { FunnelTypePicker } from '../ui/FunnelTypePicker.js';
 import { CellLabelPicker } from '../ui/CellLabelPicker.js';
+import { AcidPitTypePicker } from '../ui/AcidPitTypePicker.js';
+import { renderAcidPits } from '../render/AcidPitRenderer.js';
 import { ExportPanel } from '../ui/ExportPanel.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
 import { disableMenuBg } from '../ui/MenuBackground.js';
@@ -115,40 +118,39 @@ export default class EditorScene extends Phaser.Scene {
     this.draftFunnels = [];
     this.drag = null;
 
-    // Layer order (back to front). Explicit setDepth so the ordering doesn't
-    // depend on scene display-list insertion order (graphics added later inside
-    // the rendering functions would otherwise end up on top of everything).
-    // Back → front layering:
-    //   boardContainer (0)      peach interior floor
-    //   flowContainer (5)       dashed flow lines
-    //   shapeContainer (10)     sim shapes
-    //   funnelContainer (15)    funnel triangles
-    //   interactiveContainer (20)  factory bodies + bridges
-    //   exteriorContainer (25)  brown checker WITH interior hole (the "cut-out")
-    //   frameContainer (30)     black frame + inner shadow + buffer labels
-    this.boardContainer       = this.add.container(0, 0).setDepth(0);
-    this.shapeContainer       = this.add.container(0, 0).setDepth(10);
-    // Ambient funnel-inhale/exhale dots sit just below the funnel triangles
-    // (factory funnels at 15, border funnels at 145) so the particles read
-    // as drifting behind each funnel's face.
+    // Layer order (back to front). Back-drop chrome (brown exterior, inner
+    // shadow, black frame outline) sits at LOW depths so sim visuals —
+    // shapes + laser beams — render ON TOP of the black border and the
+    // brown buffer checker. Factories/funnels are still layered above
+    // shapes/lasers, so the relative z-order inside the play area is
+    // preserved. The "cut-out" trick is gone; stray factories in the
+    // buffer region are legitimately visible (matches ghost-drag previews).
+    this.boardContainer        = this.add.container(0, 0).setDepth(0);
+    this.exteriorContainer     = this.add.container(0, 0).setDepth(2);
+    this.shadowContainer       = this.add.container(0, 0).setDepth(4);
+    this.frameContainer        = this.add.container(0, 0).setDepth(5);
+    // Acid pits paint over the interior floor but under sim visuals.
+    this.acidPitContainer      = this.add.container(0, 0).setDepth(7);
+    this.shapeContainer        = this.add.container(0, 0).setDepth(10);
+    // Laser beams sit BELOW the funnels + factory bodies but ABOVE the
+    // black frame / brown exterior so they read across the buffer region.
+    this.laserContainer        = this.add.container(0, 0).setDepth(12);
+    // Ambient funnel-inhale/exhale dots sit just below the funnel triangles.
     this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(13);
-    this.funnelContainer      = this.add.container(0, 0).setDepth(15);
-    this.interactiveContainer = this.add.container(0, 0).setDepth(20);
+    this.borderFunnelParticleContainer  = this.add.container(0, 0).setDepth(14);
+    this.funnelContainer       = this.add.container(0, 0).setDepth(15);
+    this.interactiveContainer  = this.add.container(0, 0).setDepth(20);
     // Flow dashes sit on top of the factory body so the manifold pattern is
     // visible (the body is opaque mid-grey; at depth < body the dashes were
-    // hidden). Above body, below the brown exterior cut-out (25).
-    this.flowContainer        = this.add.container(0, 0).setDepth(22);
-    this.exteriorContainer    = this.add.container(0, 0).setDepth(25);
-    // Frame chrome is split across depths so border-funnel triangles AND
-    // buffer labels sit BETWEEN the inner shadow and the outline — both
-    // rendered UNDER the black edge, just like interior factories are
-    // under the frame.
-    this.shadowContainer       = this.add.container(0, 0).setDepth(140);
-    this.borderFunnelParticleContainer = this.add.container(0, 0).setDepth(143);
-    this.borderFunnelContainer = this.add.container(0, 0).setDepth(145);
-    this.labelContainer        = this.add.container(0, 0).setDepth(150);
-    this.bufferMarkerContainer = this.add.container(0, 0).setDepth(155);
-    this.frameContainer        = this.add.container(0, 0).setDepth(160);
+    // hidden).
+    this.flowContainer         = this.add.container(0, 0).setDepth(22);
+    // Border funnels + emitter glyphs, buffer label tiles, and sink-resolve
+    // markers all render ABOVE the black frame outline so the centered box
+    // cluster (triangle + tile + marker) reads as ONE piece on top of the
+    // border line — rather than the frame cutting through each of them.
+    this.borderFunnelContainer = this.add.container(0, 0).setDepth(163);
+    this.labelContainer        = this.add.container(0, 0).setDepth(165);
+    this.bufferMarkerContainer = this.add.container(0, 0).setDepth(168);
     // Error badges (red text over invalid factories) sit above the frame
     // outline so they're always legible.
     this.errorContainer        = this.add.container(0, 0).setDepth(170);
@@ -185,6 +187,7 @@ export default class EditorScene extends Phaser.Scene {
     }));
 
     this.shapeRenderer = new ShapeRenderer(this, this.shapeContainer, { pxCell: this.pxCell });
+    this.laserRenderer = new LaserRenderer(this, this.laserContainer, { pxCell: this.pxCell });
     this.bufferMarkerRenderer = new BufferMarkerRenderer(this, this.bufferMarkerContainer, this.level, {
       pxCell: this.pxCell, pxGap: BOARD_GAP,
     });
@@ -198,6 +201,9 @@ export default class EditorScene extends Phaser.Scene {
         if (accepted && funnel.ownerId === 'border') {
           this._onEditorOutputSatisfied(funnel);
         }
+      },
+      onCollectorSatisfied: (c) => {
+        if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(c, true);
       },
     });
     this.factoryFunnelParticles = new FunnelParticleSystem(this, this.factoryFunnelParticleContainer, { pxCell: this.pxCell });
@@ -271,6 +277,8 @@ export default class EditorScene extends Phaser.Scene {
       if (this.saveMenu)  { this.saveMenu.close(); this.saveMenu = null; }
       if (this.nameInput) { this.nameInput.destroy(); this.nameInput = null; }
       if (this.cellLabelPicker) { this.cellLabelPicker.close(); this.cellLabelPicker = null; }
+      if (this.acidPitPicker)   { this.acidPitPicker.close();   this.acidPitPicker = null; }
+      if (this._acidPits)       { this._acidPits.destroy();      this._acidPits = null; }
       if (this.exportPanel)     { this.exportPanel.destroy();   this.exportPanel = null; }
       if (this.bossPhaseIndicator) { this.bossPhaseIndicator.destroy(); this.bossPhaseIndicator = null; }
       if (this.factoryFunnelParticles) { this.factoryFunnelParticles.destroy(); this.factoryFunnelParticles = null; }
@@ -308,8 +316,20 @@ export default class EditorScene extends Phaser.Scene {
       // center so nothing drifts.
       const sq = shapeSquash(t);
       const applyPair = (entry) => {
-        if (entry.bodyWrap)   { entry.bodyWrap.scaleX   = sq.body.scaleX;    entry.bodyWrap.scaleY   = sq.body.scaleY; }
-        if (entry.funnelWrap) { entry.funnelWrap.scaleX = sq.funnels.scaleX; entry.funnelWrap.scaleY = sq.funnels.scaleY; }
+        // Powered-type factories stay STILL until fully powered — the idle
+        // (unpowered) body reads as "inert" rather than breathing with the
+        // rest of the board. Once the aggregate bolt glow is full, the
+        // factory rejoins the normal pulse.
+        const powered = entry.body && entry.body.poweredGlow;
+        const idlePowered = powered && entry.body.poweredGlow.alpha < 1;
+        if (entry.bodyWrap) {
+          entry.bodyWrap.scaleX = idlePowered ? 1 : sq.body.scaleX;
+          entry.bodyWrap.scaleY = idlePowered ? 1 : sq.body.scaleY;
+        }
+        if (entry.funnelWrap) {
+          entry.funnelWrap.scaleX = idlePowered ? 1 : sq.funnels.scaleX;
+          entry.funnelWrap.scaleY = idlePowered ? 1 : sq.funnels.scaleY;
+        }
       };
       for (const entry of this.factoryRefs.values()) applyPair(entry);
       if (this.draftPulse) applyPair(this.draftPulse);
@@ -338,6 +358,7 @@ export default class EditorScene extends Phaser.Scene {
       if (this.draftFlow) this.draftFlow.update(time);
       if (this.ghostFlow) this.ghostFlow.update(time);
       if (this.slotFlows) for (const f of this.slotFlows) f.update(time);
+      if (this._acidPits) this._acidPits.tick(time);
     }
 
     // Smooth-lerp the drag ghost toward its target using a dt-based
@@ -353,6 +374,8 @@ export default class EditorScene extends Phaser.Scene {
     }
 
     this.sim.update(time);
+    if (this.laserRenderer) this.laserRenderer.update(time, this.sim.lasers, this.sim.emitters);
+    this._updateBoltVisuals();
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.update(time);
     if (this.borderFunnelParticles)  this.borderFunnelParticles.update(time);
     if (this.draftParticles)         this.draftParticles.update(time);
@@ -369,6 +392,36 @@ export default class EditorScene extends Phaser.Scene {
       const alongX = shape.dx !== 0 ? warpStretch : 1 / warpStretch;
       const alongY = shape.dy !== 0 ? warpStretch : 1 / warpStretch;
       this.shapeRenderer.update(shape, baseScale * alongX, baseScale * alongY);
+    }
+  }
+
+  // Per-frame refresh of bolt + factory-perimeter electricity. Each bolt
+  // lerps its `glow` toward the sim-reported target. The factory's aggregate
+  // power (max across its bolts) drives the animated perimeter electricity
+  // on "powered" factories.
+  _updateBoltVisuals() {
+    if (!this.sim || !this.factoryRefs) return;
+    const powered = this.sim.boltPowered || new Map();
+    const now = this.time.now;
+    const dt = Math.max(0, Math.min(60, this.game.loop.delta || 16));
+    const step = dt / CYCLE_MS;
+    for (const entry of this.factoryRefs.values()) {
+      const bolts = entry.body && entry.body.bolts;
+      if (!bolts) continue;
+      let minGlow = 1;
+      for (const b of bolts) {
+        const key = `${entry.factoryId}:${b.cellR},${b.cellC}`;
+        const target = powered.get(key) ? 1 : 0;
+        if      (b.glow < target) b.glow = Math.min(target, b.glow + step);
+        else if (b.glow > target) b.glow = Math.max(target, b.glow - step);
+        drawBoltInto(b.gfx, b.size, b.glow, now);
+        if (b.glow < minGlow) minGlow = b.glow;
+      }
+      if (entry.body && entry.body.poweredGlow) {
+        // The body only reads as "powered" when EVERY bolt on it is fully
+        // lit — any partial state keeps the factory inert.
+        entry.body.poweredGlow.alpha = minGlow >= 1 ? 1 : 0;
+      }
     }
   }
 
@@ -856,12 +909,14 @@ export default class EditorScene extends Phaser.Scene {
     );
 
     this.boardContainer.setPosition(this.boardOriginX, this.boardOriginY);
+    if (this.acidPitContainer) this.acidPitContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.interactiveContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.flowContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.shapeContainer.setPosition(this.boardOriginX, this.boardOriginY);
     if (this.factoryFunnelParticleContainer) this.factoryFunnelParticleContainer.setPosition(this.boardOriginX, this.boardOriginY);
     if (this.borderFunnelParticleContainer)  this.borderFunnelParticleContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.funnelContainer.setPosition(this.boardOriginX, this.boardOriginY);
+    if (this.laserContainer) this.laserContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.exteriorContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.shadowContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.borderFunnelContainer.setPosition(this.boardOriginX, this.boardOriginY);
@@ -887,6 +942,13 @@ export default class EditorScene extends Phaser.Scene {
     // Pass 1 (back): peach floor on the interior only.
     renderInteriorFloor(this, this.boardContainer, {
       board: this.level.board, pxCell: this.pxCell,
+    });
+    // Acid pits layer into their own container between the floor and the
+    // shapes. Returns a {destroy, tick} handle so the cosmetic update loop
+    // can re-wobble the perimeter each frame.
+    if (this._acidPits) { this._acidPits.destroy(); this._acidPits = null; }
+    this._acidPits = renderAcidPits(this, this.acidPitContainer, this.level, {
+      pxCell: this.pxCell, pxGap: BOARD_GAP,
     });
     // Buffer funnels (triangles only). Each funnel gets its own pulseWrap
     // centered on the cell so they breathe with the factory funnels. They
@@ -970,7 +1032,7 @@ export default class EditorScene extends Phaser.Scene {
     });
     this.flowUpdaters.push(flow);
     if (!validity.valid) this._paintFactoryError(absCells, validity.error);
-    return { bodyWrap, funnelWrap, body, funnels, absCells, tintGfx, locked: isLocked };
+    return { bodyWrap, funnelWrap, body, funnels, absCells, tintGfx, locked: isLocked, factoryId: factory.id };
   }
 
   // Hovering red label placed just above the factory's top-left cell. The
@@ -1417,8 +1479,60 @@ export default class EditorScene extends Phaser.Scene {
       const hit = this.level.factories.find((fac) =>
         fac.cells.some((cc) => fac.anchor.row + cc.r === info.r && fac.anchor.col + cc.c === info.c),
       );
-      if (hit) this._openCellLabelPicker(hit, info.r, info.c);
+      if (hit) { this._openCellLabelPicker(hit, info.r, info.c); return; }
+      // No factory at this cell → treat as acid-pit placement / edit. Buffer
+      // cells are off-limits (pits are playable-interior only).
+      if (isBorderCell(this.level.board, info.r, info.c)) return;
+      this._handleAcidTap(info.r, info.c);
     }
+  }
+
+  // ===================================================================
+  //   Acid pits
+  // ===================================================================
+
+  _acidPitAt(r, c) {
+    const pits = (this.level && this.level.acidPits) || [];
+    return pits.find((p) => p.r === r && p.c === c) || null;
+  }
+
+  _handleAcidTap(r, c) {
+    const pit = this._acidPitAt(r, c);
+    if (!pit) {
+      // Add a fresh unlabeled pit at this cell.
+      if (!Array.isArray(this.level.acidPits)) this.level.acidPits = [];
+      this.level.acidPits.push({ r, c });
+      this._persist();
+      this._renderAll();
+      this._restartSim();
+      return;
+    }
+    this._openAcidPicker(pit);
+  }
+
+  _openAcidPicker(pit) {
+    if (this.acidPitPicker) { this.acidPitPicker.close(); this.acidPitPicker = null; }
+    const step = this.pxCell + BOARD_GAP;
+    const cellCx = this.boardOriginX + pit.c * step + this.pxCell / 2;
+    const cellCy = this.boardOriginY + pit.r * step + this.pxCell / 2;
+    this.acidPitPicker = new AcidPitTypePicker(this, {
+      x: cellCx, y: cellCy,
+      label: pit.label || null,
+      onChange: (label) => {
+        if (label && label.color) pit.label = { color: label.color };
+        else delete pit.label;
+        this._persist();
+        this._renderAll();
+        this._restartSim();
+      },
+      onDelete: () => {
+        this.level.acidPits = this.level.acidPits.filter((p) => !(p.r === pit.r && p.c === pit.c));
+        this._persist();
+        this._renderAll();
+        this._restartSim();
+      },
+      onClose: () => { this.acidPitPicker = null; },
+    });
   }
 
   // Find the assignment whose rotated footprint covers the given slot, not
@@ -1478,6 +1592,7 @@ export default class EditorScene extends Phaser.Scene {
       x: cellCx,
       y: cellCy,
       label: cell.label || null,
+      bolt:  !!cell.bolt,
       onChange: (label) => {
         cell.label = { ...label };
         this._persist();
@@ -1486,6 +1601,12 @@ export default class EditorScene extends Phaser.Scene {
       },
       onClear: () => {
         delete cell.label;
+        this._persist();
+        this._renderAll();
+        this._restartSim();
+      },
+      onBoltChange: (on) => {
+        if (on) cell.bolt = true; else delete cell.bolt;
         this._persist();
         this._renderAll();
         this._restartSim();
@@ -1542,12 +1663,17 @@ export default class EditorScene extends Phaser.Scene {
     this.cellLabelPicker = new CellLabelPicker(this, {
       x: cellCx, y: cellCy,
       label: cell.label || null,
+      bolt:  !!cell.bolt,
       onChange: (label) => {
         cell.label = { ...label };
         this._renderDrawGrid();
       },
       onClear: () => {
         delete cell.label;
+        this._renderDrawGrid();
+      },
+      onBoltChange: (on) => {
+        if (on) cell.bolt = true; else delete cell.bolt;
         this._renderDrawGrid();
       },
       onRemove: () => this._removeDraftCellAt(r, c),
@@ -1557,9 +1683,15 @@ export default class EditorScene extends Phaser.Scene {
 
   _cycleDraftFunnel(r, c, side) {
     const idx = this.draftFunnels.findIndex((f) => f.r === r && f.c === c && f.side === side);
+    // Cycle: none → input → output → emitter → none. Factory funnels can't be
+    // collectors (collectors are border-only by design).
     if (idx < 0) this.draftFunnels.push({ r, c, side, role: 'input' });
-    else if (this.draftFunnels[idx].role !== 'output') this.draftFunnels[idx].role = 'output';
-    else this.draftFunnels.splice(idx, 1);
+    else {
+      const cur = this.draftFunnels[idx].role;
+      if      (cur === 'input')  this.draftFunnels[idx].role = 'output';
+      else if (cur === 'output') this.draftFunnels[idx].role = 'emitter';
+      else                        this.draftFunnels.splice(idx, 1);
+    }
     this._renderDrawGrid();
   }
 
@@ -1590,11 +1722,16 @@ export default class EditorScene extends Phaser.Scene {
     // wildcard — opening + dismissing without clicking would silently leave
     // it untyped and any shape would pass through.
     let type = this._lookupBorderType(funnel);
+    // Emitters / collectors carry no type; keep `type` as a display default
+    // for the dimmed form/color rows but don't persist anything.
+    const laserRole = funnel.role === 'emitter' || funnel.role === 'collector';
     if (!type) {
       type = { ...DEFAULT_SHAPE_TYPE };
-      this._upsertTypedEntry(funnel.role, funnel.r, funnel.c, funnel.side, type);
-      this._persist();
-      this._restartSim();
+      if (!laserRole) {
+        this._upsertTypedEntry(funnel.role, funnel.r, funnel.c, funnel.side, type);
+        this._persist();
+        this._restartSim();
+      }
     }
     const step = this.pxCell + BOARD_GAP;
     const cellCx = this.boardOriginX + funnel.c * step + this.pxCell / 2;
@@ -1607,13 +1744,20 @@ export default class EditorScene extends Phaser.Scene {
       onChange: (patch) => {
         if (patch.role && patch.role !== funnel.role) {
           funnel.role = patch.role;
-          // Move the typed entry between inputs[] and outputs[] to match.
-          this._removeTypedEntry(funnel.r, funnel.c, funnel.side);
-          this._upsertTypedEntry(funnel.role, funnel.r, funnel.c, funnel.side, type);
+          // Emitter / collector carry no type — drop the typed entry when
+          // switching INTO them, and re-seed a default when switching OUT.
+          const laserRole = funnel.role === 'emitter' || funnel.role === 'collector';
+          if (laserRole) {
+            this._removeTypedEntry(funnel.r, funnel.c, funnel.side);
+          } else {
+            this._removeTypedEntry(funnel.r, funnel.c, funnel.side);
+            this._upsertTypedEntry(funnel.role, funnel.r, funnel.c, funnel.side, type);
+          }
         }
         if (patch.type) {
           Object.assign(type, patch.type);
-          this._upsertTypedEntry(funnel.role, funnel.r, funnel.c, funnel.side, type);
+          const laserRole = funnel.role === 'emitter' || funnel.role === 'collector';
+          if (!laserRole) this._upsertTypedEntry(funnel.role, funnel.r, funnel.c, funnel.side, type);
         }
         this._persist();
         this._renderAll();
@@ -1956,6 +2100,10 @@ export default class EditorScene extends Phaser.Scene {
     }
     for (const fac of this.level.factories) {
       for (const { r, c } of fac.cells) set.add(`${fac.anchor.row + r},${fac.anchor.col + c}`);
+    }
+    // Acid pits block factory placement too — shapes pass over, factories don't.
+    for (const pit of (this.level.acidPits || [])) {
+      set.add(`${pit.r},${pit.c}`);
     }
     return set;
   }
@@ -2635,6 +2783,8 @@ export default class EditorScene extends Phaser.Scene {
     if (this.shapeRenderer) this.shapeRenderer.clearAll();
     if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.clearAll();
     this.shapeRenderer = new ShapeRenderer(this, this.shapeContainer, { pxCell: this.pxCell });
+    if (this.laserRenderer) this.laserRenderer.destroy();
+    this.laserRenderer = new LaserRenderer(this, this.laserContainer, { pxCell: this.pxCell });
     this.bufferMarkerRenderer = new BufferMarkerRenderer(this, this.bufferMarkerContainer, this.level, {
       pxCell: this.pxCell, pxGap: BOARD_GAP,
     });
@@ -2648,6 +2798,9 @@ export default class EditorScene extends Phaser.Scene {
         if (accepted && funnel.ownerId === 'border') {
           this._onEditorOutputSatisfied(funnel);
         }
+      },
+      onCollectorSatisfied: (c) => {
+        if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(c, true);
       },
     });
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.resize(this.pxCell);
@@ -2699,6 +2852,8 @@ export default class EditorScene extends Phaser.Scene {
     if (this.shapeRenderer) this.shapeRenderer.clearAll();
     if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.clearAll();
     this.shapeRenderer = new ShapeRenderer(this, this.shapeContainer, { pxCell: this.pxCell });
+    if (this.laserRenderer) this.laserRenderer.destroy();
+    this.laserRenderer = new LaserRenderer(this, this.laserContainer, { pxCell: this.pxCell });
     this.bufferMarkerRenderer = new BufferMarkerRenderer(this, this.bufferMarkerContainer, this.level, {
       pxCell: this.pxCell, pxGap: BOARD_GAP,
     });
@@ -2712,6 +2867,9 @@ export default class EditorScene extends Phaser.Scene {
         if (accepted && funnel.ownerId === 'border') {
           this._onEditorOutputSatisfied(funnel);
         }
+      },
+      onCollectorSatisfied: (c) => {
+        if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(c, true);
       },
     });
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.resize(this.pxCell);

@@ -3,17 +3,21 @@ import {
   BOARD_GAP, SHAPE_SCALE, SHAPE_RADIUS_FRAC, outlineWidth,
   FUNNEL_INPUT_FILL, FUNNEL_INPUT_STROKE,
   FUNNEL_OUTPUT_FILL, FUNNEL_OUTPUT_STROKE,
+  EMITTER_FILL, EMITTER_STROKE, COLLECTOR_FILL, COLLECTOR_STROKE,
 } from '../constants.js';
-import { FRAME_PAD } from './PlayAreaFrame.js';
 import { drawPuddle } from './shapes.js';
 
 // Labels each buffer funnel with a role-colored rounded box (sized like a
-// 1×1 factory: SHAPE_SCALE × pxCell) sitting TANGENT to the interior frame
-// on the buffer side, with a form+color icon centered inside.
+// 1×1 factory: SHAPE_SCALE × pxCell), CENTERED on its buffer cell — same
+// positioning as a placed factory body on the play grid — with a form+color
+// icon centered inside. Scenes render this container ABOVE the black frame
+// outline so the box stays fully visible over the border line.
 //
 // Role color:
-//   input  → green (matches the triangle fill)
-//   output → red   (matches the triangle fill)
+//   input      → green
+//   output     → red
+//   emitter    → dark grey (laser source)
+//   collector  → white (laser catch)
 //
 // Each label lives in its own wrap Container centered on the box position,
 // so the scene can apply the squash-and-stretch pulse (sq.funnels) around
@@ -28,21 +32,10 @@ const LABEL_RADIUS_FRAC = SHAPE_RADIUS_FRAC * 0.5;
 export function computeBufferLabelBox(level, funnel, pxCell, pxGap) {
   const step = pxCell + pxGap;
   const size = SHAPE_SCALE * pxCell;
-  const cFrom = 1, cTo = level.board.cols - 2;
-  const rFrom = 1, rTo = level.board.rows - 2;
-  const frameTop    = rFrom * step - FRAME_PAD;
-  const frameBottom = (rTo + 1) * step + FRAME_PAD;
-  const frameLeft   = cFrom * step - FRAME_PAD;
-  const frameRight  = (cTo  + 1) * step + FRAME_PAD;
-  const cellCX = funnel.c * step + pxCell / 2;
-  const cellCY = funnel.r * step + pxCell / 2;
-  let x = cellCX, y = cellCY;
-  switch (funnel.side) {
-    case 'bottom': y = frameTop    - size / 2; break;
-    case 'top':    y = frameBottom + size / 2; break;
-    case 'right':  x = frameLeft   - size / 2; break;
-    case 'left':   x = frameRight  + size / 2; break;
-  }
+  // Centered on the buffer cell — matches where a factory body would sit
+  // if this cell were a play-area cell.
+  const x = funnel.c * step + pxCell / 2;
+  const y = funnel.r * step + pxCell / 2;
   return { x, y, size };
 }
 
@@ -50,54 +43,47 @@ export function renderBufferLabels(scene, container, level, { pxCell, pxGap }) {
   const wraps = [];
   const funnels = (level.border && level.border.funnels) || [];
   if (funnels.length === 0) return wraps;
-  const step = pxCell + pxGap;
   const boxSize = SHAPE_SCALE * pxCell;
   const boxR    = Math.max(3, Math.round(pxCell * SHAPE_SCALE * 0.18));
   const strokeW = outlineWidth(pxCell);
   const iconR   = Math.max(4, Math.round(pxCell * LABEL_RADIUS_FRAC));
 
-  // Interior-frame edges in board-local coords (same geometry as
-  // PlayAreaFrame's renderFrameOutline).
-  const cFrom = 1, cTo = level.board.cols - 2;
-  const rFrom = 1, rTo = level.board.rows - 2;
-  const frameTop    = rFrom * step - FRAME_PAD;
-  const frameBottom = (rTo + 1) * step + FRAME_PAD;
-  const frameLeft   = cFrom * step - FRAME_PAD;
-  const frameRight  = (cTo  + 1) * step + FRAME_PAD;
-
   for (const f of funnels) {
-    const type = lookupType(level, f);
-    const iconColor = COLOR_HEX[type.color] || COLOR_HEX[DEFAULT_SHAPE_TYPE.color];
-    const isOutput = f.role === 'output';
-    const boxFill    = isOutput ? FUNNEL_OUTPUT_FILL   : FUNNEL_INPUT_FILL;
-    const boxStroke  = isOutput ? FUNNEL_OUTPUT_STROKE : FUNNEL_INPUT_STROKE;
+    const isEmitter   = f.role === 'emitter';
+    const isCollector = f.role === 'collector';
+    const isOutput    = f.role === 'output';
+    const boxFill   = isEmitter   ? EMITTER_FILL   :
+                      isCollector ? COLLECTOR_FILL :
+                      isOutput    ? FUNNEL_OUTPUT_FILL : FUNNEL_INPUT_FILL;
+    const boxStroke = isEmitter   ? EMITTER_STROKE   :
+                      isCollector ? COLLECTOR_STROKE :
+                      isOutput    ? FUNNEL_OUTPUT_STROKE : FUNNEL_INPUT_STROKE;
 
-    const cellCX = f.c * step + pxCell / 2;
-    const cellCY = f.r * step + pxCell / 2;
-
-    // Position the box tangent to the frame edge on the OUTSIDE (buffer
-    // side). f.side is the funnel's inward direction; the box sits opposite.
-    let boxCX = cellCX, boxCY = cellCY;
-    switch (f.side) {
-      case 'bottom': boxCY = frameTop    - boxSize / 2; break;
-      case 'top':    boxCY = frameBottom + boxSize / 2; break;
-      case 'right':  boxCX = frameLeft   - boxSize / 2; break;
-      case 'left':   boxCX = frameRight  + boxSize / 2; break;
-    }
+    const { x: boxCX, y: boxCY } = computeBufferLabelBox(level, f, pxCell, pxGap);
 
     const wrap = scene.add.container(boxCX, boxCY);
     container.add(wrap);
-
     const gfx = scene.make.graphics({ add: false });
-    // Role-colored tile with a centered form+color icon. Role is conveyed
-    // purely by fill color (green = input, red = output); the labeling copy
-    // lives inside the FunnelTypePicker modal instead of on the board tile.
     gfx.fillStyle(boxFill, 1);
     gfx.lineStyle(strokeW, boxStroke, 1);
     gfx.fillRoundedRect(-boxSize / 2, -boxSize / 2, boxSize, boxSize, boxR);
     gfx.strokeRoundedRect(-boxSize / 2, -boxSize / 2, boxSize, boxSize, boxR);
-    gfx.lineStyle(strokeW, 0x000000, 1);
-    drawForm(gfx, 0, 0, iconR, type.form, iconColor);
+    if (isEmitter || isCollector) {
+      // Red bullseye — filled red dot inside a red ring — on BOTH the
+      // emitter (laser source) and the collector (laser catch) so the role
+      // reads at a glance without any shape-type icon.
+      const dotR  = iconR * 0.55;
+      const ringR = iconR * 1.05;
+      gfx.lineStyle(Math.max(2, strokeW), 0xd02020, 1);
+      gfx.strokeCircle(0, 0, ringR);
+      gfx.fillStyle(0xd02020, 1);
+      gfx.fillCircle(0, 0, dotR);
+    } else {
+      const type = lookupType(level, f);
+      const iconColor = COLOR_HEX[type.color] || COLOR_HEX[DEFAULT_SHAPE_TYPE.color];
+      gfx.lineStyle(strokeW, 0x000000, 1);
+      drawForm(gfx, 0, 0, iconR, type.form, iconColor);
+    }
     wrap.add(gfx);
     wraps.push(wrap);
   }

@@ -26,6 +26,7 @@ export class ShapeRenderer {
     gfx.x = shape.x;
     gfx.y = shape.y;
     gfx.setScale(0);
+    gfx._tintHex = color;
     this.container.add(gfx);
     this.handles.set(shape.id, gfx);
   }
@@ -40,6 +41,29 @@ export class ShapeRenderer {
     if (scaleY == null) scaleY = scaleX;
     gfx.scaleX = scaleX;
     gfx.scaleY = scaleY;
+
+    // Acid-pit retint: while a transition is in flight, lerp the fill
+    // color between the from/target hex values and redraw the shape.
+    const targetName = shape._acidTargetName;
+    const progress = shape._acidProgress || 0;
+    let desiredHex;
+    if (targetName && progress > 0 && progress < 1) {
+      const fromHex = (shape._acidFromHex != null)
+        ? shape._acidFromHex
+        : (COLOR_HEX[shape.color] || COLOR_HEX[DEFAULT_SHAPE_TYPE.color]);
+      const toHex   = COLOR_HEX[targetName] || fromHex;
+      desiredHex = lerpHex(fromHex, toHex, progress);
+    } else {
+      desiredHex = COLOR_HEX[shape.color] || COLOR_HEX[DEFAULT_SHAPE_TYPE.color];
+    }
+    if (desiredHex !== gfx._tintHex) {
+      const form = shape.form || DEFAULT_SHAPE_TYPE.form;
+      gfx.clear();
+      gfx.fillStyle(desiredHex, 1);
+      gfx.lineStyle(this.strokeW, 0x000000, 1);
+      drawShapeForm(gfx, this.radius, form);
+      gfx._tintHex = desiredHex;
+    }
   }
 
   remove(shape, pop) {
@@ -75,6 +99,15 @@ export class ShapeRenderer {
 // Axis-aligned form rendering, sized to fit a circumscribed circle of `r`.
 // Square: side = r * 1.7 (matches BufferLabelRenderer.drawForm).
 // Triangle: equilateral, point-up, height ≈ 2r (visual parity with the label).
+function lerpHex(a, b, t) {
+  const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff;
+  const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return (r << 16) | (g << 8) | bl;
+}
+
 function drawShapeForm(gfx, r, form) {
   switch (form) {
     case 'square': {

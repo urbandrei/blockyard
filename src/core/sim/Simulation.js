@@ -3,8 +3,28 @@
 // from its own update(). Shape visuals are created/destroyed by a
 // ShapeRenderer the scene wires in via the `onSpawn` / `onRemove` callbacks.
 
-import { SHAPE_SCALE, CYCLE_MS, SIDE_TO_EXIT, cumulativeDistance } from '../constants.js';
-import { borderCells, DEFAULT_SHAPE_TYPE, hasAnyLabel, cellLabelAt } from '../model/shape.js';
+import { SHAPE_SCALE, CYCLE_MS, SIDE_TO_EXIT, SIDE_OPPOSITE, cumulativeDistance, ACID_CROSS_CELLS } from '../constants.js';
+import { borderCells, DEFAULT_SHAPE_TYPE, hasAnyLabel, cellLabelAt, COLOR_HEX } from '../model/shape.js';
+import { emitterGapCenter, emitterTipOffset } from '../render/EmitterGlyph.js';
+
+function lerpHex(a, b, t) {
+  const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff;
+  const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return (r << 16) | (g << 8) | bl;
+}
+
+// Current visible tint for a shape — mid-transition lerp, or the shape's
+// committed color otherwise. Used by the sim on retarget so the new "from"
+// picks up where the old one left off, avoiding a color snap.
+function currentShapeHex(s) {
+  const base = COLOR_HEX[s.color] || 0xffffff;
+  if (!s._acidTargetName || !s._acidFromHex || !(s._acidProgress > 0 && s._acidProgress < 1)) return base;
+  const toHex = COLOR_HEX[s._acidTargetName] || base;
+  return lerpHex(s._acidFromHex, toHex, s._acidProgress);
+}
 
 // Small collision tolerance — the shape should visibly reach the factory edge
 // before despawning, so the funnel appears to "swallow" it. Large enough that
@@ -40,11 +60,14 @@ function edgeMidpointAbs(r, c, side, pxCell, pxGap, scale) {
 
 // From the player's (inside) perspective: sinks consume circles, sources emit.
 // Border is inverted because we view it from inside the play area.
-function isSink(f)   { return (f.ownerId === 'border' && f.role === 'output') || (f.ownerId !== 'border' && f.role === 'input'); }
-function isSource(f) { return (f.ownerId === 'border' && f.role === 'input')  || (f.ownerId !== 'border' && f.role === 'output'); }
+// Emitter / collector roles are outside this classification — they don't
+// spawn or consume shapes, so they're neither sinks nor sources.
+function isShapeFunnel(f) { return f.role === 'input' || f.role === 'output'; }
+function isSink(f)   { return isShapeFunnel(f) && ((f.ownerId === 'border' && f.role === 'output') || (f.ownerId !== 'border' && f.role === 'input')); }
+function isSource(f) { return isShapeFunnel(f) && ((f.ownerId === 'border' && f.role === 'input')  || (f.ownerId !== 'border' && f.role === 'output')); }
 
 export class Simulation {
-  constructor({ pxCell, pxGap, onSpawn, onRemove, onSinkResolve }) {
+  constructor({ pxCell, pxGap, onSpawn, onRemove, onSinkResolve, onCollectorSatisfied }) {
     this.pxCell = pxCell;
     this.pxGap = pxGap;
     this.cellStep = pxCell + pxGap;
@@ -56,6 +79,10 @@ export class Simulation {
     // either way; this is purely the side-channel the scene listens on for
     // ✓/X markers). Untyped sinks are wildcards and don't fire this.
     this.onSinkResolve = onSinkResolve || (() => {});
+    // Fires the first time a border laser collector is hit by any beam.
+    // Win-condition plumbing reads `sim.satisfiedCollectors` directly; this
+    // callback is the side-channel for scenes that want to mark the visual.
+    this.onCollectorSatisfied = onCollectorSatisfied || (() => {});
     this.shapes = [];
     this.funnels = [];
     this.walls = new Map();
@@ -66,6 +93,13 @@ export class Simulation {
     this.lastBoundary = 0;
     this.nextId = 1;
     this.running = false;
+    // Laser state — populated by start(), updated each tick.
+    this.emitters = [];
+    this.collectors = [];
+    this.lasers = [];
+    this.satisfiedCollectors = new Set();
+    this.boltPowered = new Map();
+    this._lastUpdateMs = null;
   }
 
   start(level, now) {
@@ -73,6 +107,21 @@ export class Simulation {
     this.funnels = this._collectFunnels(level);
     this.walls = this._collectWalls(level);
     this.funnelTypes = this._collectFunnelTypes(level);
+    this._collectLaserEntities(level);
+    this.lasers = [];
+    this.satisfiedCollectors = new Set();
+    this.boltPowered = new Map();
+    this._lastUpdateMs = now;
+    this._boltCells = this._collectBoltCells(level);
+    // Per-factory timestamp of when all bolts first became powered (used
+    // by the "delay emitter trigger until the bolt glow is filled" gate).
+    this._factoryBoltsPoweredSince = new Map();
+    // Acid pits: shapes flow over them, but labeled pits gradually retint
+    // a passing shape. Shapes aren't blocked — walls are unchanged.
+    this.acidByCell = new Map();
+    for (const pit of (level.acidPits || [])) {
+      if (pit.label && pit.label.color) this.acidByCell.set(`${pit.r},${pit.c}`, pit.label.color);
+    }
     // Pre-compute the required sink set per interior factory. Used each sink
     // hit to check "have all sinks on this factory been hit this cycle?" so we
     // can fire sources immediately (no cycle-boundary wait).
@@ -83,9 +132,19 @@ export class Simulation {
       if (!this.sinksByOwner.has(f.ownerId)) this.sinksByOwner.set(f.ownerId, new Set());
       this.sinksByOwner.get(f.ownerId).add(f.key);
     }
+    // Border sinks sit at SHAPE_SCALE inside a buffer cell whose wall spans
+    // the whole cell — so shapes aimed at the sink would trip the wall on
+    // entry before reaching the funnel. Treat those cells as passable for
+    // wall-collision; shapes still pop at the funnel via _funnelHit (which
+    // runs first), or fall off via OOB kill if they miss.
+    this._sinkPassableCells = new Set();
+    for (const f of this.funnels) {
+      if (f.ownerId === 'border' && isSink(f)) this._sinkPassableCells.add(`${f.absR},${f.absC}`);
+    }
     this.firedThisCycle.clear();
     this.cycleStart = now;
     this.lastBoundary = 0;
+    this._prevDNow = null;
     this.hitsThisCycle.clear();
     this.shapes.length = 0;
     // Per-owner pass-through stamp: when a factory's input funnel has no
@@ -103,6 +162,29 @@ export class Simulation {
     this.shapes.length = 0;
     this.running = false;
     this.paused = false;
+    this.lasers = [];
+    this.boltPowered = new Map();
+    this._lastUpdateMs = null;
+    // Reset laser entity state so a re-play starts from a clean idle.
+    if (this.emitters) {
+      for (const e of this.emitters) {
+        e.power = 0;
+        e.firing = false;
+        e.triggered = false;
+      }
+    }
+    this._factoryBoltsPoweredSince = new Map();
+  }
+
+  // Populate laser state (emitters/collectors/bolt cells) from the level
+  // WITHOUT starting the sim. Lets scenes render the pre-play "idle charge"
+  // animation at each emitter tip before the player presses Play.
+  prepEntities(level) {
+    this._collectLaserEntities(level);
+    this._boltCells = this._collectBoltCells(level);
+    this.boltPowered = new Map();
+    this.lasers = [];
+    this._factoryBoltsPoweredSince = new Map();
   }
 
   // Freeze/unfreeze the sim without dropping live shapes. The scene calls
@@ -122,11 +204,22 @@ export class Simulation {
       s.birthTime += dt;
       s.birthCycles = cumulativeDistance(s.birthTime / CYCLE_MS);
     }
+    // Force a fresh progressDelta baseline next frame so the paused gap
+    // doesn't lurch any in-flight acid transitions.
+    this._prevDNow = null;
     this.paused = false;
   }
 
   update(now) {
     if (!this.running || this.paused) return;
+
+    const lastMs = this._lastUpdateMs == null ? now : this._lastUpdateMs;
+    const dtMs = Math.max(0, now - lastMs);
+    this._lastUpdateMs = now;
+
+    // Laser field is updated BEFORE any cycle-boundary firing so bolt power
+    // is current when we decide whether a factory's sources may spawn.
+    this._updateLasers(dtMs);
 
     // Fire any cycle boundaries we crossed during the last frame BEFORE
     // advancing positions — so newly-spawned shapes get positioned against
@@ -155,6 +248,10 @@ export class Simulation {
     // frame (swept collision) — a single-point hit test can't catch funnel
     // entries when a long frame moves the shape more than hitRadius.
     const dNow = cumulativeDistance(now / CYCLE_MS);
+    const progressDelta = this._prevDNow == null
+      ? 0
+      : Math.max(0, (dNow - this._prevDNow) / ACID_CROSS_CELLS);
+    this._prevDNow = dNow;
     for (const s of this.shapes) {
       if (s.dead) continue;
       s.prevX = s.x;
@@ -164,9 +261,45 @@ export class Simulation {
       s.y = s.birthY + s.dy * delta;
     }
 
+    // Acid-pit transitions: per shape, look up the acid label at the
+    // current cell; start/retarget a color transition when entering a
+    // labeled cell, advance progress each frame, and commit to shape.color
+    // when the transition completes. Shapes that exit a pit mid-transition
+    // keep advancing toward their last target — a shape dipping through a
+    // red pit finishes red even if the next cell isn't acid.
+    if (this.acidByCell.size > 0 || progressDelta > 0) {
+      for (const s of this.shapes) {
+        if (s.dead) continue;
+        const cr = Math.floor(s.y / this.cellStep);
+        const cc = Math.floor(s.x / this.cellStep);
+        const label = this.acidByCell.get(`${cr},${cc}`) || null;
+        if (label && label !== s.color && label !== s._acidTargetName) {
+          // (Re)target. Start from the CURRENT visible tint, not the shape's
+          // canonical color — so retargeting mid-transition doesn't snap.
+          s._acidFromHex = currentShapeHex(s);
+          s._acidTargetName = label;
+          s._acidProgress = 0;
+        }
+        if (s._acidTargetName && (s._acidProgress || 0) < 1) {
+          s._acidProgress = Math.min(1, (s._acidProgress || 0) + progressDelta);
+          if (s._acidProgress >= 1) {
+            // Commit: sink matching from this point on sees the new color.
+            s.color = s._acidTargetName;
+            s._acidFromHex = null;
+            s._acidTargetName = null;
+            s._acidProgress = 0;
+          }
+        }
+      }
+    }
+
     // Collisions.
     for (const s of this.shapes) {
       if (s.dead) continue;
+      // Laser-pop test: a shape that crosses a live beam pops immediately.
+      // Tested before funnel hits so a shape headed into a funnel with a
+      // laser in the way still pops first (more intuitive for the player).
+      if (this._laserPops(s)) { this._kill(s, true); continue; }
       const f = this._funnelHit(s);
       if (f) {
         if (isSink(f)) {
@@ -258,7 +391,11 @@ export class Simulation {
     }
     if (level.border && Array.isArray(level.border.funnels)) {
       for (const f of level.border.funnels) {
-        add('border', f.r, f.c, f.side, f.role, 1);
+        // Border funnels live at SHAPE_SCALE so their position matches the
+        // centered buffer label tile — the triangle/emitter glyph visibly
+        // attaches to the tile edge the same way a factory funnel attaches
+        // to a factory body edge.
+        add('border', f.r, f.c, f.side, f.role, SHAPE_SCALE);
       }
     }
     return list;
@@ -341,6 +478,7 @@ export class Simulation {
     let bestF = null;
     for (const f of this.funnels) {
       if (s.sourceKey === f.key) continue;
+      if (!isShapeFunnel(f)) continue;
       let t, px, py;
       if (abLen2 < 1e-6) {
         t = 0; px = ax; py = ay;
@@ -380,8 +518,12 @@ export class Simulation {
     const step = this.cellStep;
     const r = Math.floor(y / step);
     const col = Math.floor(x / step);
-    const wall = this.walls.get(`${r},${col}`);
+    const key = `${r},${col}`;
+    const wall = this.walls.get(key);
     if (!wall) return false;
+    // Buffer cells that host a border sink are passable — see start() for
+    // why. Funnel-hit resolution still pops shapes at the sink.
+    if (this._sinkPassableCells && this._sinkPassableCells.has(key)) return false;
     const inner = this.pxCell * wall.scale;
     const m = (this.pxCell - inner) / 2;
     const lx = x - col * step, ly = y - r * step;
@@ -407,6 +549,9 @@ export class Simulation {
     if (!required) return;
     for (const k of required) if (!set.has(k)) return; // still waiting on a sink
     this.firedThisCycle.add(ownerId);
+    // Lightning-bolt gate: a factory with one or more bolt cells cannot
+    // spawn shapes from its outputs until every bolt on it is powered.
+    if (!this._factoryBoltsPowered(ownerId)) return;
     for (const f of this.funnels) {
       if (f.ownerId === ownerId && isSource(f)) this._spawn(f, now);
     }
@@ -419,7 +564,15 @@ export class Simulation {
   }
 
   _spawn(funnel, now) {
-    const inset = 2;
+    // Shapes spawn INSET a little from the funnel in the outward direction
+    // so the first-frame collision check doesn't snag them on the source's
+    // own wall. Border sources additionally have to clear the full-cell
+    // buffer wall, which the funnel sits INSIDE of (at SHAPE_SCALE).
+    const base = 2;
+    const wallClearance = funnel.ownerId === 'border'
+      ? (this.pxCell * (1 - (funnel.scale || 1))) / 2
+      : 0;
+    const inset = base + wallClearance;
     const sx = funnel.x + funnel.dx * inset;
     const sy = funnel.y + funnel.dy * inset;
     // Stamp the spawned shape with the funnel's declared type (form+color).
@@ -472,4 +625,266 @@ export class Simulation {
     s.dead = true;
     this.onRemove(s, pop);
   }
+
+  // ---------- laser field ----------
+  //
+  // Emitters are a separate funnel species — they don't spawn or consume
+  // shapes, they shoot straight-line beams. Border emitters are always on.
+  // Factory emitters are dormant until a laser from ELSEWHERE strikes them;
+  // once struck, every OTHER emitter on the same factory fires outward (the
+  // hit one absorbs). Activation/deactivation animates over 1 CYCLE_MS via
+  // the per-emitter `power` scalar.
+
+  _collectLaserEntities(level) {
+    const emitters = [];
+    const collectors = [];
+    const byKey = new Map();
+    const tipOff = emitterTipOffset(this.pxCell);
+    const makeEntity = (ownerId, absR, absC, side, scale) => {
+      const [dx, dy] = outwardDir(side);
+      const [x, y] = emitterGapCenter(absR, absC, side, this.pxCell, this.pxGap, scale);
+      return {
+        ownerId, absR, absC, side, dx, dy, x, y, scale,
+        // Tip in board-local coords — where the charge animation is anchored.
+        tipX: x + dx * tipOff,
+        tipY: y + dy * tipOff,
+        // Charge state: `power` ∈ [0, 1] lerps both directions over
+        // CYCLE_MS. `firing` latches: flips true when power reaches 1,
+        // flips false when power returns to 0. Beam fires iff `firing`,
+        // so brief trigger drops don't cut the beam or retrigger the
+        // fire animation.
+        power: 0,
+        firing: false,
+        triggered: false,
+        key: `${ownerId}:${absR},${absC},${side}`,
+      };
+    };
+    if (level.border && Array.isArray(level.border.funnels)) {
+      for (const f of level.border.funnels) {
+        if (f.role === 'emitter') {
+          const e = makeEntity('border', f.r, f.c, f.side, SHAPE_SCALE);
+          emitters.push(e); byKey.set(e.key, e);
+        } else if (f.role === 'collector') {
+          const c = makeEntity('border', f.r, f.c, f.side, SHAPE_SCALE);
+          collectors.push(c); byKey.set(c.key, c);
+        }
+      }
+    }
+    for (const fac of level.factories || []) {
+      const boltedCells = new Set(
+        (fac.cells || []).filter((c) => c.bolt).map((c) => `${c.r},${c.c}`)
+      );
+      for (const f of (fac.funnels || [])) {
+        if (f.role !== 'emitter') continue;
+        const absR = fac.anchor.row + f.r;
+        const absC = fac.anchor.col + f.c;
+        const e = makeEntity(fac.id, absR, absC, f.side, SHAPE_SCALE);
+        e.bolted = boltedCells.has(`${f.r},${f.c}`);
+        emitters.push(e); byKey.set(e.key, e);
+      }
+    }
+    this.emitters = emitters;
+    this.collectors = collectors;
+    this._laserByKey = byKey;
+  }
+
+  _collectBoltCells(level) {
+    // Map factoryId → Set of "absR,absC" carrying a lightning bolt. Absolute
+    // coords match the scene's render-side lookup (factory.anchor + cell.r/c).
+    const map = new Map();
+    for (const fac of level.factories || []) {
+      for (const cell of (fac.cells || [])) {
+        if (!cell.bolt) continue;
+        if (!map.has(fac.id)) map.set(fac.id, new Set());
+        map.get(fac.id).add(`${fac.anchor.row + cell.r},${fac.anchor.col + cell.c}`);
+      }
+    }
+    return map;
+  }
+
+  _factoryBoltsPowered(factoryId) {
+    const bolts = this._boltCells && this._boltCells.get(factoryId);
+    if (!bolts || bolts.size === 0) return true;
+    for (const cellKey of bolts) {
+      if (!this.boltPowered.get(`${factoryId}:${cellKey}`)) return false;
+    }
+    return true;
+  }
+
+  _updateLasers(dtMs) {
+    const now = this._lastUpdateMs;
+
+    // 1. Cast rays from emitters that are currently FIRING. `firing` is a
+    //    latched flag (true once power reaches 1, false only once power
+    //    returns to 0) so brief trigger drops don't flicker the beam.
+    const beams = [];
+    const hitEmitters = new Set();
+    const hitCollectors = new Set();
+    const boltLit = new Map();
+
+    for (const src of this.emitters) {
+      if (!src.firing) continue;
+      const ray = this._castLaser(src);
+      beams.push({
+        x0: src.x, y0: src.y, x1: ray.endX, y1: ray.endY,
+        power: src.power, sourceKey: src.key,
+        hitType: ray.terminator || 'open',
+      });
+      if (ray.hitEmitterKey) {
+        const target = this._laserByKey && this._laserByKey.get(ray.hitEmitterKey);
+        if (target && target.ownerId !== src.ownerId) {
+          hitEmitters.add(ray.hitEmitterKey);
+          if (target.ownerId !== 'border') {
+            boltLit.set(`${target.ownerId}:${target.absR},${target.absC}`, true);
+          }
+        }
+      }
+      if (ray.hitCollectorKey) hitCollectors.add(ray.hitCollectorKey);
+    }
+
+    this.lasers = beams;
+    this.boltPowered = boltLit;
+
+    // 2. Track how long each bolted factory has been fully powered. The
+    //    emitter-charge animation only starts once the bolts have had a
+    //    full CYCLE_MS to visually fill in — so "charge" follows "bolt
+    //    fully lit" rather than racing it.
+    if (this._boltCells) {
+      for (const factoryId of this._boltCells.keys()) {
+        if (this._factoryBoltsPowered(factoryId)) {
+          if (!this._factoryBoltsPoweredSince.has(factoryId)) {
+            this._factoryBoltsPoweredSince.set(factoryId, now);
+          }
+        } else {
+          this._factoryBoltsPoweredSince.delete(factoryId);
+        }
+      }
+    }
+
+    // 3. Compute `triggered` per emitter.
+    //    • Border: running.
+    //    • Bolted factory: all bolts powered for ≥ CYCLE_MS.
+    //    • Non-bolted factory: sibling-hit rule.
+    const hitsByFactory = new Map();
+    for (const key of hitEmitters) {
+      const e = this._laserByKey.get(key);
+      if (!e || e.ownerId === 'border') continue;
+      hitsByFactory.set(e.ownerId, (hitsByFactory.get(e.ownerId) || 0) + 1);
+    }
+    for (const e of this.emitters) {
+      if (e.ownerId === 'border') {
+        e.triggered = !!this.running;
+      } else {
+        const factoryBolts = this._boltCells && this._boltCells.get(e.ownerId);
+        const factoryHasBolts = !!(factoryBolts && factoryBolts.size > 0);
+        if (factoryHasBolts) {
+          const since = this._factoryBoltsPoweredSince.get(e.ownerId);
+          e.triggered = since !== undefined && (now - since) >= CYCLE_MS;
+        } else {
+          const siblingHits =
+            (hitsByFactory.get(e.ownerId) || 0) - (hitEmitters.has(e.key) ? 1 : 0);
+          e.triggered = siblingHits > 0;
+        }
+      }
+    }
+
+    // 4. Lerp power toward the trigger state. Both directions take
+    //    CYCLE_MS; `firing` latches on at power == 1 and off at power == 0
+    //    so the beam stays steady through brief trigger flickers.
+    const step = CYCLE_MS > 0 ? (dtMs / CYCLE_MS) : 1;
+    for (const e of this.emitters) {
+      const cur = e.power || 0;
+      const next = e.triggered
+        ? Math.min(1, cur + step)
+        : Math.max(0, cur - step);
+      e.power = next;
+      if (!e.firing && next >= 1) e.firing = true;
+      else if (e.firing && next <= 0.0001) e.firing = false;
+    }
+
+    // 5. Collector satisfaction (one-shot, latches on first hit).
+    for (const key of hitCollectors) {
+      if (this.satisfiedCollectors.has(key)) continue;
+      this.satisfiedCollectors.add(key);
+      const col = this._laserByKey.get(key);
+      if (col) this.onCollectorSatisfied(col);
+    }
+  }
+
+  _castLaser(src) {
+    const { pxCell, pxGap } = this;
+    const backSide = SIDE_OPPOSITE[src.side];
+    let r = src.absR, c = src.absC;
+    let endX = src.x, endY = src.y;
+    for (let i = 0; i < 128; i++) {
+      const nr = r + src.dy, nc = c + src.dx;
+      // Terminator on the incoming edge of (nr,nc)?
+      const tKey = this._terminatorKeyAt(nr, nc, backSide);
+      if (tKey) {
+        const t = this._laserByKey.get(tKey);
+        if (t) {
+          const res = { endX: t.x, endY: t.y };
+          if (this._isCollectorKey(tKey)) { res.terminator = 'collector'; res.hitCollectorKey = tKey; }
+          else                            { res.terminator = 'emitter';   res.hitEmitterKey   = tKey; }
+          return res;
+        }
+      }
+      // Wall blocker (factory body cell / buffer cell) — stop at its near edge.
+      const wall = this.walls.get(`${nr},${nc}`);
+      if (wall) {
+        const [ex, ey] = edgeMidpointAbs(nr, nc, backSide, pxCell, pxGap, wall.scale || 1);
+        return { endX: ex, endY: ey, terminator: 'wall' };
+      }
+      // Advance; fall-through out-of-range guard.
+      r = nr; c = nc;
+      endX = src.x + src.dx * this.cellStep * (i + 1);
+      endY = src.y + src.dy * this.cellStep * (i + 1);
+      if (nr < -1 || nc < -1 || nr > 64 || nc > 64) break;
+    }
+    return { endX, endY, terminator: 'open' };
+  }
+
+  _isCollectorKey(key) {
+    if (!this.collectors) return false;
+    for (const c of this.collectors) if (c.key === key) return true;
+    return false;
+  }
+
+  _terminatorKeyAt(r, c, side) {
+    if (!side || !this._laserByKey) return null;
+    // Border terminator?
+    const bk = `border:${r},${c},${side}`;
+    if (this._laserByKey.has(bk)) return bk;
+    // Factory emitter terminator? Scan keys — factory emitters are few so
+    // this is cheap; avoids building an additional reverse index.
+    for (const [key, ent] of this._laserByKey) {
+      if (ent.ownerId === 'border') continue;
+      if (ent.absR === r && ent.absC === c && ent.side === side) return key;
+    }
+    return null;
+  }
+
+  _laserPops(s) {
+    // Point-vs-segment distance from the shape's CURRENT position to each
+    // live beam, up to its drawn length. Cheap + good enough; shapes move
+    // slowly relative to the pxCell-wide beam width.
+    if (!this.lasers || this.lasers.length === 0) return false;
+    const popR = this.pxCell * 0.22;   // shape radius ~SHAPE_RADIUS_FRAC
+    const popR2 = popR * popR;
+    for (const b of this.lasers) {
+      if ((b.power || 0) < 0.5) continue;   // only fully-grown beams are lethal
+      const dx = b.x1 - b.x0, dy = b.y1 - b.y0;
+      const len = Math.hypot(dx, dy);
+      if (len < 1) continue;
+      const drawLen = len * b.power;
+      const ux = dx / len, uy = dy / len;
+      const rx = s.x - b.x0, ry = s.y - b.y0;
+      const along = rx * ux + ry * uy;
+      if (along < 0 || along > drawLen) continue;
+      const perp = rx * uy - ry * ux;
+      if (perp * perp < popR2) return true;
+    }
+    return false;
+  }
 }
+

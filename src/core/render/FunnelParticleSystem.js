@@ -286,6 +286,7 @@ export function collectFunnelsForParticles(level, pxCell, pxGap, scale) {
       return cell && cell.label ? cell.label : null;
     };
     for (const f of (fac.funnels || [])) {
+      if (f.role === 'emitter' || f.role === 'collector') continue;
       const absR = fac.anchor.row + f.r;
       const absC = fac.anchor.col + f.c;
       const obj = buildFunnelPoint(absR, absC, f.side, f.role, cellLabelAt(f.r, f.c), pxCell, pxGap, scale);
@@ -296,6 +297,7 @@ export function collectFunnelsForParticles(level, pxCell, pxGap, scale) {
   const inputMap  = indexBorderTypes(level.inputs);
   const outputMap = indexBorderTypes(level.outputs);
   for (const f of ((level.border && level.border.funnels) || [])) {
+    if (f.role === 'emitter' || f.role === 'collector') continue;
     const key = `${f.r},${f.c},${f.side}`;
     const type = f.role === 'output' ? outputMap.get(key) : inputMap.get(key);
     // Border funnels invert sink/source relative to the sim — a border
@@ -320,6 +322,7 @@ export function collectFactoryFunnelsForParticles(cells, funnels, pxCell, pxGap,
     return cell && cell.label ? cell.label : null;
   };
   for (const f of (funnels || [])) {
+    if (f.role === 'emitter' || f.role === 'collector') continue;
     const obj = buildFunnelPoint(f.r, f.c, f.side, f.role, cellLabelAt(f.r, f.c), pxCell, pxGap, scale);
     if (obj) out.push(obj);
   }
