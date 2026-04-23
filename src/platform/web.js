@@ -17,9 +17,10 @@ function storageKey(key) {
   return key.startsWith(KEY_PREFIX) ? key : KEY_PREFIX + key;
 }
 
-// Read at import time so every method sees the same origin. Trailing slashes
-// stripped so we can safely concatenate `${API}/levels`.
-const API = (import.meta.env && import.meta.env.VITE_BLOCKYARD_API || '').replace(/\/+$/, '');
+// Hardcoded — the URL isn't a secret and every shipped build talks to the
+// same public API. Trailing slashes stripped so we can safely concatenate
+// `${API}/levels`.
+const API = 'https://blockyard-api.onrender.com';
 
 export default (function createWebAdapter() {
   const base = createBaseAdapter('web');
