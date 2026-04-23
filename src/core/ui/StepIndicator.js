@@ -60,6 +60,20 @@ export class StepIndicator {
     this._build();
   }
 
+  // Screen-space rect of one of the three step pills. Returns null if
+  // the indicator isn't built yet or `idx` is out of range. Used by
+  // HelpModal to spotlight the BLOCKS / BLUEPRINT / EXPORT pills.
+  getBoxRect(idx) {
+    if (!this._boxes || idx < 0 || idx >= this._boxes.length) return null;
+    const b = this._boxes[idx];
+    return {
+      x: b.cx - b.boxW / 2,
+      y: b.cy - b.boxH / 2,
+      w: b.boxW,
+      h: b.boxH,
+    };
+  }
+
   _build() {
     const { x, y, width, height } = this.opts;
     const gap = 8;

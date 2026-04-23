@@ -10,7 +10,7 @@ import { getCommunityLevelById, saveLocal as saveCommunityLocal } from '../commu
 import { SaveMenu } from '../ui/SaveMenu.js';
 import { TextInputOverlay } from '../ui/TextInputOverlay.js';
 import {
-  cellsToSet, isContiguous, isAdjacentToFactory, isPerimeterEdge,
+  isAdjacentToFactory, isPerimeterEdge,
   normalizeFactory, isBorderCell, innerSideOf, funnelPolyPoints,
   validateFactory, isObstacleFactory,
 } from '../model/shape.js';
@@ -24,15 +24,19 @@ import { ShapeRenderer } from '../render/ShapeRenderer.js';
 import { LaserRenderer } from '../render/LaserRenderer.js';
 import { BufferMarkerRenderer } from '../render/BufferMarkerRenderer.js';
 import { TitleBar } from '../ui/TitleBar.js';
-import { FunnelTypePicker } from '../ui/FunnelTypePicker.js';
-import { CellLabelPicker } from '../ui/CellLabelPicker.js';
-import { AcidPitTypePicker } from '../ui/AcidPitTypePicker.js';
 import { renderAcidPits } from '../render/AcidPitRenderer.js';
 import { ExportPanel } from '../ui/ExportPanel.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
 import { disableMenuBg } from '../ui/MenuBackground.js';
 import { rotateFactoryShape } from '../model/shape.js';
 import { DEFAULT_SHAPE_TYPE } from '../model/shape.js';
+import { UndoStack } from '../editor/UndoStack.js';
+import { PaletteBar } from '../editor/PaletteBar.js';
+import { PalettePopup } from '../editor/PalettePopup.js';
+import { HelpModal } from '../editor/HelpModal.js';
+import { ConfirmModal } from '../editor/ConfirmModal.js';
+import { TOOLS_BY_SLOT, SLOT, findTool } from '../editor/tools.js';
+import { applyToolAt } from '../editor/applyTool.js';
 import { drawBackChevron, drawHome, drawQuestion, drawTrash, drawPlus, drawMinus } from '../ui/Icons.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
 import { compute920Box } from '../ui/ContentBox.js';
@@ -59,21 +63,40 @@ const SHAPE_WARP_AMP = 0.15;
 //   • Play/Stop in the toolbar runs the sim (shapes flow through factories).
 
 const TOOLBAR_H = TitleBar.HEIGHT + 8;    // space reserved above the play area
-const ICON_SLOTS = 6;                     // fixed — HOME, BACK, HINT, -, +, CLEAR
+const ICON_SLOTS = 4;                     // fixed — HOME, START_OVER, -, +
 
 // Blueprint (draft-composer) chrome. Grid + a small separate icon island
 // sitting below the grid in its own rounded-rect panel.
 const BLUEPRINT_PAD       = 10;
 const BLUEPRINT_RADIUS    = 12;
 const ISLAND_TO_GRID_GAP  = 14;
+// Vertical gap between the new palette band and the composer's draw grid
+// inside the blueprint area. Small — they share the same blueprint panel.
+const PALETTE_TO_GRID_GAP = 6;
 
-// Which slot holds which icon.
-const SLOT_HOME   = 0;
-const SLOT_BACK   = 1;
-const SLOT_HINT   = 2;
-const SLOT_SHRINK = 3;
-const SLOT_GROW   = 4;
-const SLOT_CLEAR  = 5;
+// Used by _snapFactoryEdge / _snapBorderEdge / _snapComposerEdge.
+const EDGE_SIDES = ['top', 'bottom', 'left', 'right'];
+
+// Midpoint (in scene coords) of one side of a cell positioned at top-left
+// (cellX, cellY) with size `cellSize`.
+function _edgeMidpoint(cellX, cellY, cellSize, side) {
+  const half = cellSize / 2;
+  switch (side) {
+    case 'top':    return [cellX + half, cellY];
+    case 'bottom': return [cellX + half, cellY + cellSize];
+    case 'left':   return [cellX,        cellY + half];
+    case 'right':  return [cellX + cellSize, cellY + half];
+  }
+  return [cellX, cellY];
+}
+
+// Which slot holds which icon. Reduced from the legacy 6-slot layout
+// (HOME / BACK / EXPORT / SHRINK / GROW / CLEAR) to 4 — Back and Export
+// behaviors are deferred until they're re-surfaced via another UI affordance.
+const SLOT_HOME       = 0;
+const SLOT_START_OVER = 1;
+const SLOT_SHRINK     = 2;
+const SLOT_GROW       = 3;
 
 // Board resize clamps (for the +/- buttons; testing-only knob).
 const BOARD_MIN_DIM = 3;
@@ -157,6 +180,10 @@ export default class EditorScene extends Phaser.Scene {
     // outline so they're always legible.
     this.errorContainer        = this.add.container(0, 0).setDepth(170);
     this.drawGridContainer    = this.add.container(0, 0).setDepth(50);
+    // Palette bar sits between the composer (drawGridContainer) and the
+    // icon island, in the top band of the blueprint area. Renders the
+    // 6 white pill slots holding the currently-armed tool per category.
+    this.paletteContainer     = this.add.container(0, 0).setDepth(51);
     this.iconIslandContainer  = this.add.container(0, 0).setDepth(52);
     this.hoverContainer       = this.add.container(0, 0).setDepth(60);
     this.boardHoverContainer  = this.add.container(0, 0).setDepth(60);
@@ -179,6 +206,7 @@ export default class EditorScene extends Phaser.Scene {
     this._layoutBoardAndDrawGrid();
     this._renderAll();
     this._renderDrawGrid();
+    this._renderPaletteBar();
     this._renderIconIsland();
     this._buildToolbar();
 
@@ -206,6 +234,7 @@ export default class EditorScene extends Phaser.Scene {
       },
       onCollectorSatisfied: (c) => {
         if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(c, true);
+        this._onEditorCatcherSatisfied(c);
       },
     });
     this.factoryFunnelParticles = new FunnelParticleSystem(this, this.factoryFunnelParticleContainer, { pxCell: this.pxCell });
@@ -213,6 +242,7 @@ export default class EditorScene extends Phaser.Scene {
     this._refreshFunnelParticles();
 
     this._satisfiedOutputs = new Set();
+    this._satisfiedCatchers = new Set();
     this._victoryReady = false;
     this._mode = 'design';                  // 'design' | 'blueprintSetup'
     this._blueprintAssignments = new Map(); // factoryId -> { slot:{r,c}, rotation }
@@ -222,6 +252,12 @@ export default class EditorScene extends Phaser.Scene {
     // on the board at play time instead of being dragged into a blueprint
     // slot; in the exported level they land in `lockedFactories`.
     this._lockedFactoryIds = new Set();
+
+    // Snapshot-based undo. Push happens at the start of each user-initiated
+    // mutation handler (drag-end, tap-rotate, popup pick, board resize,
+    // start-over) — NOT inside _persist, which also runs during init/load
+    // where snapshotting would corrupt the stack on first edit.
+    this._undoStack = new UndoStack();
 
     this.dragCtrl = new DragController(this, {
       isOverCell:      (x, y) => this._cellAt(x, y),
@@ -247,14 +283,19 @@ export default class EditorScene extends Phaser.Scene {
         if (info.kind === 'draft') return this._isDraftCell(info.r, info.c);
         if (info.kind === 'board') {
           const fac = this._factoryAtBoardCell(info.r, info.c);
-          return !!fac && !fac.locked;
+          if (fac && !fac.locked) return true;
+          // Pits and border funnels are pickup-able — press-drag moves them.
+          if (this._acidPitAt(info.r, info.c)) return true;
+          const bfArr = (this.level.border && this.level.border.funnels) || [];
+          if (bfArr.some((f) => f.r === info.r && f.c === info.c)) return true;
+          return false;
         }
         return false;
       },
-      // FunnelTypePicker uses a fullscreen shield to capture taps; gate the
-      // drag controller on it so a tap inside the picker can't also fire a
-      // funnel-edge toggle behind it.
-      isPlaying:       () => !!this.funnelPicker || !!this.cellLabelPicker || !!this.saveMenu || !!this.exportPanel || !!this.nameInput,
+      // Modal overlays use a fullscreen shield to capture taps; gate the
+      // drag controller on each so taps inside an overlay don't also fire
+      // edge / cell handlers behind it.
+      isPlaying:       () => !!this.saveMenu || !!this.exportPanel || !!this.nameInput || !!this._palettePopup || !!this._helpModal || !!this._confirmModal,
     });
 
     // Sim auto-runs in the editor so funnels emit shapes as you design. Any
@@ -278,8 +319,6 @@ export default class EditorScene extends Phaser.Scene {
       this.dragCtrl && this.dragCtrl.destroy();
       if (this.saveMenu)  { this.saveMenu.close(); this.saveMenu = null; }
       if (this.nameInput) { this.nameInput.destroy(); this.nameInput = null; }
-      if (this.cellLabelPicker) { this.cellLabelPicker.close(); this.cellLabelPicker = null; }
-      if (this.acidPitPicker)   { this.acidPitPicker.close();   this.acidPitPicker = null; }
       if (this._acidPits)       { this._acidPits.destroy();      this._acidPits = null; }
       if (this.exportPanel)     { this.exportPanel.destroy();   this.exportPanel = null; }
       if (this.bossPhaseIndicator) { this.bossPhaseIndicator.destroy(); this.bossPhaseIndicator = null; }
@@ -288,6 +327,18 @@ export default class EditorScene extends Phaser.Scene {
       if (this.draftParticles) { this.draftParticles.destroy(); this.draftParticles = null; }
       if (this.ghostParticles) { this.ghostParticles.destroy(); this.ghostParticles = null; }
       if (this.slotParticleSystems) { for (const s of this.slotParticleSystems) s.destroy(); this.slotParticleSystems = null; }
+      if (this._paletteBar)   { this._paletteBar.destroy();   this._paletteBar = null; }
+      if (this._palettePopup) { this._palettePopup.close();   this._palettePopup = null; }
+      if (this._helpModal)    { this._helpModal.close();      this._helpModal = null; }
+      if (this._confirmModal) { this._confirmModal.close();   this._confirmModal = null; }
+      if (this._paletteHit)   { this._paletteHit.destroy();   this._paletteHit = null; }
+      if (this._paletteGhost) { this._paletteGhost.destroy(); this._paletteGhost = null; }
+      if (this._pendingPaletteTap) {
+        this._pendingPaletteTap.timer.remove(false);
+        this._pendingPaletteTap = null;
+      }
+      if (this._paletteMoveHandler) { this.input.off('pointermove', this._paletteMoveHandler); this._paletteMoveHandler = null; }
+      if (this._paletteUpHandler)   { this.input.off('pointerup',   this._paletteUpHandler);   this._paletteUpHandler   = null; }
       this._dismissStepAdvanceBanner && this._dismissStepAdvanceBanner();
       if (this._stepNew) this._stepNew.clear();
       this._lastStepReachable = null;
@@ -488,19 +539,42 @@ export default class EditorScene extends Phaser.Scene {
 
   // Single funnel for every level mutation. Sandbox writes through the legacy
   // `blockyard.level` key; designer mode writes through community.saveLocal,
-  // which mints an id on first save and re-stamps `updatedAt` thereafter.
   // Editor's auto-running test sim resolves a border output → record it.
-  // When every required output has been satisfied at least once, mark the
-  // editor's "victory ready" — the EXPORT button in the icon island goes
-  // active and the user can switch to blueprint-setup mode.
+  // Recomputes victory once it's been recorded.
   _onEditorOutputSatisfied(funnel) {
     if (this._mode !== 'design') return;
     this._satisfiedOutputs.add(funnel.key);
-    const required = (this.level && this.level.outputs) || [];
-    if (required.length === 0) return;
-    for (const o of required) {
-      const k = `border:${o.r},${o.c},${o.side}`;
-      if (!this._satisfiedOutputs.has(k)) return;
+    this._recomputeVictoryReady();
+  }
+
+  // Same idea for laser catchers (collector role on the border ring) —
+  // when a laser hits one, record it. A level can be made win-able with
+  // catchers ALONE (no standard outputs) so any catcher hit contributes
+  // to the same shared victory check.
+  _onEditorCatcherSatisfied(collector) {
+    if (this._mode !== 'design') return;
+    this._satisfiedCatchers.add(collector.key);
+    this._recomputeVictoryReady();
+  }
+
+  // Victory rule:
+  //   • Every required output (level.outputs) must have been satisfied.
+  //   • Every required catcher (border funnel with role='collector') must
+  //     have been satisfied.
+  //   • A level with NEITHER outputs nor catchers can never be victory-
+  //     ready (no win condition).
+  // So a catcher-only level is valid as long as every catcher has been hit.
+  _recomputeVictoryReady() {
+    if (this._mode !== 'design') return;
+    const reqOutputs = (this.level && this.level.outputs) || [];
+    const reqCatchers = ((this.level && this.level.border && this.level.border.funnels) || [])
+      .filter((f) => f.role === 'collector');
+    if (reqOutputs.length === 0 && reqCatchers.length === 0) return;
+    for (const o of reqOutputs) {
+      if (!this._satisfiedOutputs.has(`border:${o.r},${o.c},${o.side}`)) return;
+    }
+    for (const c of reqCatchers) {
+      if (!this._satisfiedCatchers.has(`border:${c.r},${c.c},${c.side}`)) return;
     }
     if (!this._victoryReady) {
       this._victoryReady = true;
@@ -513,10 +587,11 @@ export default class EditorScene extends Phaser.Scene {
     }
   }
 
-  // Restart the test sim and clear the satisfied-outputs tracker (any level
+  // Restart the test sim and clear the satisfaction trackers (any level
   // mutation may invalidate the previous solution).
   _resetVictoryTracking() {
     this._satisfiedOutputs && this._satisfiedOutputs.clear();
+    this._satisfiedCatchers && this._satisfiedCatchers.clear();
     this._victoryReady = false;
     this._refreshSteps();
   }
@@ -749,6 +824,43 @@ export default class EditorScene extends Phaser.Scene {
     };
   }
 
+  // Capture the current editor state (level + composer draft + blueprint
+  // slot assignments + mode) as one undo entry. Caller is responsible for
+  // invoking this BEFORE applying a mutation. Map values round-trip via
+  // JSON because the serialized form is what we restore from.
+  _snapshotForUndo() {
+    if (!this._undoStack) return;
+    this._undoStack.push({
+      level: JSON.stringify(this.level),
+      assignments: JSON.stringify(Array.from(this._blueprintAssignments.entries())),
+      draftCells: JSON.stringify(this.draftCells),
+      draftFunnels: JSON.stringify(this.draftFunnels),
+      mode: this._mode,
+    });
+  }
+
+  // Pop the latest snapshot and restore. Returns true if anything was
+  // restored, false if the stack was empty (call site can no-op or beep).
+  // Restoration covers level + blueprint state AND triggers the same
+  // re-render pipeline a normal mutation would (board, composer, sim) so
+  // every layer reflects the restored state.
+  _undo() {
+    if (!this._undoStack) return false;
+    const snap = this._undoStack.pop();
+    if (!snap) return false;
+    this.level = JSON.parse(snap.level);
+    this._blueprintAssignments = new Map(JSON.parse(snap.assignments));
+    this.draftCells = JSON.parse(snap.draftCells);
+    this.draftFunnels = JSON.parse(snap.draftFunnels);
+    this._mode = snap.mode;
+    this._persist();
+    if (typeof this._renderAll === 'function')     this._renderAll();
+    if (typeof this._renderDrawGrid === 'function') this._renderDrawGrid();
+    if (typeof this._renderIconIsland === 'function') this._renderIconIsland();
+    if (typeof this._restartSim === 'function')    this._restartSim();
+    return true;
+  }
+
   _persist() {
     // Boss: any mutation while revisiting a prior stage invalidates the
     // stages after it. Fire once per back-nav edit cycle.
@@ -816,8 +928,10 @@ export default class EditorScene extends Phaser.Scene {
 
     // Total chrome within the blueprint+island column:
     //   blueprint padding + gap + island padding = 4*PAD + gap
-    // Total cell-rows consumed vertically: drawGridRows (blueprint) + 1 (island).
-    const chrome = BLUEPRINT_PAD * 4 + ISLAND_TO_GRID_GAP;
+    // Plus the new palette band's gap below itself (palette occupies one
+    // refPxCell row inside the blueprint, accounted for in fitPxCell's
+    // stack factor below).
+    const chrome = BLUEPRINT_PAD * 4 + ISLAND_TO_GRID_GAP + PALETTE_TO_GRID_GAP;
 
     // Two cell sizes:
     //   refPxCell — sized against a 5×5 reference board in the current 9:20
@@ -843,7 +957,8 @@ export default class EditorScene extends Phaser.Scene {
       const wGapFactor  = Math.max(0, boardDim - 1);
       const cellW_board     = (availW - BOARD_GAP * wGapFactor) / wCellFactor;
       const cellW_blueprint = (availW - BLUEPRINT_PAD * 2) / drawGridColsN;
-      const stackCellFactor = boardDim + (drawGridRowsN + 1);
+      // Stack rows: board (boardDim) + composer (drawGridRowsN) + palette (1) + island (1).
+      const stackCellFactor = boardDim + (drawGridRowsN + 2);
       const stackGapFactor  = Math.max(0, boardDim - 1);
       const cellH_stack = (boxH - stackFixed - BOARD_GAP * stackGapFactor) / stackCellFactor;
       return Math.min(cellW_board, cellW_blueprint, cellH_stack);
@@ -870,6 +985,12 @@ export default class EditorScene extends Phaser.Scene {
     const bpH       = refDrawGridRows * refPxCell;   // fixed
     const islandW   = bpW;                            // fixed
     this.islandH    = refPxCell;                      // fixed
+    // Palette band height — one reference cell row, sits inside the
+    // blueprint area above the composer's draw grid.
+    // Palette band sits at ~95% of a cell row — enough to host a square
+    // icon plus a comfortable text label above and a chevron below.
+    this.paletteH   = Math.round(refPxCell * 0.95);
+    this.paletteW   = bpW;
 
     // Blueprint cell size shrinks/grows with the actual drawGridCols so
     // cells × count keeps the outer at bpW. Used for hit-testing, cell
@@ -891,7 +1012,7 @@ export default class EditorScene extends Phaser.Scene {
     const stackH =
       topMargin + titleToBoardGap +
       boardH + boardToBpGap +
-      (BLUEPRINT_PAD * 2) + bpH +
+      (BLUEPRINT_PAD * 2) + this.paletteH + PALETTE_TO_GRID_GAP + bpH +
       ISLAND_TO_GRID_GAP + (BLUEPRINT_PAD * 2) + this.islandH +
       bottomMargin;
     const verticalSlack = Math.max(0, Math.floor((boxH - stackH) / 2));
@@ -903,7 +1024,11 @@ export default class EditorScene extends Phaser.Scene {
     const blueprintTopY = this.boardOriginY + boardH + boardToBpGap;
 
     this.drawGridOriginX = boxX + Math.round((boxW - bpW) / 2);
-    this.drawGridOriginY = Math.round(blueprintTopY + BLUEPRINT_PAD);
+    // Palette sits at the top of the blueprint pad; composer's draw grid
+    // is shifted down by paletteH + the palette/grid gap.
+    this.paletteOriginX = boxX + Math.round((boxW - bpW) / 2);
+    this.paletteOriginY = Math.round(blueprintTopY + BLUEPRINT_PAD);
+    this.drawGridOriginY = Math.round(this.paletteOriginY + this.paletteH + PALETTE_TO_GRID_GAP);
 
     this.iconIslandOriginX = boxX + Math.round((boxW - islandW) / 2);
     this.iconIslandOriginY = Math.round(
@@ -928,6 +1053,7 @@ export default class EditorScene extends Phaser.Scene {
     this.errorContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.placementContainer.setPosition(this.boardOriginX, this.boardOriginY);
     this.drawGridContainer.setPosition(this.drawGridOriginX, this.drawGridOriginY);
+    this.paletteContainer.setPosition(this.paletteOriginX, this.paletteOriginY);
     this.iconIslandContainer.setPosition(this.iconIslandOriginX, this.iconIslandOriginY);
     this.hoverContainer.setPosition(this.drawGridOriginX, this.drawGridOriginY);
     this.boardHoverContainer.setPosition(this.boardOriginX, this.boardOriginY);
@@ -1196,6 +1322,793 @@ export default class EditorScene extends Phaser.Scene {
     }
   }
 
+  // Build (or rebuild on layout change) the palette bar that occupies the
+  // top band of the blueprint area. The PaletteBar instance owns its own
+  // graphics inside paletteContainer; we destroy and recreate on layout
+  // shifts so width/height come from the latest layout pass.
+  _renderPaletteBar() {
+    if (!this.paletteContainer) return;
+    if (this._paletteBar) { this._paletteBar.destroy(); this._paletteBar = null; }
+    this.paletteContainer.removeAll(true);
+    this._paletteBar = new PaletteBar(this, this.paletteContainer, {
+      width:  this.paletteW,
+      height: this.paletteH,
+    });
+    this._installPaletteHitArea();
+  }
+
+  // Transparent hit-rect over the palette pill. Implements a drag-vs-tap
+  // state machine so a quick tap opens the popup (re-arm) and a press-and-
+  // drag carries the armed tool's ghost out to a drop target. The pointer
+  // movement past PALETTE_DRAG_THRESHOLD switches the gesture to a drag;
+  // pointerup decides which terminator runs. Scene-level pointermove /
+  // pointerup listeners handle the case where the pointer leaves the rect.
+  _installPaletteHitArea() {
+    if (this._paletteHit) { this._paletteHit.destroy(); this._paletteHit = null; }
+    if (this._paletteMoveHandler) this.input.off('pointermove', this._paletteMoveHandler);
+    if (this._paletteUpHandler)   this.input.off('pointerup',   this._paletteUpHandler);
+
+    const hit = this.add.rectangle(
+      this.paletteOriginX + this.paletteW / 2,
+      this.paletteOriginY + this.paletteH / 2,
+      this.paletteW,
+      this.paletteH,
+      0xffffff,
+      0.001,
+    ).setDepth(53).setInteractive({ useHandCursor: true });
+
+    const PALETTE_DRAG_THRESHOLD = 6;
+    this._paletteGesture = null;   // null | { slot, downX, downY, dragStarted }
+
+    hit.on('pointerdown', (p, lx, ly, e) => {
+      const slot = this._paletteBar ? this._paletteBar.slotAt(lx, ly) : -1;
+      if (slot < 0) return;
+      // Undo is tap-only: fire immediately and don't enter gesture state.
+      if (slot === SLOT.UNDO) {
+        if (e && e.stopPropagation) e.stopPropagation();
+        this._undo && this._undo();
+        return;
+      }
+      // Stop the same pointerdown from also reaching scene-level DragController.
+      if (e && e.stopPropagation) e.stopPropagation();
+      this._paletteGesture = { slot, downX: p.x, downY: p.y, dragStarted: false };
+    });
+
+    this._paletteMoveHandler = (p) => {
+      const g = this._paletteGesture;
+      if (!g) return;
+      if (g.dragStarted) {
+        this._paletteDragMove(p.x, p.y);
+        return;
+      }
+      const moved = Math.hypot(p.x - g.downX, p.y - g.downY);
+      if (moved >= PALETTE_DRAG_THRESHOLD) {
+        g.dragStarted = true;
+        this._paletteDragStart(g.slot, p.x, p.y);
+      }
+    };
+    this._paletteUpHandler = (p) => {
+      const g = this._paletteGesture;
+      if (!g) return;
+      this._paletteGesture = null;
+      if (g.dragStarted) {
+        this._paletteDragEnd(p.x, p.y);
+      } else {
+        this._onPaletteSlotTap(g.slot);
+      }
+    };
+    this.input.on('pointermove', this._paletteMoveHandler);
+    this.input.on('pointerup',   this._paletteUpHandler);
+
+    this._paletteHit = hit;
+  }
+
+  // Begin a drag of the slot's currently-armed tool. Renders a ghost icon
+  // in placementContainer (depth 80) following the pointer — same depth
+  // the existing factory-drag uses.
+  _paletteDragStart(slotIdx, x, y) {
+    if (this._palettePopup) { this._palettePopup.close(); this._palettePopup = null; }
+    const toolId = this._paletteBar ? this._paletteBar.getArmed(slotIdx) : null;
+    const tool = toolId ? findTool(toolId) : null;
+    if (!tool) return;
+    this._paletteDrag = { slotIdx, tool };
+    // Fresh ghost graphics — own object so we can reposition cheaply.
+    if (this._paletteGhost) { this._paletteGhost.destroy(); this._paletteGhost = null; }
+    const g = this.make.graphics({ add: false });
+    if (tool.drawIcon) tool.drawIcon(g, 0, 0, Math.max(28, this.pxCell * 0.7));
+    g.setDepth(80);
+    this.add.existing(g);
+    this._paletteGhost = g;
+    this._paletteDragMove(x, y);
+  }
+
+  _paletteDragMove(x, y) {
+    if (this._paletteGhost) {
+      this._paletteGhost.x = x;
+      this._paletteGhost.y = y;
+    }
+    this._updatePalettePlacementPreview(x, y, this._paletteDrag && this._paletteDrag.tool);
+  }
+
+  _paletteDragEnd(x, y) {
+    const drag = this._paletteDrag;
+    this._paletteDrag = null;
+    this._clearPalettePlacementPreview();
+    if (this._paletteGhost) { this._paletteGhost.destroy(); this._paletteGhost = null; }
+    if (!drag) return;
+    const target = this._paletteHitTest(x, y, drag.tool);
+    if (!target) return;
+    this._snapshotForUndo();
+    const result = applyToolAt(this, drag.tool, target);
+    if (result && result.mutated) {
+      this._persist();
+      this._renderAll();
+      this._renderDrawGrid();
+      this._restartSim();
+    }
+  }
+
+  // ---------- Pickup drag (acid pit / border funnel) ----------
+  //
+  // When the user press-drags a board cell that has no factory but does
+  // have a pit or border funnel, we lift that piece into a palette-style
+  // ghost and re-place via applyToolAt on drop. The original entry is
+  // removed up-front so collision checks treat the cell as empty during
+  // the move, and is restored if the drop falls on no valid target (or
+  // back on the original cell). Snapshot taken at pickup start so undo
+  // reverts the entire move; pop the snapshot on cancel so a no-op move
+  // doesn't pollute the undo stack.
+
+  _beginPickupDrag(grabR, grabC) {
+    // Acid pit?
+    const pit = this._acidPitAt(grabR, grabC);
+    if (pit) {
+      this._snapshotForUndo();
+      this._pickupDrag = {
+        kind: 'acidPit',
+        toolId: 'board.acid',
+        origin: { r: pit.r, c: pit.c, label: pit.label ? { ...pit.label } : null },
+        lastX: 0, lastY: 0,
+      };
+      this.level.acidPits = this.level.acidPits.filter((p) => !(p.r === pit.r && p.c === pit.c));
+      this._renderAll();
+      this._restartSim();
+      this._buildPickupGhost('board.acid');
+      this._activateTrashIsland();
+      return true;
+    }
+    // Border funnel?
+    const bfArr = (this.level.border && this.level.border.funnels) || [];
+    const bf = bfArr.find((f) => f.r === grabR && f.c === grabC);
+    if (bf) {
+      const typedEntry = this._lookupBorderType(bf);
+      const toolId =
+        bf.role === 'input'   ? 'board.borderInput'   :
+        bf.role === 'output'  ? 'board.borderOutput'  :
+        bf.role === 'emitter' ? 'board.borderEmitter' :
+                                'board.borderCatcher';
+      this._snapshotForUndo();
+      this._pickupDrag = {
+        kind: 'borderFunnel',
+        toolId,
+        origin: { r: bf.r, c: bf.c, side: bf.side, role: bf.role },
+        typedEntry: typedEntry ? { ...typedEntry } : null,
+        lastX: 0, lastY: 0,
+      };
+      this.level.border.funnels = bfArr.filter((f) => !(f.r === bf.r && f.c === bf.c && f.side === bf.side));
+      this._removeTypedEntry(bf.r, bf.c, bf.side);
+      this._renderAll();
+      this._restartSim();
+      this._buildPickupGhost(toolId);
+      this._activateTrashIsland();
+      return true;
+    }
+    return false;
+  }
+
+  // Swap the icon island into the red "DELETE" trash zone for any drag
+  // that supports island-drop deletion (factory, draft, or pickup). Tears
+  // down the per-slot interactive hit rects so the underlying buttons
+  // can't fire mid-drag. Counterpart: _deactivateTrashIsland().
+  _activateTrashIsland() {
+    this._factoryDragActive = true;
+    if (this.iconSlotHits) {
+      for (const h of this.iconSlotHits) h.destroy();
+      this.iconSlotHits = null;
+    }
+    this._renderIconIsland();
+  }
+  _deactivateTrashIsland() {
+    if (!this._factoryDragActive) return;
+    this._factoryDragActive = false;
+    this._renderIconIsland();
+    this._setupIconSlotHandlers();
+  }
+
+  _buildPickupGhost(toolId) {
+    if (this._paletteGhost) { this._paletteGhost.destroy(); this._paletteGhost = null; }
+    const tool = findTool(toolId);
+    if (!tool || !tool.drawIcon) return;
+    const g = this.make.graphics({ add: false });
+    tool.drawIcon(g, 0, 0, Math.max(28, this.pxCell * 0.7));
+    g.setDepth(80);
+    this.add.existing(g);
+    this._paletteGhost = g;
+  }
+
+  _endPickupDrag() {
+    const pickup = this._pickupDrag;
+    this._pickupDrag = null;
+    this._clearPalettePlacementPreview();
+    if (this._paletteGhost) { this._paletteGhost.destroy(); this._paletteGhost = null; }
+    if (!pickup) { this._deactivateTrashIsland(); return; }
+
+    // Prefer the live pointer position so a quick release after the last
+    // pointermove doesn't fall back to a slightly stale coord.
+    const pointer = this.input.activePointer;
+    const px = pointer ? pointer.x : pickup.lastX;
+    const py = pointer ? pointer.y : pickup.lastY;
+
+    // Drop on the trash island → delete the picked-up piece. The start
+    // already removed it from level state, so we just keep that removal
+    // and persist. Pickup-start snapshot is kept so undo restores it.
+    if (this._iconSlotAt(px, py)) {
+      this._deactivateTrashIsland();
+      this._persist();
+      this._renderAll();
+      this._restartSim();
+      return;
+    }
+
+    const tool = findTool(pickup.toolId);
+    const target = tool ? this._paletteHitTest(px, py, tool) : null;
+
+    // Drop on the original location, off-target, or no target → restore
+    // the picked-up item and discard the pickup-start snapshot so the
+    // undo stack stays clean.
+    const sameOrigin = target && this._pickupTargetMatchesOrigin(pickup, target);
+    if (!target || sameOrigin) {
+      this._restorePickup(pickup);
+      this._renderAll();
+      this._restartSim();
+      this._deactivateTrashIsland();
+      if (this._undoStack) this._undoStack.pop();
+      return;
+    }
+
+    const result = applyToolAt(this, tool, target);
+    if (!result || !result.mutated) {
+      this._restorePickup(pickup);
+      this._renderAll();
+      this._restartSim();
+      this._deactivateTrashIsland();
+      if (this._undoStack) this._undoStack.pop();
+      return;
+    }
+    // applyTool seeds default properties (acid: untyped, border funnel:
+    // DEFAULT_SHAPE_TYPE). Reapply the picked-up item's original label /
+    // typed entry so the move preserves what the user had configured.
+    this._reapplyPickupProperties(pickup, target);
+    this._persist();
+    this._renderAll();
+    this._restartSim();
+    this._deactivateTrashIsland();
+  }
+
+  _pickupTargetMatchesOrigin(pickup, target) {
+    if (pickup.kind === 'acidPit') {
+      return target.kind === 'boardCell'
+        && target.r === pickup.origin.r
+        && target.c === pickup.origin.c;
+    }
+    if (pickup.kind === 'borderFunnel') {
+      return target.kind === 'borderEdge'
+        && target.r === pickup.origin.r
+        && target.c === pickup.origin.c
+        && target.side === pickup.origin.side;
+    }
+    return false;
+  }
+
+  _restorePickup(pickup) {
+    if (pickup.kind === 'acidPit') {
+      if (!Array.isArray(this.level.acidPits)) this.level.acidPits = [];
+      const entry = { r: pickup.origin.r, c: pickup.origin.c };
+      if (pickup.origin.label) entry.label = { ...pickup.origin.label };
+      this.level.acidPits.push(entry);
+    } else if (pickup.kind === 'borderFunnel') {
+      if (!this.level.border) this.level.border = { funnels: [] };
+      this.level.border.funnels.push({
+        r: pickup.origin.r, c: pickup.origin.c,
+        side: pickup.origin.side, role: pickup.origin.role,
+      });
+      if (pickup.typedEntry && (pickup.origin.role === 'input' || pickup.origin.role === 'output')) {
+        const key = pickup.origin.role === 'output' ? 'outputs' : 'inputs';
+        if (!Array.isArray(this.level[key])) this.level[key] = [];
+        this.level[key].push({
+          r: pickup.origin.r, c: pickup.origin.c, side: pickup.origin.side,
+          type: { ...pickup.typedEntry },
+        });
+      }
+    }
+  }
+
+  _reapplyPickupProperties(pickup, target) {
+    if (pickup.kind === 'acidPit' && pickup.origin.label) {
+      const pit = this._acidPitAt(target.r, target.c);
+      if (pit) pit.label = { ...pickup.origin.label };
+    } else if (pickup.kind === 'borderFunnel'
+               && pickup.typedEntry
+               && (pickup.origin.role === 'input' || pickup.origin.role === 'output')) {
+      const key = pickup.origin.role === 'output' ? 'outputs' : 'inputs';
+      if (!Array.isArray(this.level[key])) this.level[key] = [];
+      const idx = this.level[key].findIndex((e) =>
+        e.r === target.r && e.c === target.c && e.side === target.side);
+      const entry = {
+        r: target.r, c: target.c, side: target.side,
+        type: { ...pickup.typedEntry },
+      };
+      if (idx < 0) this.level[key].push(entry);
+      else         this.level[key][idx] = entry;
+    }
+  }
+
+  // Resolve where in the editor a pointer landed for drop-dispatch. Tool
+  // category determines the target priority:
+  //   FACTORY  → cells (board interior, composer)
+  //   FUNNEL   → factory perimeter edges (board placed factory, composer
+  //              draft); does NOT drop on border edges (those use the
+  //              dedicated Board pieces tools)
+  //   BOARD    → varies by tool: acid pit on interior cells; border funnel
+  //              variants on border edges
+  //   LABEL    → factory cells (board factory cell, composer draft cell)
+  //   TRASH    → smart resolution (wired in task 6)
+  _paletteHitTest(x, y, tool) {
+    if (!tool) {
+      const boardCell = this._boardCellAt(x, y);
+      if (boardCell) return { kind: 'boardCell', r: boardCell.r, c: boardCell.c };
+      const draftCell = this._drawGridCellAt(x, y);
+      if (draftCell) return { kind: 'composerCell', r: draftCell.r, c: draftCell.c };
+      return null;
+    }
+    const slot = tool.category;
+    if (slot === SLOT.FACTORY) {
+      const boardCell = this._boardCellAt(x, y);
+      if (boardCell) return { kind: 'boardCell', r: boardCell.r, c: boardCell.c };
+      const draftCell = this._drawGridCellAt(x, y);
+      if (draftCell) return { kind: 'composerCell', r: draftCell.r, c: draftCell.c };
+      return null;
+    }
+    if (slot === SLOT.FUNNEL) {
+      // Wide midpoint-snap (within one cell of any valid edge midpoint) so
+      // the user doesn't need pixel-precision dropping on a perimeter strip.
+      const factSnap  = this._snapFactoryEdge(x, y, this.pxCell);
+      const draftSnap = this._snapComposerEdge(x, y, this.drawCellPx);
+      // Take whichever is closer when both are in range — preserves intent
+      // when the pointer hovers near the seam between board and composer.
+      if (factSnap && (!draftSnap || factSnap.dist <= draftSnap.dist)) {
+        return { kind: 'factoryEdge', factoryId: factSnap.factoryId, r: factSnap.r, c: factSnap.c, side: factSnap.side };
+      }
+      if (draftSnap) {
+        return { kind: 'composerEdge', r: draftSnap.r, c: draftSnap.c, side: draftSnap.side };
+      }
+      return null;
+    }
+    if (slot === SLOT.BOARD_PIECE) {
+      const isAcid = tool.payload && tool.payload.kind === 'acid';
+      if (isAcid) {
+        const boardCell = this._boardCellAt(x, y);
+        if (boardCell) return { kind: 'boardCell', r: boardCell.r, c: boardCell.c };
+        return null;
+      }
+      const borderSnap = this._snapBorderEdge(x, y, this.pxCell);
+      if (borderSnap) {
+        return { kind: 'borderEdge', r: borderSnap.r, c: borderSnap.c, side: borderSnap.side };
+      }
+      return null;
+    }
+    if (slot === SLOT.TRASH) {
+      // Edges first (most specific). Snap distance matches the palette-
+      // funnel snap so dropping near an edge midpoint is forgiving.
+      const factSnap = this._snapFactoryEdge(x, y, this.pxCell);
+      const draftSnap = this._snapComposerEdge(x, y, this.drawCellPx);
+      const borderSnap = this._snapBorderEdge(x, y, this.pxCell);
+      // Edge candidates only count if there's actually a funnel on them
+      // (no point trashing an empty edge). Pick whichever in-range edge
+      // has an actual funnel, with the closer one winning.
+      const candidates = [];
+      if (factSnap) {
+        const fac = this.level.factories.find((f) => f.id === factSnap.factoryId);
+        if (fac && (fac.funnels || []).some((f) => (f.r + fac.anchor.row) === factSnap.r && (f.c + fac.anchor.col) === factSnap.c && f.side === factSnap.side)) {
+          candidates.push({ d: factSnap.dist, t: { kind: 'factoryEdge', factoryId: factSnap.factoryId, r: factSnap.r, c: factSnap.c, side: factSnap.side } });
+        }
+      }
+      if (borderSnap) {
+        const bfArr = (this.level.border && this.level.border.funnels) || [];
+        if (bfArr.some((f) => f.r === borderSnap.r && f.c === borderSnap.c && f.side === borderSnap.side)) {
+          candidates.push({ d: borderSnap.dist, t: { kind: 'borderEdge', r: borderSnap.r, c: borderSnap.c, side: borderSnap.side } });
+        }
+      }
+      if (draftSnap) {
+        if ((this.draftFunnels || []).some((f) => f.r === draftSnap.r && f.c === draftSnap.c && f.side === draftSnap.side)) {
+          candidates.push({ d: draftSnap.dist, t: { kind: 'composerEdge', r: draftSnap.r, c: draftSnap.c, side: draftSnap.side } });
+        }
+      }
+      if (candidates.length > 0) {
+        candidates.sort((a, b) => a.d - b.d);
+        return candidates[0].t;
+      }
+      // No edge hit → cells. Try board first, then composer.
+      const boardCell = this._boardCellAt(x, y);
+      if (boardCell) {
+        const fac = this._factoryAtBoardCell(boardCell.r, boardCell.c);
+        if (fac) return { kind: 'factoryCell', factoryId: fac.id, r: boardCell.r, c: boardCell.c };
+        const pit = this._acidPitAt(boardCell.r, boardCell.c);
+        if (pit) return { kind: 'acidPit', r: boardCell.r, c: boardCell.c };
+        const bfArr = (this.level.border && this.level.border.funnels) || [];
+        const bf = bfArr.find((f) => f.r === boardCell.r && f.c === boardCell.c);
+        if (bf) return { kind: 'borderFunnel', r: bf.r, c: bf.c, side: bf.side, role: bf.role };
+      }
+      const draftCell = this._drawGridCellAt(x, y);
+      if (draftCell && this._isDraftCell(draftCell.r, draftCell.c)) {
+        return { kind: 'composerCell', r: draftCell.r, c: draftCell.c };
+      }
+      return null;
+    }
+    if (slot === SLOT.LABEL) {
+      const boardCell = this._boardCellAt(x, y);
+      if (boardCell) {
+        const fac = this._factoryAtBoardCell(boardCell.r, boardCell.c);
+        if (fac) return { kind: 'factoryCell', factoryId: fac.id, r: boardCell.r, c: boardCell.c };
+        // Acid pit on this cell — labelable; only the color is honored.
+        const pit = this._acidPitAt(boardCell.r, boardCell.c);
+        if (pit) return { kind: 'acidPit', r: boardCell.r, c: boardCell.c };
+        // Border funnel on this cell — labels apply to the typed entry
+        // (level.inputs / level.outputs). Emitter / collector are laser
+        // entities and don't carry labels; the apply branch rejects them.
+        const borderFunnels = (this.level.border && this.level.border.funnels) || [];
+        const bf = borderFunnels.find((f) => f.r === boardCell.r && f.c === boardCell.c);
+        if (bf) return { kind: 'borderFunnel', r: bf.r, c: bf.c, side: bf.side, role: bf.role };
+      }
+      const draftCell = this._drawGridCellAt(x, y);
+      if (draftCell && this._isDraftCell(draftCell.r, draftCell.c)) {
+        return { kind: 'composerCell', r: draftCell.r, c: draftCell.c };
+      }
+      return null;
+    }
+    return null;
+  }
+
+  // ---------- Wide midpoint-snap helpers (palette drag only) ----------
+  //
+  // The narrow `_factoryEdgeAt` / `_borderEdgeAt` / `_draftEdgeAt` require
+  // the pointer to land inside the actual edge strip. For palette drags
+  // that's punishingly precise — the user wants to drop "near" an edge
+  // and have the funnel snap to the closest one. These helpers iterate
+  // every valid edge, compute its midpoint in scene coords, and return
+  // the nearest whose midpoint is within `maxDist`. Returns null if
+  // nothing is in range.
+
+  _snapFactoryEdge(px, py, maxDist) {
+    let best = null;
+    let bestD2 = maxDist * maxDist;
+    const step = this.pxCell + BOARD_GAP;
+    for (const fac of this.level.factories) {
+      for (const cc of fac.cells) {
+        const absR = fac.anchor.row + cc.r;
+        const absC = fac.anchor.col + cc.c;
+        const cellX = this.boardOriginX + absC * step;
+        const cellY = this.boardOriginY + absR * step;
+        for (const side of EDGE_SIDES) {
+          if (!isPerimeterEdge(fac.cells, cc.r, cc.c, side)) continue;
+          const [mx, my] = _edgeMidpoint(cellX, cellY, this.pxCell, side);
+          const dx = px - mx, dy = py - my;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bestD2) {
+            bestD2 = d2;
+            best = { factoryId: fac.id, r: absR, c: absC, side, dist: Math.sqrt(d2) };
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  _snapBorderEdge(px, py, maxDist) {
+    let best = null;
+    let bestD2 = maxDist * maxDist;
+    const step = this.pxCell + BOARD_GAP;
+    const board = this.level.board;
+    for (let r = 0; r < board.rows; r++) {
+      for (let c = 0; c < board.cols; c++) {
+        if (!isBorderCell(board, r, c)) continue;
+        const side = innerSideOf(board, r, c);
+        if (!side) continue;
+        const cellX = this.boardOriginX + c * step;
+        const cellY = this.boardOriginY + r * step;
+        const [mx, my] = _edgeMidpoint(cellX, cellY, this.pxCell, side);
+        const dx = px - mx, dy = py - my;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          best = { r, c, side, dist: Math.sqrt(d2) };
+        }
+      }
+    }
+    return best;
+  }
+
+  _snapComposerEdge(px, py, maxDist) {
+    if (!this.draftCells || this.draftCells.length === 0) return null;
+    let best = null;
+    let bestD2 = maxDist * maxDist;
+    const step = this.drawCellPx;
+    for (const cc of this.draftCells) {
+      const cellX = this.drawGridOriginX + cc.c * step;
+      const cellY = this.drawGridOriginY + cc.r * step;
+      for (const side of EDGE_SIDES) {
+        if (!isPerimeterEdge(this.draftCells, cc.r, cc.c, side)) continue;
+        const [mx, my] = _edgeMidpoint(cellX, cellY, step, side);
+        const dx = px - mx, dy = py - my;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          best = { r: cc.r, c: cc.c, side, dist: Math.sqrt(d2) };
+        }
+      }
+    }
+    return best;
+  }
+
+  // Factory perimeter edge under (px, py). Returns the absolute board
+  // (r, c, side) of the edge plus the owning factoryId, or null. The
+  // pointer must be inside a board cell that's part of a factory AND
+  // within the edge's hitbox AND the side must be on the factory's
+  // perimeter (not an internal seam between two cells of the same factory).
+  _factoryEdgeAt(px, py) {
+    const cell = this._boardCellAt(px, py);
+    if (!cell) return null;
+    const fac = this._factoryAtBoardCell(cell.r, cell.c);
+    if (!fac) return null;
+    // Convert to factory-relative coords for isPerimeterEdge.
+    const relR = cell.r - fac.anchor.row;
+    const relC = cell.c - fac.anchor.col;
+    const lx = px - this.boardOriginX - cell.c * (this.pxCell + BOARD_GAP);
+    const ly = py - this.boardOriginY - cell.r * (this.pxCell + BOARD_GAP);
+    const T = Math.min(Math.floor(this.pxCell / 2), 24);
+    let chosen = null;
+    if      (ly <= T)                  chosen = 'top';
+    else if (ly >= this.pxCell - T)    chosen = 'bottom';
+    else if (lx <= T)                  chosen = 'left';
+    else if (lx >= this.pxCell - T)    chosen = 'right';
+    if (!chosen) return null;
+    if (!isPerimeterEdge(fac.cells, relR, relC, chosen)) return null;
+    return { factoryId: fac.id, r: cell.r, c: cell.c, side: chosen };
+  }
+
+  // Light blue placement indicator at the would-place target. Renders
+  // into placementContainer (depth 80, anchored at boardOrigin). Cells
+  // get a rect outline; edges get a thick stripe along the chosen side.
+  // For composer / draft targets, coords are offset from board origin to
+  // the draw grid's origin so a single container works for both areas.
+  _updatePalettePlacementPreview(x, y, tool) {
+    if (!this.placementContainer) return;
+    this.placementContainer.removeAll(true);
+    const target = this._paletteHitTest(x, y, tool);
+    if (!target) return;
+    const g = this.make.graphics({ add: false });
+    // Trash drag uses red so the user reads it as a deletion preview;
+    // every other tool uses the placement-blue.
+    const isTrash = tool && tool.category === SLOT.TRASH;
+    const previewColor = isTrash ? 0xff4040 : 0x4cb1ff;
+    g.lineStyle(3, previewColor, 0.9);
+    const offX = this.drawGridOriginX - this.boardOriginX;
+    const offY = this.drawGridOriginY - this.boardOriginY;
+
+    if (target.kind === 'boardCell' || target.kind === 'factoryCell' || target.kind === 'acidPit') {
+      const step = this.pxCell + BOARD_GAP;
+      g.strokeRect(target.c * step + 1, target.r * step + 1, this.pxCell - 2, this.pxCell - 2);
+    } else if (target.kind === 'borderFunnel') {
+      const step = this.pxCell + BOARD_GAP;
+      g.strokeRect(target.c * step + 1, target.r * step + 1, this.pxCell - 2, this.pxCell - 2);
+    } else if (target.kind === 'composerCell') {
+      const step = this.drawCellPx;
+      g.strokeRect(offX + target.c * step + 1, offY + target.r * step + 1, step - 2, step - 2);
+    } else if (target.kind === 'borderEdge' || target.kind === 'factoryEdge') {
+      const step = this.pxCell + BOARD_GAP;
+      this._strokeEdgeMarker(g, target.c * step, target.r * step, this.pxCell, target.side);
+    } else if (target.kind === 'composerEdge') {
+      const step = this.drawCellPx;
+      this._strokeEdgeMarker(g, offX + target.c * step, offY + target.r * step, step, target.side);
+    }
+    this.placementContainer.add(g);
+  }
+
+  // Thick blue stripe along the chosen side of a cell rect (cellX, cellY,
+  // size). Used by the palette placement preview to mark a funnel edge.
+  _strokeEdgeMarker(g, cellX, cellY, size, side) {
+    const inset = 4;
+    if (side === 'top') {
+      g.strokeLineShape(new Phaser.Geom.Line(cellX + inset, cellY + 2, cellX + size - inset, cellY + 2));
+    } else if (side === 'bottom') {
+      g.strokeLineShape(new Phaser.Geom.Line(cellX + inset, cellY + size - 2, cellX + size - inset, cellY + size - 2));
+    } else if (side === 'left') {
+      g.strokeLineShape(new Phaser.Geom.Line(cellX + 2, cellY + inset, cellX + 2, cellY + size - inset));
+    } else if (side === 'right') {
+      g.strokeLineShape(new Phaser.Geom.Line(cellX + size - 2, cellY + inset, cellX + size - 2, cellY + size - inset));
+    }
+  }
+
+  _clearPalettePlacementPreview() {
+    if (this.placementContainer) this.placementContainer.removeAll(true);
+  }
+
+  // Open the popup for a multi-option slot, or run the slot's tap action
+  // for single-option slots:
+  //   UNDO    → undo last mutation (no popup)
+  //   FACTORY → no-op (single option; only drag is meaningful)
+  //   TRASH   → no-op (single option; only drag is meaningful)
+  //
+  // For multi-option slots, the popup OPEN is deferred by one double-click
+  // window. A second tap on the same slot within the window cancels the
+  // open and cycles to the next armed tool — so there's no popup flash on
+  // a quick double-click. After the window elapses with no second tap, the
+  // popup opens. The wired onShieldTap path stays as a redundant cycle
+  // mechanism (tap origin slot again while popup is open).
+  _onPaletteSlotTap(slotIdx) {
+    if (slotIdx === SLOT.UNDO) {
+      this._undo && this._undo();
+      return;
+    }
+    if (slotIdx === SLOT.HELP) {
+      this._openHelpModal();
+      return;
+    }
+    // Single-option categories — no dropdown, no cycle. Tap is a no-op;
+    // the user interacts via drag only.
+    if (slotIdx === SLOT.FACTORY || slotIdx === SLOT.TRASH) return;
+
+    const DOUBLE_TAP_MS = 250;
+    // Second tap on the SAME slot inside the window → cycle, suppress popup.
+    if (this._pendingPaletteTap && this._pendingPaletteTap.slot === slotIdx) {
+      this._pendingPaletteTap.timer.remove(false);
+      this._pendingPaletteTap = null;
+      this._cyclePaletteSlot(slotIdx);
+      return;
+    }
+    // First tap (or different slot) → cancel any pending, schedule open.
+    if (this._pendingPaletteTap) {
+      this._pendingPaletteTap.timer.remove(false);
+      this._pendingPaletteTap = null;
+    }
+    const timer = this.time.delayedCall(DOUBLE_TAP_MS, () => {
+      this._pendingPaletteTap = null;
+      this._openPaletteSlotPopup(slotIdx);
+    });
+    this._pendingPaletteTap = { slot: slotIdx, timer };
+  }
+
+  // Actual popup-open path. Separated from _onPaletteSlotTap so the
+  // deferred timer (above) and any future direct callers can both hit it
+  // without re-running the double-tap detection.
+  _openPaletteSlotPopup(slotIdx) {
+    if (this._palettePopup) { this._palettePopup.close(); this._palettePopup = null; }
+    const options = TOOLS_BY_SLOT[slotIdx] || [];
+    if (options.length === 0) return;
+    const layout = slotIdx === SLOT.LABEL ? 'labels' : 'row';
+    const center = this._paletteBar ? this._paletteBar.slotCenter(slotIdx) : { x: 0, y: 0 };
+    // Anchor at the BOTTOM of the slot so the popup drops down from there.
+    const slotBottom = this._paletteBar ? this._paletteBar.bottomY() : this.paletteH;
+    const anchor = {
+      x: this.paletteOriginX + center.x,
+      y: this.paletteOriginY + slotBottom,
+    };
+    const slotSize = this._paletteBar ? this._paletteBar.slotSize() : { w: this.paletteW / 6, h: this.paletteH };
+    const selectedId = this._paletteBar ? this._paletteBar.getArmed(slotIdx) : null;
+    // Screen-space rect of the originating slot — used by onShieldTap to
+    // detect a "tap origin slot again" gesture (= cycle to next option).
+    const slotRect = {
+      x: this.paletteOriginX + center.x - slotSize.w / 2,
+      y: this.paletteOriginY + center.y - slotSize.h / 2,
+      w: slotSize.w,
+      h: slotSize.h,
+    };
+    // Cycle-via-shield only counts within this window after the popup
+    // opens. A click on the origin slot AFTER this window has elapsed is
+    // treated as an ordinary dismissal — long pauses between clicks are
+    // not a double-click.
+    const SHIELD_CYCLE_WINDOW_MS = 500;
+    const popupOpenedAt = this.time.now;
+    this._palettePopup = new PalettePopup(this, {
+      anchor,
+      slotSize,
+      layout,
+      options,
+      selectedId,
+      onPick: (toolId) => {
+        if (this._paletteBar) this._paletteBar.setArmed(slotIdx, toolId);
+      },
+      onShieldTap: (x, y) => {
+        if (this.time.now - popupOpenedAt > SHIELD_CYCLE_WINDOW_MS) return;
+        if (x >= slotRect.x && x < slotRect.x + slotRect.w &&
+            y >= slotRect.y && y < slotRect.y + slotRect.h) {
+          this._cyclePaletteSlot(slotIdx);
+        }
+      },
+      onClose: () => {
+        this._palettePopup = null;
+      },
+    });
+  }
+
+  // Open the click-through help modal. Single instance — re-opening
+  // dismisses any pending palette popup so the modal isn't trapped
+  // behind another overlay.
+  _openHelpModal() {
+    if (this._helpModal) { this._helpModal.close(); this._helpModal = null; }
+    if (this._palettePopup) { this._palettePopup.close(); this._palettePopup = null; }
+    this._helpModal = new HelpModal(this, {
+      bossMode: !!this._bossMode,
+      onClose: () => { this._helpModal = null; },
+    });
+  }
+
+  // Confirm-then-reset the editor. The modal explains the destructive
+  // action; YES wipes all factories / acid pits / border funnels / typed
+  // entries / draft / blueprint assignments and reseeds the level with a
+  // fresh sandbox-style default funnel pair (one input top-center, one
+  // output bottom-center). Snapshots BEFORE the wipe so undo restores.
+  _openStartOverConfirm() {
+    if (this._confirmModal) { this._confirmModal.close(); this._confirmModal = null; }
+    if (this._palettePopup) { this._palettePopup.close(); this._palettePopup = null; }
+    this._confirmModal = new ConfirmModal(this, {
+      title: 'Start over?',
+      body:  'This wipes the entire level — every factory, label, acid pit, and border piece. The undo button can bring it back.',
+      confirmLabel: 'START OVER',
+      cancelLabel:  'CANCEL',
+      danger: true,
+      onConfirm: () => this._resetLevelToDefault(),
+      onClose:   () => { this._confirmModal = null; },
+    });
+  }
+
+  _resetLevelToDefault() {
+    this._snapshotForUndo();
+    // Preserve the current board size so the user doesn't lose their
+    // resize choice — only the level CONTENTS are wiped, not its shape.
+    const dim = (this.level && this.level.board && this.level.board.rows) || 6;
+    this.level.factories = [];
+    this.level.initialFactories = [];
+    this.level.lockedFactories = [];
+    this.level.acidPits = [];
+    this.level.border = { funnels: [] };
+    this.level.inputs = [];
+    this.level.outputs = [];
+    seedDefaultFunnels(this.level);
+    // Local editor state.
+    this.draftCells = [];
+    this.draftFunnels = [];
+    this._blueprintAssignments = new Map();
+    this._lockedFactoryIds = new Set();
+    this._mode = 'design';
+    this._persist();
+    this._renderAll();
+    this._renderDrawGrid();
+    this._restartSim();
+    void dim;   // referenced for readability above; nothing else uses it
+  }
+
+  // Advance the slot's armed tool to the next option in TOOLS_BY_SLOT,
+  // wrapping around. Single-option slots no-op.
+  _cyclePaletteSlot(slotIdx) {
+    const options = TOOLS_BY_SLOT[slotIdx] || [];
+    if (options.length <= 1 || !this._paletteBar) return;
+    const currentId = this._paletteBar.getArmed(slotIdx);
+    const idx = options.findIndex((t) => t.id === currentId);
+    const next = options[(idx + 1) % options.length];
+    if (next) this._paletteBar.setArmed(slotIdx, next.id);
+  }
+
   // Standalone icon island beneath the blueprint, full blueprint width.
   // ICON_SLOTS evenly divide that width; slot width (islandSlotW) may be
   // wider or narrower than a cell depending on blueprint size. The island
@@ -1206,6 +2119,36 @@ export default class EditorScene extends Phaser.Scene {
     const slotW = this.islandSlotW;
     const islandW = slotW * ICON_SLOTS;
     const islandH = this.islandH;
+
+    // Drag-active mode: replace the whole island with a red drop zone
+    // that just says "DELETE" in big bold letters, centered. Used for
+    // factory drags, draft drags, and pickup drags (acid pit / border
+    // funnel). Hit-testing is _iconSlotAt (any slot in the island).
+    if (this._factoryDragActive) {
+      const dropFrame = this.make.graphics({ add: false });
+      dropFrame.fillStyle(0xa01818, 1);
+      dropFrame.lineStyle(3, 0xffffff, 1);
+      dropFrame.fillRoundedRect(-BLUEPRINT_PAD, -BLUEPRINT_PAD, islandW + BLUEPRINT_PAD * 2, islandH + BLUEPRINT_PAD * 2, BLUEPRINT_RADIUS);
+      dropFrame.strokeRoundedRect(-BLUEPRINT_PAD, -BLUEPRINT_PAD, islandW + BLUEPRINT_PAD * 2, islandH + BLUEPRINT_PAD * 2, BLUEPRINT_RADIUS);
+      this.iconIslandContainer.add(dropFrame);
+      // Use container-local coords — iconIslandContainer is already
+      // positioned at iconIslandOriginX/Y, so the children just need
+      // local 0..islandW / 0..islandH coordinates.
+      const fontPx = Math.max(20, Math.round(islandH * 0.55));
+      const label = this.add.text(
+        islandW / 2,
+        islandH / 2,
+        'DELETE',
+        {
+          fontFamily: 'system-ui, sans-serif',
+          fontSize: `${fontPx}px`,
+          fontStyle: 'bold',
+          color: '#ffffff',
+        },
+      ).setOrigin(0.5);
+      this.iconIslandContainer.add(label);
+      return;
+    }
 
     const frame = this.make.graphics({ add: false });
     frame.fillStyle(BLUEPRINT_BG, 1);
@@ -1232,25 +2175,10 @@ export default class EditorScene extends Phaser.Scene {
       drawFn(g, slot * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
       this.iconIslandContainer.add(g);
     };
-    addGlyph(SLOT_HOME,   drawHome);
-    addGlyph(SLOT_BACK,   drawBackChevron);
-    addGlyph(SLOT_CLEAR,  drawTrash);
-    addGlyph(SLOT_SHRINK, drawMinus);
-    addGlyph(SLOT_GROW,   drawPlus);
-    // EXPORT (replaces HINT in BOTH sandbox and designer mode). Lights up
-    // when the test sim has satisfied every output (design mode) or every
-    // solution factory is in a unique blueprint slot (setup mode).
-    const exportEnabled = this._mode === 'blueprintSetup'
-      ? this._blueprintExportReady()
-      : !!this._victoryReady;
-    const color = exportEnabled ? '#ffffff' : '#9aa6b2';
-    const label = this.add.text(
-      this.iconIslandOriginX + SLOT_HINT * slotW + slotW / 2,
-      this.iconIslandOriginY + cy,
-      'EXPORT',
-      { fontFamily: 'system-ui, sans-serif', fontSize: '14px', fontStyle: 'bold', color },
-    ).setOrigin(0.5);
-    this.iconIslandContainer.add(label);
+    addGlyph(SLOT_HOME,       drawHome);
+    addGlyph(SLOT_START_OVER, drawTrash);
+    addGlyph(SLOT_SHRINK,     drawMinus);
+    addGlyph(SLOT_GROW,       drawPlus);
   }
 
   _renderDraftShape() {
@@ -1326,12 +2254,22 @@ export default class EditorScene extends Phaser.Scene {
 
   _edgeAt(px, py) {
     const border = this._borderEdgeAt(px, py);
-    if (border) return { ...border, kind: 'border' };
+    if (border) {
+      // If the border edge already has a funnel, route the gesture to
+      // the CELL path instead so press-drag can pick the funnel up. The
+      // edge path only fires on bare border cells (no funnel yet) — but
+      // those are now placed via the palette anyway, so the edge path's
+      // legacy tap-to-cycle behavior is effectively a no-op outside of
+      // backwards compatibility.
+      const funnels = (this.level && this.level.border && this.level.border.funnels) || [];
+      const occupied = funnels.some((f) => f.r === border.r && f.c === border.c && f.side === border.side);
+      if (!occupied) return { ...border, kind: 'border' };
+      // Fall through to draft-edge / null below.
+    }
     // The buffer-label square next to each existing border funnel also acts
     // as a click target — easier to hit than the narrow edge strip. Only
     // triggers for already-placed funnels (empty buffer edges have no label).
-    const bufferLabel = this._bufferLabelAt(px, py);
-    if (bufferLabel) return { ...bufferLabel, kind: 'border' };
+    // SKIP it now too — picking up the funnel via cell-drag is the new path.
     const draft = this._draftEdgeAt(px, py);
     if (draft) return { ...draft, kind: 'draft' };
     return null;
@@ -1474,19 +2412,91 @@ export default class EditorScene extends Phaser.Scene {
       return;
     }
     if (info.kind === 'draft') {
-      this._toggleDraftCell(info.r, info.c);
+      // Tap on a draft cell → rotate the whole draft 90° CW around the
+      // tapped cell. Tap on an empty composer cell that's a valid factory
+      // position (adjacent to existing draft, or first cell anywhere) →
+      // add a factory block there.
+      if (this._isDraftCell(info.r, info.c)) {
+        this._rotateDraftAround(info.r, info.c);
+        return;
+      }
+      this._tryQuickAddFactory({ kind: 'composerCell', r: info.r, c: info.c });
+      return;
     } else if (info.kind === 'board') {
-      // Tap on a placed factory's cell → open the per-cell label picker.
-      // To remove a factory, drag it back into the draft composer.
+      // Tap on a placed factory's cell → rotate the factory 90° CW. Tap
+      // on an empty interior board cell that's a valid factory position
+      // → add a factory block there. Other taps (acid pits, border
+      // funnels, occupied cells) remain no-ops.
       const hit = this.level.factories.find((fac) =>
         fac.cells.some((cc) => fac.anchor.row + cc.r === info.r && fac.anchor.col + cc.c === info.c),
       );
-      if (hit) { this._openCellLabelPicker(hit, info.r, info.c); return; }
-      // No factory at this cell → treat as acid-pit placement / edit. Buffer
-      // cells are off-limits (pits are playable-interior only).
-      if (isBorderCell(this.level.board, info.r, info.c)) return;
-      this._handleAcidTap(info.r, info.c);
+      if (hit) { this._rotatePlacedFactory(hit); return; }
+      this._tryQuickAddFactory({ kind: 'boardCell', r: info.r, c: info.c });
     }
+  }
+
+  // Click-to-place shortcut for the Factory tool — runs the same applyTool
+  // dispatch a drag-end would run, snapshotting for undo and re-rendering
+  // on success. No-op if applyTool rejects (occupied / invalid target).
+  _tryQuickAddFactory(target) {
+    const tool = findTool('factory.block');
+    if (!tool) return;
+    this._snapshotForUndo();
+    const result = applyToolAt(this, tool, target);
+    if (result && result.mutated) {
+      this._persist();
+      this._renderAll();
+      this._renderDrawGrid();
+      this._restartSim();
+    } else if (this._undoStack) {
+      // No mutation — discard the snapshot so the undo stack stays clean.
+      this._undoStack.pop();
+    }
+  }
+
+  // Rotate a board-placed factory 90° CW, snapshotting for undo first.
+  // The rotation pivots around the factory's existing anchor — bounds
+  // and overlap checks aren't enforced (the rotation is purely geometric);
+  // if the rotated footprint spills off-board or collides with another
+  // piece the user can drag it back into place or undo.
+  _rotatePlacedFactory(factory) {
+    if (factory.locked) return;
+    this._snapshotForUndo();
+    const rot = rotateFactoryShape({ cells: factory.cells, funnels: factory.funnels || [] }, 1);
+    factory.cells = rot.cells;
+    factory.funnels = rot.funnels;
+    this._persist();
+    this._renderAll();
+    this._restartSim();
+  }
+
+  // Rotate the entire draft 90° CW around (pivotR, pivotC). Cells preserve
+  // their label / bolt attributes; funnels rotate sides via SIDE_ROTATE_CW.
+  // Cells that spill outside the draw grid are allowed (the user can rotate
+  // partly off the blueprint), but the rotation is rejected if EVERY cell
+  // would land off-grid — at least one cell has to stay visible / on the
+  // blueprint so the user can keep manipulating the draft.
+  _rotateDraftAround(pivotR, pivotC) {
+    if (!Array.isArray(this.draftCells) || this.draftCells.length === 0) return;
+    const SIDE_CW = { top: 'right', right: 'bottom', bottom: 'left', left: 'top' };
+    // Visual CW in screen coords: (dr, dc) → (dc, -dr).
+    const newCells = this.draftCells.map((cc) => {
+      const dr = cc.r - pivotR, dc = cc.c - pivotC;
+      return { ...cc, r: pivotR + dc, c: pivotC - dr };
+    });
+    const anyInside = newCells.some(
+      (cc) => cc.r >= 0 && cc.c >= 0 && cc.r < this.drawGridRows && cc.c < this.drawGridCols,
+    );
+    if (!anyInside) return;
+    const newFunnels = (this.draftFunnels || []).map((f) => {
+      const dr = f.r - pivotR, dc = f.c - pivotC;
+      return { ...f, r: pivotR + dc, c: pivotC - dr, side: SIDE_CW[f.side] || f.side };
+    });
+    this._snapshotForUndo();
+    this.draftCells = newCells;
+    this.draftFunnels = newFunnels;
+    this._persist();
+    this._renderDrawGrid();
   }
 
   // ===================================================================
@@ -1496,45 +2506,6 @@ export default class EditorScene extends Phaser.Scene {
   _acidPitAt(r, c) {
     const pits = (this.level && this.level.acidPits) || [];
     return pits.find((p) => p.r === r && p.c === c) || null;
-  }
-
-  _handleAcidTap(r, c) {
-    const pit = this._acidPitAt(r, c);
-    if (!pit) {
-      // Add a fresh unlabeled pit at this cell.
-      if (!Array.isArray(this.level.acidPits)) this.level.acidPits = [];
-      this.level.acidPits.push({ r, c });
-      this._persist();
-      this._renderAll();
-      this._restartSim();
-      return;
-    }
-    this._openAcidPicker(pit);
-  }
-
-  _openAcidPicker(pit) {
-    if (this.acidPitPicker) { this.acidPitPicker.close(); this.acidPitPicker = null; }
-    const step = this.pxCell + BOARD_GAP;
-    const cellCx = this.boardOriginX + pit.c * step + this.pxCell / 2;
-    const cellCy = this.boardOriginY + pit.r * step + this.pxCell / 2;
-    this.acidPitPicker = new AcidPitTypePicker(this, {
-      x: cellCx, y: cellCy,
-      label: pit.label || null,
-      onChange: (label) => {
-        if (label && label.color) pit.label = { color: label.color };
-        else delete pit.label;
-        this._persist();
-        this._renderAll();
-        this._restartSim();
-      },
-      onDelete: () => {
-        this.level.acidPits = this.level.acidPits.filter((p) => !(p.r === pit.r && p.c === pit.c));
-        this._persist();
-        this._renderAll();
-        this._restartSim();
-      },
-      onClose: () => { this.acidPitPicker = null; },
-    });
   }
 
   // Find the assignment whose rotated footprint covers the given slot, not
@@ -1578,204 +2549,10 @@ export default class EditorScene extends Phaser.Scene {
     this._setupIconSlotHandlers();
   }
 
-  // Per-cell label editor. Single-cell factory: setting a label means
-  // "wildcard input, labeled output". Multi-cell: each labeled cell binds
-  // its funnels to that label.
-  _openCellLabelPicker(factory, absR, absC) {
-    if (this.cellLabelPicker) { this.cellLabelPicker.close(); this.cellLabelPicker = null; }
-    const localR = absR - factory.anchor.row;
-    const localC = absC - factory.anchor.col;
-    const cell = factory.cells.find((cc) => cc.r === localR && cc.c === localC);
-    if (!cell) return;
-    const step = this.pxCell + BOARD_GAP;
-    const cellCx = this.boardOriginX + absC * step + this.pxCell / 2;
-    const cellCy = this.boardOriginY + absR * step + this.pxCell / 2;
-    this.cellLabelPicker = new CellLabelPicker(this, {
-      x: cellCx,
-      y: cellCy,
-      label: cell.label || null,
-      bolt:  !!cell.bolt,
-      onChange: (label) => {
-        cell.label = { ...label };
-        this._persist();
-        this._renderAll();
-        this._restartSim();
-      },
-      onClear: () => {
-        delete cell.label;
-        this._persist();
-        this._renderAll();
-        this._restartSim();
-      },
-      onBoltChange: (on) => {
-        if (on) cell.bolt = true; else delete cell.bolt;
-        this._persist();
-        this._renderAll();
-        this._restartSim();
-      },
-      onClose: () => { this.cellLabelPicker = null; },
-    });
-  }
-
-  _onToggleFunnel(info) {
-    if (!info) return;
-    // Border funnels are locked once the user commits to the blueprint
-    // flow — editing them mid-setup would invalidate the solution
-    // snapshot taken on _enterBlueprintSetup.
-    if (info.kind === 'border') {
-      if (this._mode === 'blueprintSetup') return;
-      this._cycleBorderFunnel(info.r, info.c, info.side);
-    } else if (info.kind === 'draft') {
-      this._cycleDraftFunnel(info.r, info.c, info.side);
-    }
-  }
-
-  _toggleDraftCell(r, c) {
-    const has = this._isDraftCell(r, c);
-    if (!has) {
-      if (!isAdjacentToFactory(this.draftCells, r, c)) return;
-      this.draftCells.push({ r, c });
-      this._renderDrawGrid();
-      return;
-    }
-    // Existing draft cell: open the label picker so the author can set /
-    // clear the cell's label, or REMOVE CELL to drop it from the draft.
-    this._openDraftCellLabelPicker(r, c);
-  }
-
-  _removeDraftCellAt(r, c) {
-    const candidate = this.draftCells.filter((x) => !(x.r === r && x.c === c));
-    if (!isContiguous(candidate)) return;
-    this.draftCells = candidate;
-    // Prune funnels on removed cells and on edges that are now internal.
-    this.draftFunnels = this.draftFunnels.filter((f) => {
-      if (f.r === r && f.c === c) return false;
-      return isPerimeterEdge(this.draftCells, f.r, f.c, f.side);
-    });
-    this._renderDrawGrid();
-  }
-
-  _openDraftCellLabelPicker(r, c) {
-    if (this.cellLabelPicker) { this.cellLabelPicker.close(); this.cellLabelPicker = null; }
-    const cell = this.draftCells.find((cc) => cc.r === r && cc.c === c);
-    if (!cell) return;
-    const step = this.drawCellPx;
-    const cellCx = this.drawGridOriginX + c * step + step / 2;
-    const cellCy = this.drawGridOriginY + r * step + step / 2;
-    this.cellLabelPicker = new CellLabelPicker(this, {
-      x: cellCx, y: cellCy,
-      label: cell.label || null,
-      bolt:  !!cell.bolt,
-      onChange: (label) => {
-        cell.label = { ...label };
-        this._renderDrawGrid();
-      },
-      onClear: () => {
-        delete cell.label;
-        this._renderDrawGrid();
-      },
-      onBoltChange: (on) => {
-        if (on) cell.bolt = true; else delete cell.bolt;
-        this._renderDrawGrid();
-      },
-      onRemove: () => this._removeDraftCellAt(r, c),
-      onClose: () => { this.cellLabelPicker = null; },
-    });
-  }
-
-  _cycleDraftFunnel(r, c, side) {
-    const idx = this.draftFunnels.findIndex((f) => f.r === r && f.c === c && f.side === side);
-    // Cycle: none → input → output → emitter → none. Factory funnels can't be
-    // collectors (collectors are border-only by design).
-    if (idx < 0) this.draftFunnels.push({ r, c, side, role: 'input' });
-    else {
-      const cur = this.draftFunnels[idx].role;
-      if      (cur === 'input')  this.draftFunnels[idx].role = 'output';
-      else if (cur === 'output') this.draftFunnels[idx].role = 'emitter';
-      else                        this.draftFunnels.splice(idx, 1);
-    }
-    this._renderDrawGrid();
-  }
-
-  _cycleBorderFunnel(r, c, side) {
-    if (!this.level.border) this.level.border = { funnels: [] };
-    const arr = this.level.border.funnels;
-    const idx = arr.findIndex((f) => f.r === r && f.c === c && f.side === side);
-    if (idx < 0) {
-      // Fresh funnel: create as input with the default shape type. Subsequent
-      // taps on the label open the FunnelTypePicker (handled below).
-      arr.push({ r, c, side, role: 'input' });
-      this._upsertTypedEntry('input', r, c, side, { ...DEFAULT_SHAPE_TYPE });
-      this._persist();
-      this._renderAll();
-      this._restartSim();
-      return;
-    }
-    this._openFunnelPicker(arr[idx]);
-  }
-
-  // Open the FunnelTypePicker over a buffer funnel. Closes any existing one
-  // first; commits live so each pick re-renders + restarts the sim.
-  _openFunnelPicker(funnel) {
-    if (this.funnelPicker) { this.funnelPicker.close(); this.funnelPicker = null; }
-    // If this funnel has no typed entry yet (legacy save, or a funnel that
-    // pre-dates the picker), persist the default now. Otherwise the picker
-    // would *display* circle/blue while the sim treats the funnel as a
-    // wildcard — opening + dismissing without clicking would silently leave
-    // it untyped and any shape would pass through.
-    let type = this._lookupBorderType(funnel);
-    // Emitters / collectors carry no type; keep `type` as a display default
-    // for the dimmed form/color rows but don't persist anything.
-    const laserRole = funnel.role === 'emitter' || funnel.role === 'collector';
-    if (!type) {
-      type = { ...DEFAULT_SHAPE_TYPE };
-      if (!laserRole) {
-        this._upsertTypedEntry(funnel.role, funnel.r, funnel.c, funnel.side, type);
-        this._persist();
-        this._restartSim();
-      }
-    }
-    const step = this.pxCell + BOARD_GAP;
-    const cellCx = this.boardOriginX + funnel.c * step + this.pxCell / 2;
-    const cellCy = this.boardOriginY + funnel.r * step + this.pxCell / 2;
-    this.funnelPicker = new FunnelTypePicker(this, {
-      x: cellCx,
-      y: cellCy,
-      type,
-      role: funnel.role,
-      onChange: (patch) => {
-        if (patch.role && patch.role !== funnel.role) {
-          funnel.role = patch.role;
-          // Emitter / collector carry no type — drop the typed entry when
-          // switching INTO them, and re-seed a default when switching OUT.
-          const laserRole = funnel.role === 'emitter' || funnel.role === 'collector';
-          if (laserRole) {
-            this._removeTypedEntry(funnel.r, funnel.c, funnel.side);
-          } else {
-            this._removeTypedEntry(funnel.r, funnel.c, funnel.side);
-            this._upsertTypedEntry(funnel.role, funnel.r, funnel.c, funnel.side, type);
-          }
-        }
-        if (patch.type) {
-          Object.assign(type, patch.type);
-          const laserRole = funnel.role === 'emitter' || funnel.role === 'collector';
-          if (!laserRole) this._upsertTypedEntry(funnel.role, funnel.r, funnel.c, funnel.side, type);
-        }
-        this._persist();
-        this._renderAll();
-        this._restartSim();
-      },
-      onDelete: () => {
-        const arr = this.level.border.funnels;
-        const idx = arr.findIndex((f) => f.r === funnel.r && f.c === funnel.c && f.side === funnel.side);
-        if (idx >= 0) arr.splice(idx, 1);
-        this._removeTypedEntry(funnel.r, funnel.c, funnel.side);
-        this._persist();
-        this._renderAll();
-        this._restartSim();
-      },
-      onClose: () => { this.funnelPicker = null; },
-    });
+  _onToggleFunnel(_info) {
+    // No-op in the palette-drag model — funnel placement and editing
+    // happen via the Funnels palette (factory edges) and the Board pieces
+    // palette (border edges). Tap-to-cycle on edges is retired.
   }
 
   _lookupBorderType(f) {
@@ -1851,19 +2628,34 @@ export default class EditorScene extends Phaser.Scene {
       }
       grab  = { r: grabR - minR, c: grabC - minC };
       shape = normalizeFactory(this.draftCells, this.draftFunnels);
+      // Snapshot BEFORE the drag mutates anything so undo can revert any
+      // successful drop (place-on-board, move-to-draft, delete-zone) back
+      // to this exact pre-drag state. Popped on cancel via _cancelDrag.
+      this._snapshotForUndo();
     } else if (kind === 'board') {
       const factory = this._factoryAtBoardCell(grabR, grabC);
-      if (!factory) return;
-      source = 'board';
-      origFactory = factory;
-      grab  = { r: grabR - factory.anchor.row, c: grabC - factory.anchor.col };
-      shape = { cells: factory.cells, funnels: factory.funnels || [], converter: factory.converter };
-      // Remove from the level so placement validity and rendering reflect
-      // that the factory is "in hand". Sim restarts so it stops emitting
-      // from this factory's funnels. Restored on drag cancel.
-      this.level.factories = this.level.factories.filter((fac) => fac.id !== factory.id);
-      this._renderAll();
-      this._restartSim();
+      if (factory) {
+        source = 'board';
+        origFactory = factory;
+        grab  = { r: grabR - factory.anchor.row, c: grabC - factory.anchor.col };
+        shape = { cells: factory.cells, funnels: factory.funnels || [], converter: factory.converter };
+        // Snapshot WITH the factory still on the level — drag start
+        // removes it next, but we want undo to put it back at the
+        // original anchor regardless of how the drag ends.
+        this._snapshotForUndo();
+        // Remove from the level so placement validity and rendering reflect
+        // that the factory is "in hand". Sim restarts so it stops emitting
+        // from this factory's funnels. Restored on drag cancel.
+        this.level.factories = this.level.factories.filter((fac) => fac.id !== factory.id);
+        this._renderAll();
+        this._restartSim();
+      } else {
+        // No factory under the grab cell — this drag is a "pickup" of an
+        // acid pit or border funnel. Handled with a different ghost +
+        // applyTool dispatch path; the rest of _onDragStart is skipped.
+        if (this._beginPickupDrag(grabR, grabC)) return;
+        return;
+      }
     } else {
       return;
     }
@@ -1908,6 +2700,14 @@ export default class EditorScene extends Phaser.Scene {
     };
     this._clearHoverPreview();
 
+    // Swap the icon island into "DELETE" trash mode for the duration of
+    // this drag — both for board factory drags AND for draft (composer)
+    // drags, so dropping either onto the trash deletes them. (Slot drags
+    // in blueprintSetup keep the normal island.)
+    if (source === 'board' || source === 'draft') {
+      this._activateTrashIsland();
+    }
+
     // Seed ghost position at the pointer so there's no first-frame jump. The
     // update loop then eases it toward the target (snap-smoothing).
     const pointer = this.input.activePointer;
@@ -1921,6 +2721,20 @@ export default class EditorScene extends Phaser.Scene {
   }
 
   _onDragMove(x, y) {
+    // Pickup drag (acid pit / border funnel) takes precedence — it owns
+    // its own ghost in placementContainer-relative coords and uses the
+    // palette placement preview pipeline.
+    if (this._pickupDrag) {
+      this._pickupDrag.lastX = x;
+      this._pickupDrag.lastY = y;
+      if (this._paletteGhost) {
+        this._paletteGhost.x = x;
+        this._paletteGhost.y = y;
+      }
+      const tool = findTool(this._pickupDrag.toolId);
+      this._updatePalettePlacementPreview(x, y, tool);
+      return;
+    }
     if (!this.drag) return;
     const step = this.pxCell + BOARD_GAP;
     const grab = this.drag.grab;
@@ -1942,6 +2756,8 @@ export default class EditorScene extends Phaser.Scene {
   }
 
   _onDragEnd({ boardRC }) {
+    // Route pickup drags (pit / border funnel) to their own handler.
+    if (this._pickupDrag) { this._endPickupDrag(); return; }
     if (!this.drag) { this._clearDrag(); return; }
     const pointer = this.input.activePointer;
     const px = pointer ? pointer.x : 0;
@@ -1958,13 +2774,34 @@ export default class EditorScene extends Phaser.Scene {
       return;
     }
 
-    // Drop-destination priority: board cell → draw grid → cancel.
+    // Drop-destination priority: delete-zone (icon island during a board
+    // factory or draft drag) → board cell → draw grid → cancel.
+    if (this._factoryDragActive && this._iconSlotAt(px, py)) {
+      // No snapshot here — drag start already pushed one capturing the
+      // pre-drag state (factory on the board / draft populated). Undo
+      // will restore that.
+      if (this.drag.source === 'board') {
+        // Factory was already removed from level at drag start — don't
+        // restore it. Sim was restarted then; persist + re-render now.
+      } else if (this.drag.source === 'draft') {
+        // Clear the draft entirely — the dragged shape goes away.
+        this.draftCells = [];
+        this.draftFunnels = [];
+      }
+      this._persist();
+      this._renderAll();
+      this._renderDrawGrid();
+      this._restartSim();
+      this._clearDrag();
+      return;
+    }
     if (boardRC && this._tryPlaceOnBoard(boardRC)) {
       this._clearDrag();
       return;
     }
-    if (this._drawGridCellAt(px, py)) {
-      this._moveToDraft();
+    const dropCell = this._drawGridCellAt(px, py);
+    if (dropCell) {
+      this._moveToDraft(dropCell.r, dropCell.c);
       this._clearDrag();
       return;
     }
@@ -2048,13 +2885,32 @@ export default class EditorScene extends Phaser.Scene {
     return true;
   }
 
-  // Drop on the draw grid: the dragged factory becomes the new draft. Any
-  // existing draft (if dragging from board) is replaced. If the drag came
-  // from the board the source factory is discarded (already removed on start).
-  _moveToDraft() {
-    const { shape } = this.drag;
-    this.draftCells = shape.cells.map((c) => ({ ...c }));
-    this.draftFunnels = (shape.funnels || []).map((f) => ({ ...f }));
+  // Drop on the draw grid: the dragged factory becomes the new draft,
+  // positioned so the GRABBED cell lands at the drop point (dropR, dropC).
+  // Without that translation the cells would land at their normalized
+  // origin (top-left) regardless of where the user dropped. Bounds-clamps
+  // the offset so the bounding box stays inside drawGridRows × drawGridCols.
+  _moveToDraft(dropR, dropC) {
+    const { shape, grab } = this.drag;
+    let offR = 0, offC = 0;
+    if (dropR != null && dropC != null && grab) {
+      offR = dropR - grab.r;
+      offC = dropC - grab.c;
+      // Bounds-clamp so every cell stays inside the draw grid.
+      let minR = Infinity, minC = Infinity, maxR = -Infinity, maxC = -Infinity;
+      for (const cc of shape.cells) {
+        if (cc.r < minR) minR = cc.r;
+        if (cc.c < minC) minC = cc.c;
+        if (cc.r > maxR) maxR = cc.r;
+        if (cc.c > maxC) maxC = cc.c;
+      }
+      if (minR + offR < 0) offR = -minR;
+      if (minC + offC < 0) offC = -minC;
+      if (maxR + offR >= this.drawGridRows) offR = this.drawGridRows - 1 - maxR;
+      if (maxC + offC >= this.drawGridCols) offC = this.drawGridCols - 1 - maxC;
+    }
+    this.draftCells = shape.cells.map((c) => ({ ...c, r: c.r + offR, c: c.c + offC }));
+    this.draftFunnels = (shape.funnels || []).map((f) => ({ ...f, r: f.r + offR, c: f.c + offC }));
     this._persist();
     this._renderAll();
     this._renderDrawGrid();
@@ -2079,6 +2935,13 @@ export default class EditorScene extends Phaser.Scene {
       this.level.factories.push(this.drag.origFactory);
       this._renderAll();
       this._restartSim();
+    }
+    // The drag pushed a snapshot at START for 'board' / 'draft' sources so
+    // any successful drop has a pre-drag state to undo to. On cancel the
+    // level returned to its original state, so pop that snapshot to keep
+    // the undo stack free of no-op entries.
+    if ((this.drag.source === 'board' || this.drag.source === 'draft') && this._undoStack) {
+      this._undoStack.pop();
     }
   }
 
@@ -2159,6 +3022,7 @@ export default class EditorScene extends Phaser.Scene {
     this.ghostContainer.removeAll(true);
     this.placementContainer.removeAll(true);
     this._renderDrawGrid();
+    this._deactivateTrashIsland();
   }
 
   // ===================================================================
@@ -2174,24 +3038,14 @@ export default class EditorScene extends Phaser.Scene {
     if (!this.ready) return;
     this._clearHoverPreview();
     if (this.drag) return;
+    // Palette drag owns the placement preview; suppress composer hover.
+    if (this._paletteDrag) return;
 
-    // Edge preview (funnel cycling) takes priority over cell preview.
-    const edge = this._edgeAt(px, py);
-    if (edge && edge.kind === 'draft') {
-      this._previewFunnel(this.hoverContainer, edge.r, edge.c, edge.side, this.drawCellPx, 0, this._nextDraftFunnelRole(edge.r, edge.c, edge.side));
-      return;
-    }
-    if (edge && edge.kind === 'border') {
-      this._previewFunnel(this.boardHoverContainer, edge.r, edge.c, edge.side, this.pxCell, BOARD_GAP, this._nextBorderFunnelRole(edge.r, edge.c, edge.side), 1);
-      return;
-    }
-    // Fallback to cell add preview inside the draw grid.
-    const cell = this._drawGridCellAt(px, py);
-    if (!cell) return;
-    const already = this._isDraftCell(cell.r, cell.c);
-    if (already) return;
-    if (!isAdjacentToFactory(this.draftCells, cell.r, cell.c)) return;
-    this._previewDraftCell(cell.r, cell.c);
+    // Funnel-edge hover previews are gone in the palette-drag editor —
+    // funnels are now placed via the dedicated palette tool, so showing
+    // a "next funnel role" preview on every edge mouseover is misleading.
+    // Cell add preview on the composer is similarly retired (factory
+    // placement is now drag-from-palette only).
   }
 
   _nextDraftFunnelRole(r, c, side) {
@@ -2301,7 +3155,12 @@ export default class EditorScene extends Phaser.Scene {
   //   • current:   the pill the user is actively on (single-selection).
   //   • isNew:     scene-tracked; sticky green ring until the user taps it.
   _computeStepStates() {
-    const blocksReady  = !!this._victoryReady;
+    // Even if victory is "ready" (no required outputs to satisfy), the
+    // Blueprint phase only opens when there's at least one factory on
+    // the playable area. Otherwise BLUEPRINT would be tappable on a
+    // blank level, which is misleading — there's nothing to slot.
+    const hasFactories = (this.level.factories || []).length > 0;
+    const blocksReady  = !!this._victoryReady && hasFactories;
     const inSetup      = this._mode === 'blueprintSetup';
     const panelOpen    = !!this.exportPanel;
     const setupReady   = inSetup && this._blueprintExportReady && this._blueprintExportReady();
@@ -2510,6 +3369,7 @@ export default class EditorScene extends Phaser.Scene {
     // Reset per-stage tracking — _victoryReady will re-fire on the next
     // sim cycle if the stored solution satisfies the stage's outputs.
     this._satisfiedOutputs && this._satisfiedOutputs.clear();
+    this._satisfiedCatchers && this._satisfiedCatchers.clear();
     this._victoryReady = false;
     this._restartSim();
   }
@@ -2689,37 +3549,17 @@ export default class EditorScene extends Phaser.Scene {
       this.iconSlotHits.push(rect);
     };
     makeHit(SLOT_HOME, () => {
-      // HOME always exits to the main menu, regardless of mode or
-      // sandbox/designer flavor. Stops any running test sim first.
+      // HOME always exits to the main menu, regardless of mode.
       this.sim && this.sim.stop();
       fadeTo(this, 'Home');
     });
-    makeHit(SLOT_BACK, () => {
-      // BACK in boss mode steps one place back in the flat phase sequence;
-      // at the very start (Edit 1) it exits the scene.
-      if (this._bossMode) {
-        if (this._bossSeqPos() > 0) { this._bossBack(); return; }
-        this.sim && this.sim.stop();
-        fadeTo(this, this._designerMode ? 'Community' : 'Home');
-        return;
-      }
-      // BACK in blueprint-setup cancels setup and restores the play area;
-      // BACK anywhere else exits the scene to Community / Home.
-      if (this._mode === 'blueprintSetup') { this._exitBlueprintSetup(); return; }
-      this.sim && this.sim.stop();
-      fadeTo(this, this._designerMode ? 'Community' : 'Home');
-    });
-    makeHit(SLOT_HINT, () => {
-      // EXPORT progression — same for sandbox and designer mode. Design +
-      // victory → switch to blueprint-setup. Setup + all-slotted → open
-      // the ExportPanel. In boss mode this is a shortcut for the
-      // forward-arrow: it advances through the flat stage sequence.
-      if (this._bossMode) { this._bossForward(); return; }
-      if (this._mode === 'design') {
-        if (this._victoryReady) this._enterBlueprintSetup();
-      } else if (this._mode === 'blueprintSetup') {
-        if (this._blueprintExportReady()) this._openExportPanel();
-      }
+    makeHit(SLOT_START_OVER, () => {
+      // START OVER — opens a confirmation modal; on YES, completely
+      // resets the editor to a fresh sandbox state. Disabled during
+      // blueprint-setup mode (the user shouldn't lose their setup
+      // mid-export).
+      if (this._mode === 'blueprintSetup') return;
+      this._openStartOverConfirm();
     });
     // Board resize is disabled in boss mode past stage 1 (size is locked
     // the moment the user advances past the first stage) and in any
@@ -2733,19 +3573,6 @@ export default class EditorScene extends Phaser.Scene {
       if (this._mode === 'blueprintSetup') return;
       if (this._bossMode && this._bossMaxVisitedIdx > 0) return;
       this._resizeBoard(+1);
-    });
-    makeHit(SLOT_CLEAR, () => {
-      if (this._mode === 'blueprintSetup') return;
-      // CLEAR only removes THIS stage's own factories in boss mode —
-      // locked carry-over from prior stages is preserved.
-      if (this._bossMode) {
-        this.level.factories = (this.level.factories || []).filter((f) => f.locked);
-      } else {
-        this.level.factories = [];
-      }
-      this._persist();
-      this._renderAll();
-      this._restartSim();
     });
   }
 
@@ -2803,6 +3630,7 @@ export default class EditorScene extends Phaser.Scene {
       },
       onCollectorSatisfied: (c) => {
         if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(c, true);
+        this._onEditorCatcherSatisfied(c);
       },
     });
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.resize(this.pxCell);
@@ -2812,6 +3640,7 @@ export default class EditorScene extends Phaser.Scene {
     this._buildToolbar();
     this._renderAll();
     this._renderDrawGrid();
+    this._renderPaletteBar();
     this._renderIconIsland();
     this._restartSim();
     // pxCell changed but Phaser's scale didn't — refresh the letterbox CSS.
@@ -2872,6 +3701,7 @@ export default class EditorScene extends Phaser.Scene {
       },
       onCollectorSatisfied: (c) => {
         if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(c, true);
+        this._onEditorCatcherSatisfied(c);
       },
     });
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.resize(this.pxCell);
@@ -2881,6 +3711,7 @@ export default class EditorScene extends Phaser.Scene {
     this._buildToolbar();
     this._renderAll();
     this._renderDrawGrid();
+    this._renderPaletteBar();
     this._renderIconIsland();
     this._restartSim();
     if (this._reapplyLetterbox) this._reapplyLetterbox();
