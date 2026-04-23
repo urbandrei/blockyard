@@ -44,7 +44,7 @@ discordRoutes.post('/discord/interactions', async (c) => {
     return handleComponent(c, interaction);
   }
 
-  if (interaction.type === InteractionType.APPLICATION_MODAL_SUBMIT) {
+  if (interaction.type === InteractionType.MODAL_SUBMIT) {
     return handleModalSubmit(c, interaction);
   }
 
@@ -83,7 +83,7 @@ async function approve(c: any, levelId: string, moderator: string) {
 
 function openDenyModal(c: any, levelId: string) {
   return c.json({
-    type: InteractionResponseType.APPLICATION_MODAL,
+    type: InteractionResponseType.MODAL,
     data: {
       custom_id: `by:denyReason:${levelId}`,
       title: 'Deny level',

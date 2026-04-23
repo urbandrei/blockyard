@@ -12,7 +12,7 @@ export const ratingRoutes = new Hono();
 
 ratingRoutes.post('/levels/:id/rating', requireToken(), async (c) => {
   const { token } = c.get('auth');
-  const levelId = c.req.param('id');
+  const levelId = c.req.param('id')!;
 
   const gate = rateLimit.checkRate(token);
   if (!gate.ok) return c.json({ error: 'rate limited', retryAfterMs: gate.retryAfterMs }, 429);

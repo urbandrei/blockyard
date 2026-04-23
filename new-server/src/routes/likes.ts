@@ -11,7 +11,7 @@ export const likeRoutes = new Hono();
 
 likeRoutes.post('/levels/:id/like', requireToken(), async (c) => {
   const { token } = c.get('auth');
-  const levelId = c.req.param('id');
+  const levelId = c.req.param('id')!;
 
   const gate = rateLimit.checkLike(token);
   if (!gate.ok) return c.json({ error: 'rate limited', retryAfterMs: gate.retryAfterMs }, 429);
