@@ -31,6 +31,11 @@ function currentShapeHex(s) {
 // per-frame motion during the fast phase can't slip past undetected.
 const HIT_RADIUS_FRAC = 0.05;
 
+// How long a shape stays frozen mid-air after being struck by a laser,
+// before it shatters into the fade-out debris burst (ms). Kept short so
+// the dramatic beat doesn't overstay its welcome.
+const ELECTROCUTE_MS = 400;
+
 function outwardDir(side) {
   // Direction AWAY from the cell through the given edge. For border cells
   // this points into the play area; for interior factories away from the factory.
@@ -254,6 +259,11 @@ export class Simulation {
     this._prevDNow = dNow;
     for (const s of this.shapes) {
       if (s.dead) continue;
+      // Electrocuted shapes are frozen in place mid-death — their stored
+      // prevX/Y stays pinned so swept collision tests don't mis-register
+      // them against anything. They tick down their death timer in the
+      // collision loop below.
+      if (s.electrocuted) continue;
       s.prevX = s.x;
       s.prevY = s.y;
       const delta = (dNow - s.birthCycles) * this.cellStep;
@@ -296,10 +306,21 @@ export class Simulation {
     // Collisions.
     for (const s of this.shapes) {
       if (s.dead) continue;
-      // Laser-pop test: a shape that crosses a live beam pops immediately.
-      // Tested before funnel hits so a shape headed into a funnel with a
-      // laser in the way still pops first (more intuitive for the player).
-      if (this._laserPops(s)) { this._kill(s, true); continue; }
+      // Electrocuted shapes are dying — tick the freeze timer and skip
+      // every other collision test until the death animation plays out.
+      if (s.electrocuted) {
+        const elapsed = now - s.electrocuteStart;
+        s.electrocuteProgress = Math.min(1, elapsed / ELECTROCUTE_MS);
+        if (elapsed >= ELECTROCUTE_MS) this._kill(s, true, 'laser');
+        continue;
+      }
+      // Laser-pop test: a shape that crosses a live beam enters its
+      // electrocute death sequence instead of an instant pop.
+      if (this._laserPops(s)) {
+        s.electrocuted = true;
+        s.electrocuteStart = now;
+        continue;
+      }
       const f = this._funnelHit(s);
       if (f) {
         if (isSink(f)) {
@@ -621,9 +642,9 @@ export class Simulation {
     this.onSpawn(shape);
   }
 
-  _kill(s, pop) {
+  _kill(s, pop, cause = null) {
     s.dead = true;
-    this.onRemove(s, pop);
+    this.onRemove(s, pop, cause);
   }
 
   // ---------- laser field ----------

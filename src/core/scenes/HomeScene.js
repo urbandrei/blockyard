@@ -293,7 +293,7 @@ export default class HomeScene extends Phaser.Scene {
       pxCell: this.pxCell,
       pxGap: BOARD_GAP,
       onSpawn:  (shape) => this.shapeRenderer.spawn(shape),
-      onRemove: (shape, pop) => this.shapeRenderer.remove(shape, pop),
+      onRemove: (shape, pop, cause) => this.shapeRenderer.remove(shape, pop, cause),
       onSinkResolve: () => {},
     });
     this.simTime = 0;

@@ -151,7 +151,7 @@ export default class PlayerScene extends Phaser.Scene {
       pxCell: this.pxCell,
       pxGap: BOARD_GAP,
       onSpawn: (shape) => this.shapeRenderer.spawn(shape),
-      onRemove: (shape, pop) => this.shapeRenderer.remove(shape, pop),
+      onRemove: (shape, pop, cause) => this.shapeRenderer.remove(shape, pop, cause),
       onSinkResolve: (funnel, accepted) => {
         this.bufferMarkerRenderer.mark(funnel, accepted);
         if (accepted && funnel.ownerId === 'border') this._onOutputSatisfied(funnel);
@@ -2388,7 +2388,7 @@ export default class PlayerScene extends Phaser.Scene {
       pxCell: this.pxCell,
       pxGap: BOARD_GAP,
       onSpawn: (shape) => this.shapeRenderer.spawn(shape),
-      onRemove: (shape, pop) => this.shapeRenderer.remove(shape, pop),
+      onRemove: (shape, pop, cause) => this.shapeRenderer.remove(shape, pop, cause),
       onSinkResolve: (funnel, accepted) => {
         this.bufferMarkerRenderer.mark(funnel, accepted);
         if (accepted && funnel.ownerId === 'border') this._onOutputSatisfied(funnel);
