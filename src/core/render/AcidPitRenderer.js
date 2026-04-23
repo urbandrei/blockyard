@@ -281,7 +281,6 @@ function paintComponent(gfx, comp, labelByCell, hexOf, pxCell, pxGap) {
 
   // Bridges between adjacent same-label cells — flat rect, same colour.
   const bridgeW = step - fillInner;
-  const halfBridge = bridgeW / 2;
   for (const { r, c } of comp.cells) {
     if (has(r, c + 1)) {
       gfx.fillRect(c * step + fillM + fillInner, r * step + fillM, bridgeW, fillInner);
@@ -295,34 +294,11 @@ function paintComponent(gfx, comp, labelByCell, hexOf, pxCell, pxGap) {
     }
   }
 
-  // Half-bridges toward different-label neighbours — paint THIS component's
-  // colour across half the gap so the otherwise-exposed grid strip between
-  // the two components is covered. The other component's paintComponent
-  // pass paints its own half, meeting us at the shared cell boundary.
-  // Also fill each outside corner where two different-label neighbours
-  // meet at a diagonal (otherwise the cell corner leaks floor).
-  for (const { r, c } of comp.cells) {
-    const neighbours = [
-      { key: `${r},${c + 1}`, dr: 0, dc: 1 },
-      { key: `${r + 1},${c}`, dr: 1, dc: 0 },
-      { key: `${r},${c - 1}`, dr: 0, dc: -1 },
-      { key: `${r - 1},${c}`, dr: -1, dc: 0 },
-    ];
-    for (const n of neighbours) {
-      if (has(n.dr + r, n.dc + c)) continue;    // same-component — already handled
-      if (!labelByCell.has(n.key)) continue;    // floor, not acid
-      // Different-label acid neighbour. Paint this cell's half-bridge.
-      if (n.dc === 1) {
-        gfx.fillRect(c * step + fillM + fillInner, r * step + fillM, halfBridge, fillInner);
-      } else if (n.dc === -1) {
-        gfx.fillRect(c * step + fillM - halfBridge, r * step + fillM, halfBridge, fillInner);
-      } else if (n.dr === 1) {
-        gfx.fillRect(c * step + fillM, r * step + fillM + fillInner, fillInner, halfBridge);
-      } else if (n.dr === -1) {
-        gfx.fillRect(c * step + fillM, r * step + fillM - halfBridge, fillInner, halfBridge);
-      }
-    }
-  }
+  // Different-label acid neighbours are deliberately NOT bridged — the
+  // floor gap between them reads as a clean separator, same as between an
+  // acid pit and a non-acid floor cell. (Earlier half-bridge attempts only
+  // covered the central fillInner span and left messy partial brown at the
+  // rounded-corner shoulders + the 4-cell diagonal corner.)
 }
 
 
