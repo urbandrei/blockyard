@@ -632,22 +632,34 @@ export default class HomeScene extends Phaser.Scene {
 
   // Returns true when a deep link was handled (and the scene is already
   // fading to Player), so create() can bail before building home UI.
-  // Two URL params are supported:
-  //   ?play=<base64>  — self-contained share-string, works for any level
-  //                     (even unapproved). Matches ExportPanel's encoding.
-  //   ?level=<id>     — fetches a public level by server id.
+  // Three URL params are supported, resolved in this priority order:
+  //   ?s=<code>      — short code, looked up via the API to recover the
+  //                    full share-string, then decoded inline.
+  //   ?play=<base64> — self-contained share-string. Works for any level
+  //                    (even unapproved) without any server round trip.
+  //   ?level=<id>    — fetches a public level by server id.
   async _handleDeepLink() {
     let params = null;
     try { params = new URL(window.location.href).searchParams; }
     catch (e) { return false; }
+    const shortCode = params.get('s');
     const playB64 = params.get('play');
     const id = params.get('level');
-    if (!playB64 && !id) return false;
+    if (!shortCode && !playB64 && !id) return false;
 
     // Always strip the param — whether we succeed or not, a page refresh
     // shouldn't replay the deep link forever.
     try { window.history.replaceState({}, '', window.location.pathname); }
     catch (e) {}
+
+    if (shortCode) {
+      let resolved = null;
+      try { resolved = await platform.resolveShortCode(shortCode); } catch (e) {}
+      const body = resolved ? decodeInlineShareString(resolved) : null;
+      if (!body) return false;
+      fadeTo(this, 'Player', { levelData: body });
+      return true;
+    }
 
     if (playB64) {
       const body = decodeInlineShareString(playB64);

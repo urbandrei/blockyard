@@ -66,6 +66,12 @@ export default class PlayerScene extends Phaser.Scene {
     // CommunityScene passes a fully-formed level object so the player can
     // run levels that aren't in the catalog (locally-saved + imported).
     this._inlineLevel = (data && data.levelData) || null;
+    // When the caller wants a post-victory rating prompt (remote community
+    // levels), they pass `communityId` + `communityName` so we can stash
+    // a pending-rating record on the game registry for CommunityScene to
+    // pick up on return.
+    this._communityId   = (data && data.communityId)   || null;
+    this._communityName = (data && data.communityName) || null;
   }
 
   async create() {
@@ -2457,6 +2463,16 @@ export default class PlayerScene extends Phaser.Scene {
       markBeaten(this._sourceLevelOriginal.id);
     } else if (this.sourceLevel.id) {
       markBeaten(this.sourceLevel.id);
+    }
+    // Community-level victory: stash an id for CommunityScene to pick up
+    // and show its rating prompt when the user returns. Writing to the
+    // game registry survives scene.start so the data is still there
+    // after the level-select transition.
+    if (this._communityId) {
+      this.game.registry.set('pendingRating', {
+        id: this._communityId,
+        name: this._communityName,
+      });
     }
     // Hold for one cycle of animation so the last shape has a moment to
     // visibly land, then announce. Sim keeps running behind the banner.

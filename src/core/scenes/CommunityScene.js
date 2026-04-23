@@ -1,11 +1,18 @@
 import Phaser from 'phaser';
-import { listAll, applyFilter, getLikes, toggleLike } from '../community.js';
+import {
+  listAll, applyFilter, getLikes, toggleLike,
+  toggleHide, getHidden, getLocalIds,
+  deleteLevel as deleteLocalLevel,
+} from '../community.js';
+import { ConfirmModal } from '../ui/ConfirmModal.js';
+import { RateLevelModal } from '../ui/RateLevelModal.js';
 import { LevelCard } from '../ui/LevelCard.js';
 import { TextInputOverlay } from '../ui/TextInputOverlay.js';
 import { ImportModal } from '../ui/ImportModal.js';
 import { EditorModePicker } from '../ui/EditorModePicker.js';
 import { platform } from '../../platform/index.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
+import { copyText } from '../ui/clipboard.js';
 import { enableMenuBg } from '../ui/MenuBackground.js';
 import { compute920Box } from '../ui/ContentBox.js';
 import { BOARD_GAP, BLUEPRINT_BG, BLUEPRINT_STROKE, BLUEPRINT_DOT } from '../constants.js';
@@ -58,11 +65,27 @@ const PAGE_SIZE = 5;
 
 const DISCORD_URL = 'https://discord.gg/TODO';   // TODO: swap for the real invite once it exists
 
+// Every row is one of:
+//   { filter: '<key>', label } — sets this._filter
+//   { sort:   '<key>', label } — sets this._sort
+//   { divider: true }          — visual separator in the menu
 const FILTER_OPTIONS = [
-  { key: 'all',       label: 'All'              },
-  { key: 'liked',     label: 'Liked only'       },
-  { key: 'likesDesc', label: 'Sort: most liked' },
-  { key: 'likesAsc',  label: 'Sort: least liked'},
+  { filter: 'all',    label: 'All levels'       },
+  { filter: 'mine',   label: 'My levels'        },
+  { filter: 'others', label: "Others' levels"   },
+  { filter: 'liked',  label: 'Liked only'       },
+  { filter: 'hidden', label: 'Hidden only'      },
+  { divider: true },
+  { filter: 'r5',     label: 'Rated 5\u2605'    },
+  { filter: 'r4',     label: 'Rated 4\u2605+'   },
+  { filter: 'r3',     label: 'Rated 3\u2605+'   },
+  { filter: 'r2',     label: 'Rated 2\u2605+'   },
+  { filter: 'r1',     label: 'Rated 1\u2605+'   },
+  { divider: true },
+  { sort: 'recent',     label: 'Sort: recent'      },
+  { sort: 'likesDesc',  label: 'Sort: most liked'  },
+  { sort: 'likesAsc',   label: 'Sort: least liked' },
+  { sort: 'ratingDesc', label: 'Sort: top rated'   },
 ];
 
 export default class CommunityScene extends Phaser.Scene {
@@ -74,6 +97,8 @@ export default class CommunityScene extends Phaser.Scene {
 
     this._levels = [];
     this._likes = new Set();
+    this._hidden = new Set();
+    this._localIds = new Set();
     this._query = '';
     this._filter = 'all';
     this._sort = 'recent';
@@ -86,6 +111,14 @@ export default class CommunityScene extends Phaser.Scene {
 
     this._layoutAndRender();
     await this._refreshLevels();
+
+    // Post-play rating prompt — PlayerScene stashes a level id on the
+    // game registry when a community level is beaten. Consume once.
+    const pending = this.game.registry.get('pendingRating');
+    if (pending && pending.id) {
+      this.game.registry.set('pendingRating', null);
+      this._showRatingPrompt(pending);
+    }
 
     this._onResize = () => this._relayout();
     this.scale.on('resize', this._onResize);
@@ -313,41 +346,62 @@ export default class CommunityScene extends Phaser.Scene {
 
   _toggleFilterMenu(anchorX, anchorY) {
     if (this._filterMenu) { this._closeFilterMenu(); return; }
-    const w = 200, rowH = 36, pad = 6;
-    const h = pad * 2 + rowH * FILTER_OPTIONS.length;
+    const w = 220, rowH = 32, dividerH = 10, pad = 6;
+    const menuH = pad * 2 + FILTER_OPTIONS.reduce(
+      (sum, o) => sum + (o.divider ? dividerH : rowH), 0);
     const px = Math.max(8, Math.min(this.scale.width - w - 8, anchorX - w / 2));
-    const py = Math.max(8, Math.min(this.scale.height - h - 8, anchorY + 6));
+    const py = Math.max(8, Math.min(this.scale.height - menuH - 8, anchorY + 6));
     const shield = this.add.rectangle(this.scale.width / 2, this.scale.height / 2,
       this.scale.width, this.scale.height, 0x000000, 0).setDepth(8000).setInteractive();
     const panel = this.add.graphics().setDepth(8001);
     panel.fillStyle(0xffffff, 1);
     panel.lineStyle(2, 0x1a2332, 1);
-    panel.fillRoundedRect(px, py, w, h, 10);
-    panel.strokeRoundedRect(px, py, w, h, 10);
-    const items = FILTER_OPTIONS.map((o, i) => {
-      const cy = py + pad + rowH / 2 + i * rowH;
+    panel.fillRoundedRect(px, py, w, menuH, 10);
+    panel.strokeRoundedRect(px, py, w, menuH, 10);
+
+    // Walk the options array, drawing a row or a divider at each step.
+    // Dividers just advance the cursor and draw a thin gray line — they're
+    // not interactive, so they're tracked separately from `items`.
+    const items = [];
+    const dividers = [];
+    let cy = py + pad + rowH / 2;
+    for (const o of FILTER_OPTIONS) {
+      if (o.divider) {
+        const line = this.add.graphics().setDepth(8001);
+        line.lineStyle(1, 0xdbe3ee, 1);
+        const y = cy - rowH / 2 + dividerH / 2;
+        line.beginPath();
+        line.moveTo(px + pad + 4, y);
+        line.lineTo(px + w - pad - 4, y);
+        line.strokePath();
+        dividers.push(line);
+        cy += dividerH;
+        continue;
+      }
       const rect = this.add.rectangle(px + w / 2, cy, w - pad * 2, rowH - 2, 0xffffff, 1)
         .setStrokeStyle(1, 0x1a2332, 0.4)
         .setInteractive({ useHandCursor: true })
         .setDepth(8001);
-      const isActive = (o.key === this._filter) || (o.key === this._sort);
-      const text = this.add.text(px + w / 2, cy, (isActive ? '\u2713 ' : '') + o.label, {
+      const active = (o.filter && o.filter === this._filter)
+                  || (o.sort   && o.sort   === this._sort);
+      const text = this.add.text(px + w / 2, cy, (active ? '\u2713 ' : '') + o.label, {
         fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontStyle: 'bold',
         color: '#1a2332',
       }).setOrigin(0.5).setDepth(8001);
       rect.on('pointerover', () => rect.setFillStyle(0xeef3fb, 1));
       rect.on('pointerout',  () => rect.setFillStyle(0xffffff, 1));
       rect.on('pointerup', () => {
-        if (o.key === 'all' || o.key === 'liked') this._filter = o.key;
-        else this._sort = o.key;
+        if (o.filter) this._filter = o.filter;
+        if (o.sort)   this._sort   = o.sort;
         this._page = 0;
         this._closeFilterMenu();
         this._renderList();
       });
-      return { rect, text };
-    });
+      items.push({ rect, text });
+      cy += rowH;
+    }
     shield.on('pointerdown', () => this._closeFilterMenu());
-    this._filterMenu = { shield, panel, items };
+    this._filterMenu = { shield, panel, items, dividers };
   }
 
   _closeFilterMenu() {
@@ -355,6 +409,7 @@ export default class CommunityScene extends Phaser.Scene {
     this._filterMenu.shield.destroy();
     this._filterMenu.panel.destroy();
     for (const { rect, text } of this._filterMenu.items) { rect.destroy(); text.destroy(); }
+    for (const g of (this._filterMenu.dividers || [])) g.destroy();
     this._filterMenu = null;
   }
 
@@ -378,30 +433,83 @@ export default class CommunityScene extends Phaser.Scene {
   // the game.
   _shareLevel(id, name) {
     const url = `https://www.block-yard.com/?level=${encodeURIComponent(id)}`;
-    const done = (msg) => this._toast(msg || `Share link copied${name ? ` — ${name}` : ''}`);
-    // navigator.clipboard is async and can reject when the page isn't in a
-    // secure context or the user denies permission. Fall back to a legacy
-    // execCommand approach so the button still works on older iframes.
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(url).then(() => done(), () => this._fallbackCopy(url, done));
-    } else {
-      this._fallbackCopy(url, done);
-    }
+    const ok = `Share link copied${name ? ` — ${name}` : ''}`;
+    copyText(url).then(
+      () => this._toast(ok),
+      () => this._toast('Could not copy link'),
+    );
   }
 
-  _fallbackCopy(text, onDone) {
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      onDone();
-    } catch (e) {
-      onDone('Could not copy link');
+  // Post-play rating prompt. Opens RateLevelModal; on submit, fires
+  // platform.rateLevel and refreshes the list so the new average shows up
+  // on the card. Skip is a no-op.
+  _showRatingPrompt({ id, name }) {
+    if (this._rateModal) { this._rateModal.destroy(); this._rateModal = null; }
+    this._rateModal = new RateLevelModal(this, {
+      levelName: name,
+      onSubmit: async (stars) => {
+        this._rateModal = null;
+        try {
+          await platform.rateLevel(id, stars);
+          this._toast(`Thanks! Rated \u2605 ${stars}`);
+          await this._refreshLevels();
+          this._renderList();
+        } catch (e) {
+          this._toast('Could not save rating — try again later');
+        }
+      },
+      onSkip: () => { this._rateModal = null; },
+    });
+  }
+
+  // Local-only toggle. The hidden set is per-device so each player can
+  // curate their own feed without touching anyone else's view. We fire
+  // and forget the refresh — waiting on persistIndex isn't user-visible.
+  async _hideLevel(id, name) {
+    await toggleHide(id);
+    this._hidden = await getHidden();
+    this._toast(`Hid "${name || 'level'}" — show it again via filter \u2192 Hidden only`);
+    this._renderList();
+  }
+
+  // Confirm-before-destroy. For remote entries owned by this device we
+  // also call the API so the level disappears from the public feed; for
+  // local-only drafts there's nothing on the server to tell.
+  _confirmDelete(level) {
+    if (this._confirmModal) { this._confirmModal.destroy(); this._confirmModal = null; }
+    const isRemote = level.origin === 'remote';
+    const message = isRemote
+      ? 'This will remove the level from the community feed for everyone. This cannot be undone.'
+      : 'This will remove the level from your device. This cannot be undone.';
+    this._confirmModal = new ConfirmModal(this, {
+      title: 'DELETE LEVEL?',
+      message,
+      confirmLabel: 'DELETE',
+      cancelLabel:  'CANCEL',
+      destructive:  true,
+      onConfirm: async () => {
+        this._confirmModal = null;
+        await this._deleteLevel(level);
+      },
+      onCancel: () => { this._confirmModal = null; },
+    });
+  }
+
+  async _deleteLevel(level) {
+    const id = level.id;
+    const isRemote = level.origin === 'remote';
+    let remoteOk = true;
+    // Publish-owned remote copies need a server delete; best-effort so a
+    // cold API doesn't leave the local state stale when we already wiped
+    // the on-device index.
+    if (isRemote || this._localIds.has(id)) {
+      remoteOk = await platform.deleteRemoteLevel(id);
     }
+    // Always clear locally — if we authored this level here it's tracked
+    // in one of the local indexes; otherwise this is a safe no-op.
+    try { await deleteLocalLevel(id); } catch (e) {}
+    this._toast(remoteOk ? `Deleted "${level.name || 'level'}"` : 'Deleted locally — server delete failed');
+    await this._refreshLevels();
   }
 
   _toast(message) {
@@ -421,7 +529,9 @@ export default class CommunityScene extends Phaser.Scene {
 
   async _refreshLevels() {
     const local = await listAll();
-    this._likes = await getLikes();
+    this._likes    = await getLikes();
+    this._hidden   = await getHidden();
+    this._localIds = await getLocalIds();
 
     // Remote fetch. `platform.searchLevels` returns `{ offline: true }` on a
     // failed fetch so we can flip the banner without losing the local list.
@@ -473,7 +583,8 @@ export default class CommunityScene extends Phaser.Scene {
     if (this._scrollUpHandler)    { this.input.off('pointerup',    this._scrollUpHandler);    this._scrollUpHandler    = null; }
 
     const filtered = applyFilter(this._levels, {
-      query: this._query, filter: this._filter, sort: this._sort, likes: this._likes,
+      query: this._query, filter: this._filter, sort: this._sort,
+      likes: this._likes, hidden: this._hidden, localIds: this._localIds,
     });
     const endIdx = (this._page + 1) * PAGE_SIZE;
     const page = filtered.slice(0, endIdx);
@@ -526,6 +637,11 @@ export default class CommunityScene extends Phaser.Scene {
       const cy = stackY + CARD_H / 2;
       const editable = level.origin === 'local' || level.origin === 'imported';
       const isRemote = level.origin === 'remote';
+      // "Mine" = authored on this device (local/imported) OR published from
+      // this device (remote entry whose id lives in our local index).
+      const isMine    = editable || (isRemote && this._localIds.has(level.id));
+      const canDelete = isMine;
+      const canHide   = isRemote && !isMine;
       const card = new LevelCard(this, {
         x: cardX, y: cy, width: cardW, height: CARD_H,
         level,
@@ -538,8 +654,15 @@ export default class CommunityScene extends Phaser.Scene {
               // stranding the player on a broken scene.
               const res = await platform.fetchLevel(level.id);
               const body = res && res.level;
-              if (body) fadeTo(this, 'Player', { levelData: body });
-              else this._toast('Could not fetch level — try again later');
+              if (body) {
+                fadeTo(this, 'Player', {
+                  levelData: body,
+                  communityId: level.id,
+                  communityName: level.name,
+                });
+              } else {
+                this._toast('Could not fetch level — try again later');
+              }
             }
           : () => fadeTo(this, 'Player', { levelData: level }),
         onToggleLike: async () => {
@@ -559,6 +682,12 @@ export default class CommunityScene extends Phaser.Scene {
           : undefined,
         onShare: isRemote
           ? () => this._shareLevel(level.id, level.name)
+          : undefined,
+        onHide: canHide
+          ? () => this._hideLevel(level.id, level.name)
+          : undefined,
+        onDelete: canDelete
+          ? () => this._confirmDelete(level)
           : undefined,
       });
       for (const p of LevelCard.pieces(card)) this._scrollContainer.add(p);

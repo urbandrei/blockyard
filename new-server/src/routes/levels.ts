@@ -92,6 +92,26 @@ levelRoutes.get('/levels/:id', async (c) => {
 
 // ---- POST /levels (publish) ----
 
+// ---- DELETE /levels/:id (author-only) ----
+//
+// Authenticated by token — must match the submitted_by_token on the row.
+// Cascades to likes/ratings via the FK ON DELETE CASCADE declarations.
+// Short-links keyed by share_code are deliberately not touched here —
+// they're content-addressed, not level-addressed, and already-shared
+// deep links should keep resolving as plain `?play=` URLs.
+levelRoutes.delete('/levels/:id', requireToken(), async (c) => {
+  const { token } = c.get('auth');
+  const id = c.req.param('id')!;
+
+  const [row] = await db.select({ submittedByToken: schema.levels.submittedByToken })
+    .from(schema.levels).where(eq(schema.levels.id, id)).limit(1);
+  if (!row) return c.json({ error: 'not found' }, 404);
+  if (row.submittedByToken !== token) return c.json({ error: 'forbidden' }, 403);
+
+  await db.delete(schema.levels).where(eq(schema.levels.id, id));
+  return c.body(null, 204);
+});
+
 levelRoutes.post('/levels', requireToken(), async (c) => {
   const { token } = c.get('auth');
   const ip = clientIp(c.req.header('cf-connecting-ip'), c.req.header('x-forwarded-for'));

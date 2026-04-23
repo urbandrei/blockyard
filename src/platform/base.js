@@ -74,6 +74,16 @@ export function createBaseAdapter(name = 'base') {
     async searchLevels(_opts)  { return { levels: [], hasMore: false }; },
     async likeLevel(_id, _liked) { return false; },
     async fetchLevel(_id) { return null; },
+    // Author-only remote delete. Returns true on success, false on any
+    // failure (including ownership mismatch 403). Callers always run the
+    // local community.deleteLevel() too, independent of the remote result.
+    async deleteRemoteLevel(_id) { return false; },
+    async rateLevel(_id, _stars) { return null; },
+    // URL shortener: takes a base64 share-string and returns `{code}` or
+    // null if the backend is unreachable. Callers fall back to a direct
+    // `?play=<base64>` URL when null.
+    async shortenShareCode(_shareCode) { return null; },
+    async resolveShortCode(_code) { return null; },
 
     // External-link primitive. Adapters that can pop a new tab override this
     // (web/itch/newgrounds). Sandboxed platforms (YouTube Playables) return

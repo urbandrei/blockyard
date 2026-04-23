@@ -14,6 +14,7 @@ import { authRoutes } from './routes/auth.js';
 import { levelRoutes } from './routes/levels.js';
 import { likeRoutes } from './routes/likes.js';
 import { ratingRoutes } from './routes/ratings.js';
+import { shortsRoutes } from './routes/shorts.js';
 import { discordRoutes } from './moderation/interactions.js';
 
 const app = new Hono();
@@ -35,6 +36,7 @@ app.route('/', authRoutes);
 app.route('/', levelRoutes);
 app.route('/', likeRoutes);
 app.route('/', ratingRoutes);
+app.route('/', shortsRoutes);
 app.route('/', discordRoutes);
 
 app.onError((err, c) => {

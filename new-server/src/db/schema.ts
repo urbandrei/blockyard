@@ -63,3 +63,14 @@ export const ratings = pgTable('ratings', {
   byLevel:   index('ratings_by_level').on(t.levelId),
   starsRange: check('stars_1_to_5', sql`${t.stars} BETWEEN 1 AND 5`),
 }));
+
+// URL shortener. Maps an 8-char base64url id (first 8 chars of sha256 of
+// the share code) to the full share_code. Deterministic, so re-shortening
+// the same level is a no-op insert. Not tied to `levels` — arbitrary
+// share-strings (including unpublished / local-only levels) can be
+// shortened.
+export const shortLinks = pgTable('short_links', {
+  id:        text('id').primaryKey(),
+  shareCode: text('share_code').notNull().unique(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});

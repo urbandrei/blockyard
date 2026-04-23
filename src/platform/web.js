@@ -157,6 +157,66 @@ export default (function createWebAdapter() {
       }
     },
 
+    // Author-only remote delete. Returns true when the server 204's,
+    // false on any other outcome (404, 403, network error).
+    async deleteRemoteLevel(id) {
+      if (!API || !id) return false;
+      try {
+        await api(`/levels/${encodeURIComponent(id)}`, { method: 'DELETE', auth: true });
+        return true;
+      } catch (e) {
+        if (e && e.status === 404) return true;   // already gone is fine
+        console.warn('[web] deleteRemoteLevel failed', e);
+        return false;
+      }
+    },
+
+    async rateLevel(id, stars) {
+      if (!API || !id) return null;
+      try {
+        return await api(`/levels/${encodeURIComponent(id)}/rating`, {
+          method: 'POST',
+          auth: true,
+          body: JSON.stringify({ stars }),
+        });
+      } catch (e) {
+        console.warn('[web] rateLevel failed', e);
+        return null;
+      }
+    },
+
+    // URL shortener. Returns the short code (opaque string) for the given
+    // share-string, or null on any failure — callers fall back to the raw
+    // `?play=<base64>` URL so a cold API never breaks share buttons.
+    async shortenShareCode(shareCode) {
+      if (!API || !shareCode) return null;
+      try {
+        const res = await api('/shorts', {
+          method: 'POST',
+          auth: true,
+          body: JSON.stringify({ shareCode }),
+        });
+        return (res && res.code) || null;
+      } catch (e) {
+        console.warn('[web] shortenShareCode failed', e);
+        return null;
+      }
+    },
+
+    // Inverse of shortenShareCode: given a short code, return the full
+    // share-string (base64). Null on 404 or any network error.
+    async resolveShortCode(code) {
+      if (!API || !code) return null;
+      try {
+        const res = await api(`/shorts/${encodeURIComponent(code)}`);
+        return (res && res.shareCode) || null;
+      } catch (e) {
+        if (e && e.status === 404) return null;
+        console.warn('[web] resolveShortCode failed', e);
+        return null;
+      }
+    },
+
     canOpenExternal: true,
     openExternal(url) {
       try { window.open(url, '_blank', 'noopener,noreferrer'); return true; }

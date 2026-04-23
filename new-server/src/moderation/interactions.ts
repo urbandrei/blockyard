@@ -18,6 +18,7 @@ import { verifyKey, InteractionType, InteractionResponseType } from 'discord-int
 import { env } from '../env.js';
 import { db, schema } from '../db/client.js';
 import { buildSubmissionEmbed, buildCopyOnlyRow } from './embed.js';
+import { getOrCreateShortCode } from '../routes/shorts.js';
 
 export const discordRoutes = new Hono();
 
@@ -101,15 +102,26 @@ function openDenyModal(c: any, levelId: string) {
   });
 }
 
-// Build a self-contained deep-link URL — the share_code IS the level
-// payload (base64 of the minified JSON), so the recipient's client decodes
-// it inline without a server fetch. Works pre- and post-approval.
+// Build a short deep-link URL. Short code resolves via /shorts/:code back
+// to the full share_code; the client decodes and plays without waiting
+// on moderation. Falls back to the long `?play=<base64>` form if the
+// short-code insert fails for any reason, so mods always get a working
+// URL.
 async function socialLink(c: any, levelId: string) {
   const [row] = await db.select({ shareCode: schema.levels.shareCode, name: schema.levels.name })
     .from(schema.levels).where(eq(schema.levels.id, levelId)).limit(1);
   if (!row) return c.json(ephemeralText('level not found'));
 
-  const url = `${env.SHARE_BASE_URL.replace(/\/+$/, '')}/?play=${encodeURIComponent(row.shareCode)}`;
+  const base = env.SHARE_BASE_URL.replace(/\/+$/, '');
+  let url: string;
+  try {
+    const code = await getOrCreateShortCode(row.shareCode);
+    url = `${base}/?s=${code}`;
+  } catch (err) {
+    console.error('[discord] short-code allocation failed; falling back to long URL', err);
+    url = `${base}/?play=${encodeURIComponent(row.shareCode)}`;
+  }
+
   return c.json({
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
     data: {

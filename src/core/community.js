@@ -17,6 +17,7 @@ import { genId } from './model/level.js';
 const KEY_INDEX_LOCAL    = 'community.index.local';
 const KEY_INDEX_IMPORTED = 'community.index.imported';
 const KEY_LIKES          = 'community.likes';
+const KEY_HIDDEN         = 'community.hidden';
 const KEY_AUTHOR         = 'community.authorHandle';
 const LEVEL_KEY = (id) => `community.level.${id}`;
 
@@ -24,16 +25,18 @@ let cache = null;
 
 async function loadIndex() {
   if (cache) return cache;
-  const [local, imported, likes, author] = await Promise.all([
+  const [local, imported, likes, hidden, author] = await Promise.all([
     platform.loadData(KEY_INDEX_LOCAL),
     platform.loadData(KEY_INDEX_IMPORTED),
     platform.loadData(KEY_LIKES),
+    platform.loadData(KEY_HIDDEN),
     platform.loadData(KEY_AUTHOR),
   ]);
   cache = {
     local:    Array.isArray(local) ? local.slice() : [],
     imported: Array.isArray(imported) ? imported.slice() : [],
     likes:    new Set(Array.isArray(likes) ? likes : []),
+    hidden:   new Set(Array.isArray(hidden) ? hidden : []),
     author:   typeof author === 'string' ? author : null,
   };
   return cache;
@@ -45,6 +48,7 @@ async function persistIndex() {
     platform.saveData(KEY_INDEX_LOCAL,    cache.local),
     platform.saveData(KEY_INDEX_IMPORTED, cache.imported),
     platform.saveData(KEY_LIKES,          [...cache.likes]),
+    platform.saveData(KEY_HIDDEN,         [...cache.hidden]),
   ]);
 }
 
@@ -153,20 +157,95 @@ export async function toggleLike(id) {
   return idx.likes.has(id);
 }
 
-// Pure list filter / sort used by the search UI. Until backend, "likes" on
-// a level = 1 if the local user liked it, else 0 — sort stable enough to
-// preview the UX that ships when the real counter goes live.
-export function applyFilter(levels, { query = '', filter = 'all', sort = 'recent', likes }) {
+// ---- hide / unhide (local-only, per-device) ----
+// Hidden levels are excluded from every feed except the "Hidden only"
+// filter. Purely a client-side preference — the server doesn't know.
+export async function isHidden(id) {
+  const idx = await loadIndex();
+  return idx.hidden.has(id);
+}
+
+export async function toggleHide(id) {
+  const idx = await loadIndex();
+  if (idx.hidden.has(id)) idx.hidden.delete(id); else idx.hidden.add(id);
+  await persistIndex();
+  return idx.hidden.has(id);
+}
+
+export async function getHidden() {
+  const idx = await loadIndex();
+  return idx.hidden;
+}
+
+// Bare snapshot of the set of level ids this device has published locally
+// — used by applyFilter to distinguish "mine" vs "others" on the remote
+// feed, since remote entries carry only a display author string (not a
+// strong identity).
+export async function getLocalIds() {
+  const idx = await loadIndex();
+  return new Set([...idx.local, ...idx.imported]);
+}
+
+// Pure list filter / sort used by the search UI.
+//   filter: 'all' | 'liked' | 'hidden' | 'mine' | 'others' | 'r1'..'r5'
+//     - 'hidden' flips the default "exclude hidden" to "only hidden".
+//     - 'mine' / 'others' split the feed on ownership (remote entries in
+//       localIds = mine; everything else = others).
+//     - 'rN' keeps levels with ratingAvg rounded up >= N. Levels with no
+//       rating yet are excluded from rN filters so they don't dominate
+//       the list when nobody has rated them.
+//   sort: 'recent' | 'likesDesc' | 'likesAsc' | 'ratingDesc'
+export function applyFilter(levels, {
+  query = '', filter = 'all', sort = 'recent',
+  likes, hidden, localIds,
+}) {
+  const hiddenSet  = hidden   instanceof Set ? hidden   : new Set();
+  const localSet   = localIds instanceof Set ? localIds : new Set();
   let out = levels.slice();
+
+  // Hide-aware prefilter: hidden items drop out of every feed except the
+  // explicit "Hidden only" view.
+  if (filter === 'hidden') out = out.filter((l) => hiddenSet.has(l.id));
+  else                     out = out.filter((l) => !hiddenSet.has(l.id));
+
   const q = (query || '').trim().toLowerCase();
   if (q) out = out.filter((l) => (l.name || '').toLowerCase().includes(q));
+
   if (filter === 'liked') out = out.filter((l) => likes.has(l.id));
+
+  if (filter === 'mine') {
+    out = out.filter((l) =>
+      l.origin === 'local' || l.origin === 'imported' || localSet.has(l.id));
+  } else if (filter === 'others') {
+    out = out.filter((l) => l.origin === 'remote' && !localSet.has(l.id));
+  }
+
+  const ratingMatch = /^r([1-5])$/.exec(filter);
+  if (ratingMatch) {
+    const threshold = parseInt(ratingMatch[1], 10);
+    out = out.filter((l) => {
+      const count = Number(l.ratingCount) || 0;
+      if (count <= 0) return false;
+      const avg = Number(l.ratingAvg) || 0;
+      return Math.ceil(avg) >= threshold;
+    });
+  }
+
   switch (sort) {
     case 'likesAsc':
       out.sort((a, b) => (likes.has(a.id) ? 1 : 0) - (likes.has(b.id) ? 1 : 0));
       break;
     case 'likesDesc':
       out.sort((a, b) => (likes.has(b.id) ? 1 : 0) - (likes.has(a.id) ? 1 : 0));
+      break;
+    case 'ratingDesc':
+      // Unrated levels slide to the bottom so rated ones get the top slots.
+      out.sort((a, b) => {
+        const aRated = (Number(a.ratingCount) || 0) > 0 ? 1 : 0;
+        const bRated = (Number(b.ratingCount) || 0) > 0 ? 1 : 0;
+        if (aRated !== bRated) return bRated - aRated;
+        return (Number(b.ratingAvg) || 0) - (Number(a.ratingAvg) || 0);
+      });
       break;
     case 'recent':
     default:

@@ -7,6 +7,8 @@ import { TextInputOverlay } from './TextInputOverlay.js';
 import { saveLocal, getAuthorHandle, setStatus, setAuthorHandle } from '../community.js';
 import { AuthorPrompt } from './AuthorPrompt.js';
 import { platform } from '../../platform/index.js';
+import { copyText } from './clipboard.js';
+import { generateShareImage } from './sharePreview.js';
 
 const SHIELD_DEPTH = 9000;
 const PANEL_DEPTH  = 9001;
@@ -29,10 +31,30 @@ const SECONDARY_BTN_W = 280;
 const SECONDARY_BTN_H = 34;
 const DIVIDER_COLOR   = 0xdbe3ee;
 
-// Base URL for shareable level links. Hardcoded to the Render static site
-// so a link copied from any context (itch iframe, localhost dev) points at
-// a reliable origin — matches CommunityScene._shareLevel.
-const SHARE_BASE_URL = 'https://www.block-yard.com';
+// Share URL bases per host. When running inside itch we want the copied
+// link to be the itch game page (itch forwards query params into the
+// embedded iframe, so `?s=<code>` reaches the game). Everywhere else we
+// link back to the Render static site.
+const BLOCK_YARD_SHARE_URL = 'https://www.block-yard.com';
+const ITCH_SHARE_URL       = 'https://urbandrei.itch.io/block-yard';
+
+function shareBaseForCurrentOrigin() {
+  try {
+    const host = (window.location && window.location.hostname) || '';
+    if (/\.itch\.(zone|io)$/i.test(host)) return ITCH_SHARE_URL;
+  } catch (e) {}
+  return BLOCK_YARD_SHARE_URL;
+}
+
+// Append `?s=<code>` (or `?play=<b64>`) to a share base, handling both
+// bare-host URLs (https://www.block-yard.com) and deeper paths that itch
+// uses (https://user.itch.io/game). For deep paths we need `?` or `&`
+// depending on existing query string — but in practice our bases don't
+// carry queries, so a plain `?` is always correct.
+function withShareParam(base, paramName, value) {
+  const sep = base.includes('?') ? '&' : '?';
+  return `${base}${sep}${paramName}=${encodeURIComponent(value)}`;
+}
 
 export class ExportPanel {
   /**
@@ -149,29 +171,47 @@ export class ExportPanel {
       this._actionButton(actionsStartX + (ACTION_BTN_W + ACTION_GAP) * 2 + ACTION_BTN_W / 2, actionRowY, ACTION_BTN_W, ACTION_BTN_H, 'PUBLISH',       () => this._publish()),
     ];
 
-    // --- secondary row: EDIT MORE (if applicable) + COPY SHARE LINK ---
+    // --- secondary row: EDIT MORE (optional) + COPY LINK + SHARE ---
+    // Button count can be 2 or 3; width shrinks so everything fits in the
+    // same row without spilling past the panel's content margin.
     const secondaryRowY = actionRowY + ACTION_BTN_H + 16;
-    const secondaryPair = [];
+    const secondaryItems = [];
     if (this.opts.onEditMore) {
-      secondaryPair.push({
+      secondaryItems.push({
+        key: 'editMore',
         label: '\u2190 EDIT MORE',
         onTap: () => { const cb = this.opts.onEditMore; this._close(); cb(); },
       });
     }
-    secondaryPair.push({
-      label: 'COPY SHARE LINK',
+    secondaryItems.push({
+      key: 'copyLink',
+      label: 'COPY LINK',
       onTap: () => this._copyShareLink(),
-      shareLink: true,
     });
-    const pairW = secondaryPair.length === 2 ? SECONDARY_BTN_W * 0.72 : SECONDARY_BTN_W;
+    // Only show native-share when the browser actually supports it —
+    // desktop Chrome on Windows, for example, still often lacks the API.
+    // Falls back to the copy-link button which always works.
+    if (canNativeShare()) {
+      secondaryItems.push({
+        key: 'share',
+        label: 'SHARE\u2026',
+        onTap: () => this._nativeShare(),
+      });
+    }
     const pairGap = 12;
-    const pairTotalW = pairW * secondaryPair.length + pairGap * (secondaryPair.length - 1);
+    const innerW = panelW - PANEL_PAD * 2;
+    const pairW = Math.min(
+      SECONDARY_BTN_W,
+      (innerW - pairGap * (secondaryItems.length - 1)) / secondaryItems.length
+    );
+    const pairTotalW = pairW * secondaryItems.length + pairGap * (secondaryItems.length - 1);
     const pairStartX = px + (panelW - pairTotalW) / 2;
-    secondaryPair.forEach((b, i) => {
+    secondaryItems.forEach((b, i) => {
       const cx = pairStartX + pairW / 2 + i * (pairW + pairGap);
       const btn = this._secondaryButton(cx, secondaryRowY, pairW, SECONDARY_BTN_H, b.label, b.onTap);
-      if (b.shareLink) this._shareLinkBtn = btn;
-      else             this._editMoreBtn  = btn;
+      if (b.key === 'copyLink') this._shareLinkBtn  = btn;
+      if (b.key === 'editMore') this._editMoreBtn   = btn;
+      if (b.key === 'share')    this._nativeShareBtn = btn;
     });
 
     // --- status line at the bottom ---
@@ -377,61 +417,92 @@ export class ExportPanel {
   // level regardless of save/publish state — the share-string IS the level
   // payload, so the recipient's client decodes it inline without needing
   // to hit the server. That means pre-approval levels can be shared.
-  _copyShareLink() {
+  async _copyShareLink() {
     if (!this._boardSizeOk()) return;
+    this._setStatus('Preparing share link\u2026');
     // Strip the display-only line breaks we added in _encodeShareString so
-    // the URL param is a single contiguous base64 blob.
+    // the share code is a single contiguous base64 blob.
     const raw = (this._shareString || this._encodeShareString(this.level)).replace(/\s+/g, '');
-    const url = `${SHARE_BASE_URL}/?play=${encodeURIComponent(raw)}`;
-    const done = (msg) => this._setStatus(msg);
-    const successMsg = 'Share link copied.';
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
-        navigator.clipboard.writeText(url).then(
-          () => done(successMsg),
-          () => this._fallbackCopyString(url, () => done(successMsg)),
-        );
-      } else {
-        this._fallbackCopyString(url, () => done(successMsg));
-      }
-    } catch (e) {
-      this._setStatus('Copy failed: ' + e.message);
-    }
-  }
+    const base = shareBaseForCurrentOrigin();
 
-  _fallbackCopyString(text, onDone) {
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.left = '-9999px';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      onDone();
-    } catch (e) {
-      this._setStatus('Could not copy link.');
-    }
+    // Try to shorten via the backend. If the API is down / slow / offline,
+    // fall back to the long `?play=<b64>` URL so the button always works.
+    let code = null;
+    try { code = await platform.shortenShareCode(raw); } catch (e) {}
+    const url = code
+      ? withShareParam(base, 's', code)
+      : withShareParam(base, 'play', raw);
+
+    copyText(url).then(
+      () => this._setStatus(code ? 'Share link copied.' : 'Share link copied (long form).'),
+      (e) => this._setStatus('Copy failed: ' + (e && e.message ? e.message : 'unknown error')),
+    );
   }
 
   _copyShare() {
+    copyText(this._shareString).then(
+      () => this._setStatus('Copied share string to clipboard'),
+      (e) => this._setStatus('Copy failed: ' + (e && e.message ? e.message : 'unknown error')),
+    );
+  }
+
+  // Native share via navigator.share. Produces a 1080x1920 PNG preview
+  // of the level, shortens the share URL when possible, and hands the
+  // bundle to the browser's platform share sheet. Falls back to plain
+  // clipboard copy of the URL when the browser can't share files.
+  async _nativeShare() {
+    if (!this._boardSizeOk()) return;
+    this._setStatus('Preparing preview\u2026');
+    const raw = (this._shareString || this._encodeShareString(this.level)).replace(/\s+/g, '');
+    const base = shareBaseForCurrentOrigin();
+
+    let code = null;
+    try { code = await platform.shortenShareCode(raw); } catch (e) {}
+    const url = code
+      ? withShareParam(base, 's', code)
+      : withShareParam(base, 'play', raw);
+
+    // Build the PNG in parallel with whatever else is running.
+    let blob = null;
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(this._shareString);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = this._shareString;
-        ta.style.position = 'fixed';
-        ta.style.left = '-9999px';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      }
-      this._setStatus('Copied share string to clipboard');
+      blob = await generateShareImage(this.level, { url: base.replace(/^https?:\/\//, '') });
     } catch (e) {
-      this._setStatus('Copy failed: ' + e.message);
+      console.warn('[share] preview generation failed', e);
+    }
+
+    const name = this.level.name || 'Blockyard level';
+    const text = `Check out "${name}" on Blockyard — can you solve it?`;
+    const filename = safeFilename(name) + '.png';
+
+    // Prefer sharing with the image when the browser supports it; fall
+    // back to URL-only share; fall back to copying the URL.
+    try {
+      if (blob && navigator.canShare) {
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ title: 'Blockyard', text, url, files: [file] });
+          this._setStatus('Shared.');
+          return;
+        }
+      }
+      if (navigator.share) {
+        await navigator.share({ title: 'Blockyard', text, url });
+        this._setStatus('Shared.');
+        return;
+      }
+    } catch (e) {
+      // AbortError fires when the user dismisses the share sheet — not an
+      // error we want to alarm on.
+      if (e && e.name === 'AbortError') { this._setStatus(''); return; }
+      console.warn('[share] navigator.share failed', e);
+    }
+
+    // Last-resort fallback — copy the URL so the user can paste it.
+    try {
+      await copyText(url);
+      this._setStatus('Sharing not available \u2014 URL copied instead.');
+    } catch (e) {
+      this._setStatus('Could not share or copy — ' + (e && e.message || 'unknown error'));
     }
   }
 
@@ -518,7 +589,7 @@ export class ExportPanel {
     for (const d of (this._fieldDisplays || [])) { if (d) d.destroy(); }
     for (const g of (this._dividers || [])) { if (g) g.destroy(); }
     const buttons = [
-      this.copyBtn, this._closeButton, this._editMoreBtn, this._shareLinkBtn,
+      this.copyBtn, this._closeButton, this._editMoreBtn, this._shareLinkBtn, this._nativeShareBtn,
       ...(this._actions || []),
       ...(this._fieldEditBtns || []),
     ];
@@ -526,6 +597,19 @@ export class ExportPanel {
       if (b) { b.rect.destroy(); b.text.destroy(); }
     }
   }
+}
+
+// Detect at build time whether the browser can run the share flow at all.
+// `canShare` with files is the picky one; plain `share` is more widely
+// supported but falls back to text + url only. We show the button as
+// long as at least one path exists.
+function canNativeShare() {
+  if (typeof navigator === 'undefined' || !navigator) return false;
+  return typeof navigator.share === 'function';
+}
+
+function safeFilename(name) {
+  return String(name || 'level').toLowerCase().replace(/[^a-z0-9-_]+/gi, '_').slice(0, 40);
 }
 
 function truncate(s, n) {
