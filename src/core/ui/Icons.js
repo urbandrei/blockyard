@@ -159,6 +159,43 @@ export function drawCircleArrow(gfx, cx, cy, size, color = 0xffffff) {
   gfx.fillPath();
 }
 
+// Canonical web-share icon: three nodes (top-right, middle-left,
+// bottom-right) connected by two lines from the middle-left to each of
+// the right-side nodes. Matches the Material/Android share glyph.
+export function drawShareNet(gfx, cx, cy, size, color = 0xffffff) {
+  const nodeR = Math.max(2, Math.round(size * 0.14));
+  const line  = Math.max(2, Math.round(size * 0.09));
+  const reach = size * 0.34;
+  const top    = { x: cx + reach, y: cy - reach };
+  const middle = { x: cx - reach, y: cy };
+  const bottom = { x: cx + reach, y: cy + reach };
+
+  gfx.lineStyle(line, color, 1);
+  gfx.beginPath();
+  gfx.moveTo(middle.x, middle.y);
+  gfx.lineTo(top.x, top.y);
+  gfx.strokePath();
+  gfx.beginPath();
+  gfx.moveTo(middle.x, middle.y);
+  gfx.lineTo(bottom.x, bottom.y);
+  gfx.strokePath();
+
+  gfx.fillStyle(color, 1);
+  for (const p of [top, middle, bottom]) {
+    gfx.fillCircle(p.x, p.y, nodeR);
+  }
+}
+
+// Three vertical dots — the standard "more actions" overflow glyph.
+export function drawKebab(gfx, cx, cy, size, color = 0xffffff) {
+  const r = Math.max(2, Math.round(size * 0.12));
+  const spacing = size * 0.28;
+  gfx.fillStyle(color, 1);
+  gfx.fillCircle(cx, cy - spacing, r);
+  gfx.fillCircle(cx, cy,            r);
+  gfx.fillCircle(cx, cy + spacing, r);
+}
+
 // Sideways triangle for PLAY. Points right. Taller than wide so the glyph
 // reads as a slim classic play icon rather than a chunky equilateral.
 export function drawPlayTriangle(gfx, cx, cy, size, color = 0xffffff) {

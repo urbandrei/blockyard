@@ -1,20 +1,20 @@
-// One row in the Community search list. Renders the level's name, author,
-// rating (for remote levels), status chip, and a right-aligned button
-// stack that's built conditionally from whichever handlers the caller
-// wires:
+// One row in the Community search list. Layout, left→right:
 //
-//   onPlay        — always when level.status !== 'unfinished'
-//   onEdit        — for drafts the player can still modify (local/imported)
-//   onDelete      — for levels the player owns (local/imported/remote-mine)
-//   onHide        — for remote levels authored by someone else
-//   onToggleLike  — remote levels
-//   onShare       — remote levels
+//   [name / author]  ............  [stars] [LIKE] [SHARE] [PLAY] [⋮ MORE]
+//   [status chip]
 //
-// Status colors track the level's lifecycle:
-//   private  → grey   (only on this device)
-//   pending  → orange (submitted, awaiting moderator review)
-//   public   → green  (approved)
-//   imported → blue   (loaded from JSON; not authored here)
+// The right-side stack is built right→left so optional elements just fall
+// out of the layout when absent:
+//
+//   MORE     ⋮ — present when opts.moreItems has entries; caller builds
+//                the items list, LevelCard fires opts.onMore(worldX, worldY)
+//                so the scene can open a dropdown at the right spot.
+//   PLAY     the big blue pill; always visible for playable levels.
+//   SHARE    3-node web-share glyph; always visible for remote levels.
+//   LIKE     heart circle; fires opts.onToggleLike.
+//   STARS    display-only, reflects ratingAvg/ratingCount on the level.
+
+import { drawShareNet, drawKebab } from './Icons.js';
 
 const STATUS_PALETTE = {
   unfinished: { fill: 0xe0a800, label: 'unfinished' },
@@ -24,37 +24,42 @@ const STATUS_PALETTE = {
   imported:   { fill: 0x3b66b8, label: 'imported'   },
 };
 
-// Common dimensions — tuning these rebalances the whole right-side stack.
-const BTN_H        = 36;
-const BTN_GAP      = 8;
-const CIRCLE_R     = 16;
-const EDGE_PAD     = 16;
-const PLAY_W       = 80;
-const MEDIUM_W     = 70;
+const BTN_H     = 36;
+const BTN_GAP   = 8;
+const CIRCLE_R  = 16;
+const EDGE_PAD  = 16;
+const PLAY_W    = 80;
+const MORE_W    = 28;
+const STAR_SIZE = 18;
+const STAR_GAP  = 2;
+const STAR_ACTIVE = '#f5b400';
+const STAR_IDLE   = '#42506a';
+const STAR_FILLED = '\u2605';
+const STAR_EMPTY  = '\u2606';
 
 export class LevelCard {
   /**
    * @param {Phaser.Scene} scene
    * @param {object} opts
-   * @param {number} opts.x
-   * @param {number} opts.y
-   * @param {number} opts.width
-   * @param {number} opts.height
+   * @param {number} opts.x / opts.y              center of the card
+   * @param {number} opts.width / opts.height
    * @param {object} opts.level
    * @param {boolean} opts.liked
    * @param {() => void} opts.onPlay
    * @param {() => void} [opts.onToggleLike]
-   * @param {() => void} [opts.onEdit]
-   * @param {() => void} [opts.onDelete]
-   * @param {() => void} [opts.onHide]
-   * @param {() => void} [opts.onShare]
+   * @param {() => void} [opts.onNativeShare]     three-node share button
+   * @param {Array<{label:string,onTap:()=>void,destructive?:boolean}>} [opts.moreItems]
+   *        Filtered, in-order list of actions to put in the ⋮ dropdown.
+   * @param {(anchorX:number, anchorY:number) => void} [opts.onMore]
+   *        Fired when the ⋮ is tapped. Scene renders the dropdown.
    */
   constructor(scene, opts) {
     this.scene = scene;
     this.opts = opts;
     this._liked = !!opts.liked;
-    this._pillButtons = [];   // text-pill buttons tracked for destroy()
-    this._circles = [];       // small circle buttons tracked for destroy()
+    this._pillButtons = [];
+    this._circles = [];
+    this._stars = [];
     this._build();
   }
 
@@ -66,20 +71,14 @@ export class LevelCard {
     this.bg = this.scene.add.rectangle(x, y, width, height, 0x223047, 1)
       .setStrokeStyle(2, 0x3a5a88, 1);
 
-    // Name (top-left).
     this.name = this.scene.add.text(sx + EDGE_PAD, sy + 12, level.name || 'untitled', {
       fontFamily: 'system-ui, sans-serif', fontSize: '18px', fontStyle: 'bold',
       color: '#e6edf5',
     }).setOrigin(0, 0);
 
-    // Author + rating on a single "meta" line. For remote levels we
-    // append ★ avg (count) inline so the card stays compact; local-only
-    // levels have no rating and just show the author.
     const authorStr = level.author ? `by ${level.author}` : 'anonymous';
-    const metaStr = this._buildMetaLine(level, authorStr);
-    this.meta = this.scene.add.text(sx + EDGE_PAD, sy + 38, metaStr, {
-      fontFamily: 'system-ui, sans-serif', fontSize: '12px',
-      color: '#9aa6b2',
+    this.meta = this.scene.add.text(sx + EDGE_PAD, sy + 38, authorStr, {
+      fontFamily: 'system-ui, sans-serif', fontSize: '12px', color: '#9aa6b2',
     }).setOrigin(0, 0);
 
     // Status chip (bottom-left).
@@ -94,14 +93,21 @@ export class LevelCard {
       color: '#ffffff',
     }).setOrigin(0.5);
 
-    // ---- right-aligned button stack ----
-    //
-    // Right-to-left cursor — every button reserves its width + a gap and
-    // moves the cursor left. Unused slots just don't advance.
+    // ---- right-aligned button stack (right → left cursor) ----
     const rowY = y;
     const playable = level.status !== 'unfinished';
+    const isRemote = level.origin === 'remote';
+    const moreItems = Array.isArray(this.opts.moreItems) ? this.opts.moreItems : [];
     let cursor = sx + width - EDGE_PAD;
 
+    // ⋮ MORE (rightmost when present)
+    if (moreItems.length > 0 && this.opts.onMore) {
+      const cx = cursor - MORE_W / 2;
+      this._addMoreButton(cx, rowY);
+      cursor -= MORE_W + BTN_GAP;
+    }
+
+    // PLAY
     if (playable) {
       const cx = cursor - PLAY_W / 2;
       this._addPill(cx, rowY, PLAY_W, BTN_H, 'PLAY',
@@ -111,80 +117,31 @@ export class LevelCard {
       cursor -= PLAY_W + BTN_GAP;
     }
 
-    if (this.opts.onEdit) {
-      const cx = cursor - MEDIUM_W / 2;
-      this._addPill(cx, rowY, MEDIUM_W, BTN_H, 'EDIT',
-        0x2a3b55, 0x3a4d6f, '#e6edf5', '12px',
-        () => this.opts.onEdit());
-      cursor -= MEDIUM_W + BTN_GAP;
+    // SHARE (native) — three-node glyph
+    if (this.opts.onNativeShare) {
+      const cx = cursor - CIRCLE_R;
+      this._addShareCircle(cx, rowY);
+      cursor -= CIRCLE_R * 2 + 6;
     }
 
-    if (this.opts.onDelete) {
-      const cx = cursor - MEDIUM_W / 2;
-      this._addPill(cx, rowY, MEDIUM_W, BTN_H, 'DELETE',
-        0xd94c4c, 0xe46060, '#ffffff', '12px',
-        () => this.opts.onDelete());
-      cursor -= MEDIUM_W + BTN_GAP;
-    }
-
-    if (this.opts.onHide) {
-      const cx = cursor - MEDIUM_W / 2;
-      this._addPill(cx, rowY, MEDIUM_W, BTN_H, 'HIDE',
-        0x2a3b55, 0x3a4d6f, '#e6edf5', '12px',
-        () => this.opts.onHide());
-      cursor -= MEDIUM_W + BTN_GAP;
-    }
-
-    // LIKE + SHARE are small circle buttons — only for remote levels.
+    // LIKE
     if (this.opts.onToggleLike) {
       const cx = cursor - CIRCLE_R;
-      this.likeBg = this.scene.add.circle(cx, rowY, CIRCLE_R,
-        this._liked ? 0xd94c4c : 0x2a3b55, 1)
-        .setStrokeStyle(2, 0x1a2332, 1)
-        .setInteractive({ useHandCursor: true });
-      this.likeGlyph = this.scene.add.text(cx, rowY, '\u2665', {
-        fontFamily: 'system-ui, sans-serif', fontSize: '18px',
-        color: this._liked ? '#ffffff' : '#9aa6b2',
-      }).setOrigin(0.5);
-      this.likeBg.on('pointerup', async () => {
-        const next = await this.opts.onToggleLike();
-        this._setLiked(!!next);
-      });
-      this._circles.push(this.likeBg, this.likeGlyph);
+      this._addLikeCircle(cx, rowY);
       cursor -= CIRCLE_R * 2 + 6;
     }
 
-    if (this.opts.onShare) {
-      const cx = cursor - CIRCLE_R;
-      this.shareBg = this.scene.add.circle(cx, rowY, CIRCLE_R, 0x2a3b55, 1)
-        .setStrokeStyle(2, 0x1a2332, 1)
-        .setInteractive({ useHandCursor: true });
-      this.shareGlyph = this.scene.add.text(cx, rowY, '\u2197', {
-        fontFamily: 'system-ui, sans-serif', fontSize: '18px', fontStyle: 'bold',
-        color: '#e6edf5',
-      }).setOrigin(0.5);
-      this.shareBg.on('pointerover', () => this.shareBg.setFillStyle(0x3a4d6f, 1));
-      this.shareBg.on('pointerout',  () => this.shareBg.setFillStyle(0x2a3b55, 1));
-      this.shareBg.on('pointerup', () => this.opts.onShare());
-      this._circles.push(this.shareBg, this.shareGlyph);
-      cursor -= CIRCLE_R * 2 + 6;
-    }
-  }
-
-  _buildMetaLine(level, authorStr) {
-    const isRemote = level.origin === 'remote';
-    const count = Number(level.ratingCount) || 0;
-    const avg   = Number(level.ratingAvg)   || 0;
-    if (isRemote && count > 0) {
-      return `${authorStr}   \u2605 ${avg.toFixed(1)} (${count})`;
-    }
+    // Rating stars (display-only) — sit just left of LIKE.
     if (isRemote) {
-      return `${authorStr}   \u2606 not rated yet`;
+      const widthStars = STAR_SIZE * 5 + STAR_GAP * 4;
+      const cursorRightEdge = cursor;
+      const startX = cursorRightEdge - widthStars + STAR_SIZE / 2;
+      this._addRatingStars(startX, rowY, level);
+      cursor = cursorRightEdge - widthStars - 8;
     }
-    return authorStr;
   }
 
-  _addPill(cx, cy, w, h, label, fill, hoverFill, textColor, fontSize, onTap, opts = {}) {
+  _addPill(cx, cy, w, h, label, fill, hoverFill, textColor, fontSize, onTap, meta = {}) {
     const rect = this.scene.add.rectangle(cx, cy, w, h, fill, 1)
       .setStrokeStyle(2, 0x1a2332, 1)
       .setInteractive({ useHandCursor: true });
@@ -196,9 +153,85 @@ export class LevelCard {
     rect.on('pointerout',  () => rect.setFillStyle(fill, 1));
     rect.on('pointerup', () => onTap && onTap());
     this._pillButtons.push({ rect, text });
-    if (opts.asPlay) {
-      this.playBg = rect;
-      this.playText = text;
+    if (meta.asPlay) { this.playBg = rect; this.playText = text; }
+    return { rect, text };
+  }
+
+  _addLikeCircle(cx, cy) {
+    const bg = this.scene.add.circle(cx, cy, CIRCLE_R, this._liked ? 0xd94c4c : 0x2a3b55, 1)
+      .setStrokeStyle(2, 0x1a2332, 1)
+      .setInteractive({ useHandCursor: true });
+    const glyph = this.scene.add.text(cx, cy, '\u2665', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '18px',
+      color: this._liked ? '#ffffff' : '#9aa6b2',
+    }).setOrigin(0.5);
+    bg.on('pointerup', async () => {
+      const next = await this.opts.onToggleLike();
+      this._setLiked(!!next);
+    });
+    this.likeBg = bg;
+    this.likeGlyph = glyph;
+    this._circles.push(bg, glyph);
+  }
+
+  // Native share — circle with the three-node web-share glyph drawn via
+  // Phaser Graphics (not a text glyph, since emoji share variants render
+  // inconsistently across platforms).
+  _addShareCircle(cx, cy) {
+    const bg = this.scene.add.circle(cx, cy, CIRCLE_R, 0x2a3b55, 1)
+      .setStrokeStyle(2, 0x1a2332, 1)
+      .setInteractive({ useHandCursor: true });
+    const gfx = this.scene.add.graphics();
+    drawShareNet(gfx, cx, cy, CIRCLE_R * 1.3, 0xe6edf5);
+    bg.on('pointerover', () => bg.setFillStyle(0x3a4d6f, 1));
+    bg.on('pointerout',  () => bg.setFillStyle(0x2a3b55, 1));
+    bg.on('pointerup', () => this.opts.onNativeShare && this.opts.onNativeShare());
+    this.shareBg = bg;
+    this.shareGlyphGfx = gfx;
+    this._circles.push(bg, gfx);
+  }
+
+  _addMoreButton(cx, cy) {
+    const bg = this.scene.add.rectangle(cx, cy, MORE_W, BTN_H, 0x2a3b55, 1)
+      .setStrokeStyle(2, 0x1a2332, 1)
+      .setInteractive({ useHandCursor: true });
+    const gfx = this.scene.add.graphics();
+    drawKebab(gfx, cx, cy, BTN_H * 0.7, 0xe6edf5);
+    bg.on('pointerover', () => bg.setFillStyle(0x3a4d6f, 1));
+    bg.on('pointerout',  () => bg.setFillStyle(0x2a3b55, 1));
+    bg.on('pointerup', () => {
+      // World transform handles the scroll container's y offset, so the
+      // scene can anchor its dropdown at the screen-space position.
+      const m = bg.getWorldTransformMatrix();
+      this.opts.onMore && this.opts.onMore(m.tx, m.ty);
+    });
+    this.moreBg = bg;
+    this.moreGlyphGfx = gfx;
+    this._circles.push(bg, gfx);
+  }
+
+  _addRatingStars(startX, cy, level) {
+    const count = Number(level.ratingCount) || 0;
+    const avg   = Number(level.ratingAvg)   || 0;
+    // Rounded half-up to integer — the scene's filter bucketing (r1..r5)
+    // already rounds up, so using the rounded value here keeps the visual
+    // consistent with what the filter labels promise.
+    const lit = count > 0 ? Math.round(avg) : 0;
+    for (let i = 0; i < 5; i++) {
+      const filled = i < lit;
+      const s = this.scene.add.text(startX + i * (STAR_SIZE + STAR_GAP), cy,
+        filled ? STAR_FILLED : STAR_EMPTY, {
+        fontFamily: 'system-ui, sans-serif', fontSize: `${STAR_SIZE}px`, fontStyle: 'bold',
+        color: filled ? STAR_ACTIVE : STAR_IDLE,
+      }).setOrigin(0.5);
+      this._stars.push(s);
+    }
+    if (count > 0) {
+      const tail = this.scene.add.text(startX + 5 * (STAR_SIZE + STAR_GAP) + 2,
+        cy, `(${count})`, {
+        fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#9aa6b2',
+      }).setOrigin(0, 0.5);
+      this._stars.push(tail);
     }
   }
 
@@ -216,17 +249,17 @@ export class LevelCard {
     this.chipText.destroy();
     for (const p of this._pillButtons) { p.rect.destroy(); p.text.destroy(); }
     for (const c of this._circles)     { c.destroy(); }
+    for (const s of this._stars)       { s.destroy(); }
     this._pillButtons.length = 0;
     this._circles.length = 0;
+    this._stars.length = 0;
   }
 
-  // Every GameObject this card owns, flattened. Used by CommunityScene to
-  // reparent the card into its scroll container without touching
-  // LevelCard's build-time coordinates.
   static pieces(card) {
     const out = [card.bg, card.name, card.meta, card.chip, card.chipText];
     for (const p of card._pillButtons) { out.push(p.rect, p.text); }
     for (const c of card._circles)     { out.push(c); }
+    for (const s of card._stars)       { out.push(s); }
     return out;
   }
 }

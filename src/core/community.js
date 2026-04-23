@@ -218,6 +218,10 @@ export function applyFilter(levels, {
       l.origin === 'local' || l.origin === 'imported' || localSet.has(l.id));
   } else if (filter === 'others') {
     out = out.filter((l) => l.origin === 'remote' && !localSet.has(l.id));
+  } else if (filter === 'unfinished') {
+    out = out.filter((l) => l.status === 'unfinished');
+  } else if (filter === 'private') {
+    out = out.filter((l) => l.status === 'private');
   }
 
   const ratingMatch = /^r([1-5])$/.exec(filter);

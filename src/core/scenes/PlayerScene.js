@@ -28,7 +28,8 @@ import { compute920Box } from '../ui/ContentBox.js';
 import { Simulation } from '../sim/Simulation.js';
 import { DragController } from '../input/DragController.js';
 import { shapeSquash } from '../render/pulse.js';
-import { drawHome, drawGrid, drawCircleArrow, drawPlayTriangle } from '../ui/Icons.js';
+import { drawHome, drawGrid, drawCircleArrow, drawPlayTriangle, drawShareNet } from '../ui/Icons.js';
+import { shareLevel as nativeShareLevel, encodeShareString as encodeShareForClient } from '../ui/socialShare.js';
 import { getLevelById, nextLevelAfter } from '../catalog/index.js';
 import { markBeaten } from '../progress.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
@@ -45,14 +46,14 @@ const BLUEPRINT_PAD       = 10;
 const BLUEPRINT_RADIUS    = 12;
 const ISLAND_TO_GRID_GAP  = 14;
 
-// Icon island slots: BACK | (gap) | RESET | PLAY.
-// Icon island — three evenly-spread shortcuts. PLAY / RESET that drive the
+// Icon island — four evenly-spread shortcuts. PLAY / RESET that drive the
 // actual simulation have been promoted out of the island into a prominent
 // overlay in the blueprint area (see _renderBlueprint).
-const ICON_SLOTS           = 3;
+const ICON_SLOTS           = 4;
 const SLOT_HOME            = 0;
 const SLOT_LEVEL_SELECT    = 1;
-const SLOT_RESET           = 2;
+const SLOT_SHARE           = 2;
+const SLOT_RESET           = 3;
 
 // Player scene: load a level (catalog or sandbox), present an interactive
 // blueprint of starting factories, let the player drag/rotate them onto the
@@ -1109,6 +1110,10 @@ export default class PlayerScene extends Phaser.Scene {
     drawGrid(levelSelect, SLOT_LEVEL_SELECT * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
     this.iconIslandContainer.add(levelSelect);
 
+    const share = this.make.graphics({ add: false });
+    drawShareNet(share, SLOT_SHARE * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
+    this.iconIslandContainer.add(share);
+
     const reset = this.make.graphics({ add: false });
     drawCircleArrow(reset, SLOT_RESET * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
     this.iconIslandContainer.add(reset);
@@ -1130,7 +1135,24 @@ export default class PlayerScene extends Phaser.Scene {
       const isCommunity = this.sourceLevel.origin === 'local' || this.sourceLevel.origin === 'imported';
       fadeTo(this, isCommunity ? 'Community' : 'LevelSelect');
     });
+    makeHit(SLOT_SHARE, () => this._nativeShareCurrentLevel());
     makeHit(SLOT_RESET, () => this._resetPlay());
+  }
+
+  async _nativeShareCurrentLevel() {
+    const source = this.sourceLevel;
+    if (!source) return;
+    try {
+      const shareString = encodeShareForClient(source);
+      await nativeShareLevel({
+        scene: this,
+        level: source,
+        shareString,
+        onStatus: () => {},   // navigator.share UI is self-explanatory; no local toast needed
+      });
+    } catch (e) {
+      console.warn('[player] native share failed', e);
+    }
   }
 
   _buildToolbar() {

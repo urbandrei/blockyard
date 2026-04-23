@@ -8,7 +8,7 @@ import { saveLocal, getAuthorHandle, setStatus, setAuthorHandle } from '../commu
 import { AuthorPrompt } from './AuthorPrompt.js';
 import { platform } from '../../platform/index.js';
 import { copyText } from './clipboard.js';
-import { generateShareImage } from './sharePreview.js';
+import { shareLevel, canNativeShare, shareBaseForCurrentOrigin } from './socialShare.js';
 
 const SHIELD_DEPTH = 9000;
 const PANEL_DEPTH  = 9001;
@@ -31,26 +31,9 @@ const SECONDARY_BTN_W = 280;
 const SECONDARY_BTN_H = 34;
 const DIVIDER_COLOR   = 0xdbe3ee;
 
-// Share URL bases per host. When running inside itch we want the copied
-// link to be the itch game page (itch forwards query params into the
-// embedded iframe, so `?s=<code>` reaches the game). Everywhere else we
-// link back to the Render static site.
-const BLOCK_YARD_SHARE_URL = 'https://www.block-yard.com';
-const ITCH_SHARE_URL       = 'https://urbandrei.itch.io/block-yard';
-
-function shareBaseForCurrentOrigin() {
-  try {
-    const host = (window.location && window.location.hostname) || '';
-    if (/\.itch\.(zone|io)$/i.test(host)) return ITCH_SHARE_URL;
-  } catch (e) {}
-  return BLOCK_YARD_SHARE_URL;
-}
-
 // Append `?s=<code>` (or `?play=<b64>`) to a share base, handling both
-// bare-host URLs (https://www.block-yard.com) and deeper paths that itch
-// uses (https://user.itch.io/game). For deep paths we need `?` or `&`
-// depending on existing query string — but in practice our bases don't
-// carry queries, so a plain `?` is always correct.
+// bare-host URLs and deeper paths (itch's user-page URL). Plain `?` is
+// always correct since our bases never carry queries today.
 function withShareParam(base, paramName, value) {
   const sep = base.includes('?') ? '&' : '?';
   return `${base}${sep}${paramName}=${encodeURIComponent(value)}`;
@@ -446,64 +429,15 @@ export class ExportPanel {
     );
   }
 
-  // Native share via navigator.share. Produces a 1080x1920 PNG preview
-  // of the level, shortens the share URL when possible, and hands the
-  // bundle to the browser's platform share sheet. Falls back to plain
-  // clipboard copy of the URL when the browser can't share files.
   async _nativeShare() {
     if (!this._boardSizeOk()) return;
-    this._setStatus('Preparing preview\u2026');
-    const raw = (this._shareString || this._encodeShareString(this.level)).replace(/\s+/g, '');
-    const base = shareBaseForCurrentOrigin();
-
-    let code = null;
-    try { code = await platform.shortenShareCode(raw); } catch (e) {}
-    const url = code
-      ? withShareParam(base, 's', code)
-      : withShareParam(base, 'play', raw);
-
-    // Build the PNG in parallel with whatever else is running.
-    let blob = null;
-    try {
-      blob = await generateShareImage(this.level, { url: base.replace(/^https?:\/\//, '') });
-    } catch (e) {
-      console.warn('[share] preview generation failed', e);
-    }
-
-    const name = this.level.name || 'Blockyard level';
-    const text = `Check out "${name}" on Blockyard — can you solve it?`;
-    const filename = safeFilename(name) + '.png';
-
-    // Prefer sharing with the image when the browser supports it; fall
-    // back to URL-only share; fall back to copying the URL.
-    try {
-      if (blob && navigator.canShare) {
-        const file = new File([blob], filename, { type: 'image/png' });
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({ title: 'Blockyard', text, url, files: [file] });
-          this._setStatus('Shared.');
-          return;
-        }
-      }
-      if (navigator.share) {
-        await navigator.share({ title: 'Blockyard', text, url });
-        this._setStatus('Shared.');
-        return;
-      }
-    } catch (e) {
-      // AbortError fires when the user dismisses the share sheet — not an
-      // error we want to alarm on.
-      if (e && e.name === 'AbortError') { this._setStatus(''); return; }
-      console.warn('[share] navigator.share failed', e);
-    }
-
-    // Last-resort fallback — copy the URL so the user can paste it.
-    try {
-      await copyText(url);
-      this._setStatus('Sharing not available \u2014 URL copied instead.');
-    } catch (e) {
-      this._setStatus('Could not share or copy — ' + (e && e.message || 'unknown error'));
-    }
+    const shareString = this._shareString || this._encodeShareString(this.level);
+    await shareLevel({
+      scene: this.scene,
+      level: this.level,
+      shareString,
+      onStatus: (msg) => this._setStatus(msg),
+    });
   }
 
   _downloadJson() {
@@ -531,6 +465,12 @@ export class ExportPanel {
     if (!this._boardSizeOk()) return;
     const handle = await getAuthorHandle();
     if (!handle) { this._editAuthor(); return; }
+    // Reaching ExportPanel means the level is finished (blueprint setup
+    // complete), so flip the editor's 'unfinished' draft tag to 'private'.
+    // Publish later bumps it to 'pending' via setStatus.
+    if (this.level.status === 'unfinished' || !this.level.status) {
+      this.level.status = 'private';
+    }
     const stamped = await saveLocal(this.level);
     Object.assign(this.level, { id: stamped.id, status: stamped.status, author: stamped.author });
     this._setStatus(`Saved to library (status: ${stamped.status})`);
@@ -541,6 +481,9 @@ export class ExportPanel {
     if (!this._boardSizeOk()) return;
     const handle = await getAuthorHandle();
     if (!handle) { this._editAuthor(); return; }
+    if (this.level.status === 'unfinished' || !this.level.status) {
+      this.level.status = 'private';
+    }
     const stamped = await saveLocal(this.level);
     const accepted = await platform.publishLevel(stamped);
     let final = stamped;
@@ -597,19 +540,6 @@ export class ExportPanel {
       if (b) { b.rect.destroy(); b.text.destroy(); }
     }
   }
-}
-
-// Detect at build time whether the browser can run the share flow at all.
-// `canShare` with files is the picky one; plain `share` is more widely
-// supported but falls back to text + url only. We show the button as
-// long as at least one path exists.
-function canNativeShare() {
-  if (typeof navigator === 'undefined' || !navigator) return false;
-  return typeof navigator.share === 'function';
-}
-
-function safeFilename(name) {
-  return String(name || 'level').toLowerCase().replace(/[^a-z0-9-_]+/gi, '_').slice(0, 40);
 }
 
 function truncate(s, n) {

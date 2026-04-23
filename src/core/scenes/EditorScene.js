@@ -307,6 +307,15 @@ export default class EditorScene extends Phaser.Scene {
     // _restartSim() to pick up the new funnel/wall layout.
     this._restartSim();
 
+    // Finished levels opened from the Community list drop straight into
+    // blueprint-setup so the author sees their authored initialFactories
+    // in their slots. Unfinished drafts restore in plain design mode so
+    // the editor reopens exactly as it was left.
+    const isFinished = this._designerMode
+      && this.level && this.level.status
+      && this.level.status !== 'unfinished';
+    if (isFinished) this._restoreBlueprintSetupFromLevel();
+
     // Hover preview for the draw grid: as the pointer moves over an empty-but-
     // adjacent cell, show a grey ghost of the cell that would be added. Over
     // a perimeter edge that doesn't yet have an output funnel, show a grey
@@ -537,7 +546,9 @@ export default class EditorScene extends Phaser.Scene {
     fresh.name = 'untitled';
     fresh.number = 0;
     fresh.origin = 'local';
-    fresh.status = 'private';
+    // Drafts stay 'unfinished' until the user walks the level through
+    // blueprint setup + ExportPanel, which flips to 'private'.
+    fresh.status = 'unfinished';
     return fresh;
   }
 
@@ -601,6 +612,39 @@ export default class EditorScene extends Phaser.Scene {
   }
 
   // ---------- Blueprint-setup mode ----------
+
+  // Re-enter blueprint-setup from a persisted finished level. Mirrors
+  // _enterBlueprintSetup but skips the _victoryReady check (the level is
+  // already known to solve) and seeds _blueprintAssignments /
+  // _lockedFactoryIds from the saved initialFactories / lockedFactories
+  // so factories open back in their authored slots.
+  _restoreBlueprintSetupFromLevel() {
+    if (this._mode === 'blueprintSetup') return;
+    const source = (this.level.factories || [])
+      .filter((f) => !(this._bossMode && f.locked));
+    this._solutionSnapshot = JSON.parse(JSON.stringify(source));
+    this._blueprintAssignments = new Map();
+    for (const it of (this.level.initialFactories || [])) {
+      if (!it.id || !it.slot) continue;
+      this._blueprintAssignments.set(it.id, {
+        slot: { r: it.slot.row, c: it.slot.col },
+        rotation: it.rotation || 0,
+      });
+    }
+    this._lockedFactoryIds = new Set(
+      (this.level.lockedFactories || []).map((f) => f.id).filter(Boolean)
+    );
+    this._victoryReady = true;
+    this._mode = 'blueprintSetup';
+    if (this.sim) this.sim.stop();
+    if (this.shapeRenderer) this.shapeRenderer.clearAll();
+    if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.clearAll();
+    this._renderDrawGrid();
+    this._renderIconIsland();
+    this._setupIconSlotHandlers();
+    this._refreshSteps();
+    this._refreshBossIndicator && this._refreshBossIndicator();
+  }
 
   _enterBlueprintSetup() {
     if (this._mode === 'blueprintSetup') return;

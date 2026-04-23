@@ -6,6 +6,7 @@ import {
 } from '../community.js';
 import { ConfirmModal } from '../ui/ConfirmModal.js';
 import { RateLevelModal } from '../ui/RateLevelModal.js';
+import { shareLevel as nativeShareLevel, encodeShareString as encodeShareForClient } from '../ui/socialShare.js';
 import { LevelCard } from '../ui/LevelCard.js';
 import { TextInputOverlay } from '../ui/TextInputOverlay.js';
 import { ImportModal } from '../ui/ImportModal.js';
@@ -65,22 +66,28 @@ const PAGE_SIZE = 5;
 
 const DISCORD_URL = 'https://discord.gg/TODO';   // TODO: swap for the real invite once it exists
 
-// Every row is one of:
+// The filter menu is split into two arrays: FILTER_TOP is the default
+// visible stack (max 5 rows), FILTER_MORE is revealed when the user
+// taps "Show more". Each row is:
 //   { filter: '<key>', label } — sets this._filter
 //   { sort:   '<key>', label } — sets this._sort
 //   { divider: true }          — visual separator in the menu
-const FILTER_OPTIONS = [
-  { filter: 'all',    label: 'All levels'       },
-  { filter: 'mine',   label: 'My levels'        },
-  { filter: 'others', label: "Others' levels"   },
-  { filter: 'liked',  label: 'Liked only'       },
-  { filter: 'hidden', label: 'Hidden only'      },
+const FILTER_TOP = [
+  { filter: 'all',    label: 'All levels'      },
+  { filter: 'mine',   label: 'My levels'       },
+  { filter: 'others', label: "Others' levels"  },
+  { filter: 'liked',  label: 'Liked only'      },
+  { filter: 'hidden', label: 'Hidden only'     },
+];
+const FILTER_MORE = [
+  { filter: 'unfinished', label: 'Unfinished drafts' },
+  { filter: 'private',    label: 'Private (finished)' },
   { divider: true },
-  { filter: 'r5',     label: 'Rated 5\u2605'    },
-  { filter: 'r4',     label: 'Rated 4\u2605+'   },
-  { filter: 'r3',     label: 'Rated 3\u2605+'   },
-  { filter: 'r2',     label: 'Rated 2\u2605+'   },
-  { filter: 'r1',     label: 'Rated 1\u2605+'   },
+  { filter: 'r5',     label: 'Rated 5\u2605'   },
+  { filter: 'r4',     label: 'Rated 4\u2605+'  },
+  { filter: 'r3',     label: 'Rated 3\u2605+'  },
+  { filter: 'r2',     label: 'Rated 2\u2605+'  },
+  { filter: 'r1',     label: 'Rated 1\u2605+'  },
   { divider: true },
   { sort: 'recent',     label: 'Sort: recent'      },
   { sort: 'likesDesc',  label: 'Sort: most liked'  },
@@ -346,11 +353,24 @@ export default class CommunityScene extends Phaser.Scene {
 
   _toggleFilterMenu(anchorX, anchorY) {
     if (this._filterMenu) { this._closeFilterMenu(); return; }
-    const w = 220, rowH = 32, dividerH = 10, pad = 6;
-    const menuH = pad * 2 + FILTER_OPTIONS.reduce(
-      (sum, o) => sum + (o.divider ? dividerH : rowH), 0);
+    this._renderFilterMenu(anchorX, anchorY);
+  }
+
+  _renderFilterMenu(anchorX, anchorY) {
+    this._closeFilterMenu();
+    // Top 5 are always shown; the rest appear only when the user taps
+    // the expander. Once expanded, the choice sticks for the session so
+    // hopping through the menu feels stable.
+    const expanded = !!this._filterMenuExpanded;
+    const rows = expanded ? [...FILTER_TOP, ...FILTER_MORE] : FILTER_TOP.slice();
+    // Always end with an expander row.
+    rows.push({ expand: true });
+
+    const w = 230, rowH = 32, dividerH = 10, pad = 6;
+    const menuH = pad * 2 + rows.reduce((s, r) => s + (r.divider ? dividerH : rowH), 0);
     const px = Math.max(8, Math.min(this.scale.width - w - 8, anchorX - w / 2));
     const py = Math.max(8, Math.min(this.scale.height - menuH - 8, anchorY + 6));
+
     const shield = this.add.rectangle(this.scale.width / 2, this.scale.height / 2,
       this.scale.width, this.scale.height, 0x000000, 0).setDepth(8000).setInteractive();
     const panel = this.add.graphics().setDepth(8001);
@@ -359,14 +379,11 @@ export default class CommunityScene extends Phaser.Scene {
     panel.fillRoundedRect(px, py, w, menuH, 10);
     panel.strokeRoundedRect(px, py, w, menuH, 10);
 
-    // Walk the options array, drawing a row or a divider at each step.
-    // Dividers just advance the cursor and draw a thin gray line — they're
-    // not interactive, so they're tracked separately from `items`.
     const items = [];
     const dividers = [];
     let cy = py + pad + rowH / 2;
-    for (const o of FILTER_OPTIONS) {
-      if (o.divider) {
+    for (const row of rows) {
+      if (row.divider) {
         const line = this.add.graphics().setDepth(8001);
         line.lineStyle(1, 0xdbe3ee, 1);
         const y = cy - rowH / 2 + dividerH / 2;
@@ -382,17 +399,30 @@ export default class CommunityScene extends Phaser.Scene {
         .setStrokeStyle(1, 0x1a2332, 0.4)
         .setInteractive({ useHandCursor: true })
         .setDepth(8001);
-      const active = (o.filter && o.filter === this._filter)
-                  || (o.sort   && o.sort   === this._sort);
-      const text = this.add.text(px + w / 2, cy, (active ? '\u2713 ' : '') + o.label, {
+      let label;
+      let color = '#1a2332';
+      if (row.expand) {
+        label = expanded ? '\u25B4 Show less' : '\u25BE Show more';
+        color = '#3b66b8';
+      } else {
+        const active = (row.filter && row.filter === this._filter)
+                    || (row.sort   && row.sort   === this._sort);
+        label = (active ? '\u2713 ' : '') + row.label;
+      }
+      const text = this.add.text(px + w / 2, cy, label, {
         fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontStyle: 'bold',
-        color: '#1a2332',
+        color,
       }).setOrigin(0.5).setDepth(8001);
       rect.on('pointerover', () => rect.setFillStyle(0xeef3fb, 1));
       rect.on('pointerout',  () => rect.setFillStyle(0xffffff, 1));
       rect.on('pointerup', () => {
-        if (o.filter) this._filter = o.filter;
-        if (o.sort)   this._sort   = o.sort;
+        if (row.expand) {
+          this._filterMenuExpanded = !expanded;
+          this._renderFilterMenu(anchorX, anchorY);
+          return;
+        }
+        if (row.filter) this._filter = row.filter;
+        if (row.sort)   this._sort   = row.sort;
         this._page = 0;
         this._closeFilterMenu();
         this._renderList();
@@ -426,18 +456,110 @@ export default class CommunityScene extends Phaser.Scene {
     });
   }
 
-  // Shareable deep-link base. Hardcoded to the Render static site so a link
-  // copied from any context (itch iframe, localhost dev) still points at a
-  // reliable origin. Receiving side works on both Render and itch because
-  // HomeScene._handleDeepLink reads `?level=` from whatever origin served
-  // the game.
-  _shareLevel(id, name) {
-    const url = `https://www.block-yard.com/?level=${encodeURIComponent(id)}`;
-    const ok = `Share link copied${name ? ` — ${name}` : ''}`;
+  // Produce a shareable deep-link for any finished level.
+  //   - Remote approved levels → short `?level=<id>` (server-resident).
+  //   - Local finished levels (private/pending/imported) → shortener
+  //     call with a `?play=<b64>` fallback when the API can't respond.
+  async _buildShareUrl(level) {
+    if (level.origin === 'remote' && level.id) {
+      return `https://www.block-yard.com/?level=${encodeURIComponent(level.id)}`;
+    }
+    const shareString = encodeShareForClient(level);
+    let code = null;
+    try { code = await platform.shortenShareCode(shareString); } catch (e) {}
+    const base = 'https://www.block-yard.com';
+    return code
+      ? `${base}/?s=${encodeURIComponent(code)}`
+      : `${base}/?play=${encodeURIComponent(shareString)}`;
+  }
+
+  async _shareLevelLink(level) {
+    this._toast('Preparing share link\u2026');
+    const url = await this._buildShareUrl(level);
+    const ok = `Share link copied${level.name ? ` — ${level.name}` : ''}`;
     copyText(url).then(
       () => this._toast(ok),
       () => this._toast('Could not copy link'),
     );
+  }
+
+  // Per-card dropdown. Rendered at the kebab button's world position so
+  // it aligns under the ⋮ regardless of scroll offset. Closes on outside
+  // tap, on item tap, or when the list is re-rendered (new search page,
+  // refresh, etc.) via _closeMoreMenu.
+  _openMoreMenu(anchorX, anchorY, items) {
+    this._closeMoreMenu();
+    if (!items || !items.length) return;
+
+    const rowH = 34;
+    const pad = 6;
+    const w = 180;
+    const h = pad * 2 + rowH * items.length;
+
+    // Pin the menu to the right edge of the kebab button and drop below
+    // it; clamp so it never bleeds past the viewport.
+    const px = Math.max(8, Math.min(this.scale.width - w - 8, anchorX - w + 14));
+    const py = Math.max(8, Math.min(this.scale.height - h - 8, anchorY + 22));
+
+    const shield = this.add.rectangle(this.scale.width / 2, this.scale.height / 2,
+      this.scale.width, this.scale.height, 0x000000, 0)
+      .setDepth(9500).setInteractive();
+    const panel = this.add.graphics().setDepth(9501);
+    panel.fillStyle(0xffffff, 1);
+    panel.lineStyle(2, 0x1a2332, 1);
+    panel.fillRoundedRect(px, py, w, h, 10);
+    panel.strokeRoundedRect(px, py, w, h, 10);
+
+    const rowElements = items.map((item, i) => {
+      const cy = py + pad + rowH / 2 + i * rowH;
+      const rect = this.add.rectangle(px + w / 2, cy, w - pad * 2, rowH - 2, 0xffffff, 1)
+        .setStrokeStyle(1, 0x1a2332, 0.4)
+        .setInteractive({ useHandCursor: true })
+        .setDepth(9502);
+      const text = this.add.text(px + pad + 10, cy, item.label, {
+        fontFamily: 'system-ui, sans-serif', fontSize: '13px', fontStyle: 'bold',
+        color: item.destructive ? '#b32727' : '#1a2332',
+      }).setOrigin(0, 0.5).setDepth(9502);
+      rect.on('pointerover', () => rect.setFillStyle(0xeef3fb, 1));
+      rect.on('pointerout',  () => rect.setFillStyle(0xffffff, 1));
+      rect.on('pointerup', () => {
+        this._closeMoreMenu();
+        try { item.onTap && item.onTap(); } catch (e) { console.warn('[community] menu action failed', e); }
+      });
+      return { rect, text };
+    });
+    shield.on('pointerdown', () => this._closeMoreMenu());
+    this._moreMenu = { shield, panel, rowElements };
+  }
+
+  _closeMoreMenu() {
+    if (!this._moreMenu) return;
+    this._moreMenu.shield.destroy();
+    this._moreMenu.panel.destroy();
+    for (const { rect, text } of this._moreMenu.rowElements) { rect.destroy(); text.destroy(); }
+    this._moreMenu = null;
+  }
+
+  // Hand any finished level to the shared native-share helper. Remote
+  // summaries need a fetch to recover the full body; local levels
+  // already carry everything the helper needs.
+  async _nativeShareAny(level) {
+    let body = level;
+    if (level.origin === 'remote') {
+      const res = await platform.fetchLevel(level.id).catch(() => null);
+      body = res && res.level;
+      if (!body) { this._toast('Could not fetch level — try again later'); return; }
+    }
+    // The helper expects a share-string; encode the body the same way
+    // ExportPanel does so the `?play=<b64>` fallback works. Our encoding
+    // strips the runtime-only fields inside socialShare.js's helper.
+    const shareString = encodeShareForClient(body);
+    await nativeShareLevel({
+      scene: this,
+      level: { ...body, name: level.name, author: level.author },
+      shareString,
+      onStatus: (msg) => { if (msg) this._toast(msg); },
+    });
   }
 
   // Post-play rating prompt. Opens RateLevelModal; on submit, fires
@@ -560,6 +682,9 @@ export default class CommunityScene extends Phaser.Scene {
   }
 
   _renderList() {
+    // Any per-card dropdown anchored at world coordinates becomes stale
+    // the moment we rebuild — close it first.
+    this._closeMoreMenu();
     // Tear down anything from the previous render — cards, the scroll
     // container + its mask, the load-more button, and the empty-state
     // placeholder.
@@ -642,6 +767,32 @@ export default class CommunityScene extends Phaser.Scene {
       const isMine    = editable || (isRemote && this._localIds.has(level.id));
       const canDelete = isMine;
       const canHide   = isRemote && !isMine;
+      // "Finished" = past the unfinished-draft stage. That's the gate for
+      // share affordances — you can't meaningfully share a level that
+      // doesn't even have a valid solution yet.
+      const isFinished = !!level.status && level.status !== 'unfinished';
+      // Per-level dropdown items — pre-filtered here so LevelCard can
+      // render the ⋮ button only when there's actually something in the
+      // menu. Order reflects what appears in the open dropdown.
+      const moreItems = [];
+      if (editable) moreItems.push({
+        label: 'Edit',
+        onTap: () => fadeTo(this, 'Editor', { designerMode: true, levelId: level.id }),
+      });
+      if (isFinished) moreItems.push({
+        label: 'Copy link',
+        onTap: () => this._shareLevelLink(level),
+      });
+      if (canHide) moreItems.push({
+        label: 'Hide',
+        onTap: () => this._hideLevel(level.id, level.name),
+      });
+      if (canDelete) moreItems.push({
+        label: 'Delete',
+        onTap: () => this._confirmDelete(level),
+        destructive: true,
+      });
+
       const card = new LevelCard(this, {
         x: cardX, y: cy, width: cardW, height: CARD_H,
         level,
@@ -677,17 +828,12 @@ export default class CommunityScene extends Phaser.Scene {
           }
           return next;
         },
-        onEdit: editable
-          ? () => fadeTo(this, 'Editor', { designerMode: true, levelId: level.id })
+        onNativeShare: isFinished
+          ? () => this._nativeShareAny(level)
           : undefined,
-        onShare: isRemote
-          ? () => this._shareLevel(level.id, level.name)
-          : undefined,
-        onHide: canHide
-          ? () => this._hideLevel(level.id, level.name)
-          : undefined,
-        onDelete: canDelete
-          ? () => this._confirmDelete(level)
+        moreItems,
+        onMore: moreItems.length > 0
+          ? (ax, ay) => this._openMoreMenu(ax, ay, moreItems)
           : undefined,
       });
       for (const p of LevelCard.pieces(card)) this._scrollContainer.add(p);
@@ -919,7 +1065,9 @@ export default class CommunityScene extends Phaser.Scene {
     if (!this._scrollContainer) return;
     const max = 0;
     const min = this._scrollMin || 0;
-    this._scrollOffset = Math.max(min, Math.min(max, next));
+    const clamped = Math.max(min, Math.min(max, next));
+    if (clamped !== this._scrollOffset) this._closeMoreMenu();
+    this._scrollOffset = clamped;
     this._scrollContainer.y = this._scrollOffset;
     this._paintScrollThumb();
   }
