@@ -84,10 +84,12 @@ export default class PlayerScene extends Phaser.Scene {
     this.shadowContainer       = this.add.container(0, 0).setDepth(4);
     this.frameContainer        = this.add.container(0, 0).setDepth(5);
     this.acidPitContainer      = this.add.container(0, 0).setDepth(7);
+    // Funnel particles render BELOW shapes so emerging shapes paint over
+    // their own preview particles instead of being veiled by them.
+    this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(8);
+    this.borderFunnelParticleContainer  = this.add.container(0, 0).setDepth(9);
     this.shapeContainer        = this.add.container(0, 0).setDepth(10);
     this.laserContainer        = this.add.container(0, 0).setDepth(12);
-    this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(13);
-    this.borderFunnelParticleContainer  = this.add.container(0, 0).setDepth(14);
     this.funnelContainer       = this.add.container(0, 0).setDepth(15);
     this.interactiveContainer  = this.add.container(0, 0).setDepth(20);
     this.flowContainer         = this.add.container(0, 0).setDepth(22);

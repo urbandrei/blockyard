@@ -119,13 +119,14 @@ export class FunnelParticleSystem {
   }
 
   _spawnParticle(f, birthTime) {
-    // Resolve typing → concrete (form, color). Partial labels randomize
-    // only the missing axis so e.g. a shape-only funnel emits multi-color
-    // particles all of the same form.
+    // Resolve typing → concrete (form, color). A missing form-axis randomizes
+    // across forms (so a color-only funnel emits varied shapes in one color);
+    // a missing color-axis renders white (so a form-only funnel reads as
+    // "any color" without flickering through the palette).
     const typeForm  = f.type && f.type.form  ? f.type.form  : null;
     const typeColor = f.type && f.type.color ? f.type.color : null;
     const form  = typeForm  || FORMS[Math.floor(Math.random() * FORMS.length)];
-    const color = typeColor || COLORS[Math.floor(Math.random() * COLORS.length)];
+    const color = typeColor || 'white';
     // Perpendicular scatter axis (unit vector 90° from outward).
     const px = -f.dy, py = f.dx;
     const scatter = (Math.random() - 0.5) * this.pxCell * 0.28;

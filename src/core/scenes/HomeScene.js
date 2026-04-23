@@ -85,9 +85,10 @@ export default class HomeScene extends Phaser.Scene {
     // Containers. Depths mirror PlayerScene so exterior checker covers the
     // outside of the board via the same cut-out trick.
     this.boardContainer        = this.add.container(0, 0).setDepth(0);
+    // Ambient funnel particles render BELOW shapes so emerging shapes paint
+    // over their own preview particles instead of being veiled by them.
+    this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(8);
     this.shapeContainer        = this.add.container(0, 0).setDepth(10);
-    // Ambient funnel particles sit just below the funnel triangles.
-    this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(13);
     this.funnelContainer       = this.add.container(0, 0).setDepth(15);
     this.interactiveContainer  = this.add.container(0, 0).setDepth(20);
     this.flowContainer         = this.add.container(0, 0).setDepth(22);

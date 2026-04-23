@@ -131,13 +131,15 @@ export default class EditorScene extends Phaser.Scene {
     this.frameContainer        = this.add.container(0, 0).setDepth(5);
     // Acid pits paint over the interior floor but under sim visuals.
     this.acidPitContainer      = this.add.container(0, 0).setDepth(7);
+    // Ambient funnel-inhale/exhale dots sit BELOW shapes so an emerging
+    // shape paints over its own preview particles instead of being veiled by
+    // them.
+    this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(8);
+    this.borderFunnelParticleContainer  = this.add.container(0, 0).setDepth(9);
     this.shapeContainer        = this.add.container(0, 0).setDepth(10);
     // Laser beams sit BELOW the funnels + factory bodies but ABOVE the
     // black frame / brown exterior so they read across the buffer region.
     this.laserContainer        = this.add.container(0, 0).setDepth(12);
-    // Ambient funnel-inhale/exhale dots sit just below the funnel triangles.
-    this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(13);
-    this.borderFunnelParticleContainer  = this.add.container(0, 0).setDepth(14);
     this.funnelContainer       = this.add.container(0, 0).setDepth(15);
     this.interactiveContainer  = this.add.container(0, 0).setDepth(20);
     // Flow dashes sit on top of the factory body so the manifold pattern is
