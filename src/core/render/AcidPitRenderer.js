@@ -33,12 +33,22 @@ const INTERIOR_BUBBLE_PER_CELL = 0.6;     // ~0.6 live bubbles per acid cell at 
 const INTERIOR_BUBBLE_LIFE_MS = 1100;
 // Fraction of the life that's the pop phase — smaller = faster pop.
 const POP_FRAC = 0.18;
-const INTERIOR_BUBBLE_R_FRAC = 0.055;     // max radius = 5.5% of pxCell
-const EDGE_BUBBLE_R_FRAC = 0.032;
+const INTERIOR_BUBBLE_R_FRAC = 0.090;     // max radius as fraction of pxCell
+const EDGE_BUBBLE_R_FRAC = 0.055;
 const EDGE_BUBBLE_EVERY_SAMPLES = 14;     // one edge bubble every ~N perimeter samples
-// Extra inset for edge bubbles beyond their own radius — higher = tucked
-// further inside the outline.
-const EDGE_BUBBLE_EXTRA_INSET_FRAC = 0.045;   // fraction of pxCell
+// Extra inset for edge bubbles beyond their own radius + the stroke widths —
+// higher = tucked further inside the outline. The stroke contribution is
+// added at draw time (since strokeW depends on pxCell).
+const EDGE_BUBBLE_EXTRA_INSET_FRAC = 0.02;    // fraction of pxCell
+// Edge bubbles cycle through grow/hold/pop on a long life so they read as
+// "steady" but visibly pop occasionally. Replaced into a free slot at the
+// same average rate they pop, so steady-state count stays near the slot
+// quota (the per-component max). MIN_FRAC enforces a floor: if live count
+// drops below this fraction of the quota, top-up ignores stagger so the
+// count snaps back up — caps the visible minimum.
+const EDGE_BUBBLE_LIFE_MS = 4500;
+const EDGE_POP_FRAC = 0.18;
+const EDGE_BUBBLE_MIN_FRAC = 0.6;
 
 export function renderAcidPits(scene, container, level, { pxCell, pxGap = BOARD_GAP }) {
   const pits = (level && level.acidPits) || [];
@@ -73,21 +83,19 @@ export function renderAcidPits(scene, container, level, { pxCell, pxGap = BOARD_
     paintComponent(fillGfx, comp, labelByCell, hexOf, pxCell, pxGap);
     const loops = traceFactoryLoops(comp.cells, pxCell, pxGap, ACID_OUTLINE_SCALE);
     const loopSamples = loops.map((loop) => resampleBezierLoop(loop, pxCell, PERIMETER_SAMPLE_PX));
-    // Edge bubbles — steady bubbles anchored to specific samples around the
-    // perimeter. Each is attached to a sampleIdx; per tick its position is
-    // read from the wobbled sample so the bubble rides the wave.
-    const edgeBubbles = [];
+    // Edge bubble slots — fixed positions around the perimeter that live
+    // bubbles cycle through. Per-slot rFrac + wobblePhase keep each slot's
+    // visual identity stable across the bubbles that pop in and out of it,
+    // so the perimeter doesn't look like it's randomly scrambling.
+    const edgeSlots = [];
     for (let li = 0; li < loopSamples.length; li++) {
       const samples = loopSamples[li];
       for (let i = 0; i < samples.length; i += EDGE_BUBBLE_EVERY_SAMPLES) {
-        // Pseudo-random radius + outward offset based on sample index so
-        // the pattern is deterministic across redraws.
         const seed = mulberry32((li * 1013 + i * 37) | 0);
-        edgeBubbles.push({
+        edgeSlots.push({
           loopIdx: li,
           sampleIdx: i,
           rFrac: 0.6 + 0.4 * seed(),
-          offsetFrac: -0.1 - 0.3 * seed(), // slightly inward
           wobblePhase: seed() * Math.PI * 2,
         });
       }
@@ -95,7 +103,7 @@ export function renderAcidPits(scene, container, level, { pxCell, pxGap = BOARD_
     // Interior bubble homes — random positions within each acid cell. We
     // lazily spawn live bubbles at these home points; each bubble runs its
     // grow/hold/pop cycle and despawns, with a replacement spawned elsewhere.
-    return { comp, loops, loopSamples, edgeBubbles, liveBubbles: [] };
+    return { comp, loops, loopSamples, edgeSlots, edgeLive: [], liveBubbles: [] };
   });
 
   // Top up interior bubbles so each component holds a rough quota.
@@ -126,22 +134,74 @@ export function renderAcidPits(scene, container, level, { pxCell, pxGap = BOARD_
         drawSmoothOutline(edgeGfx, wobbled, strokeW, outlineHex);
       }
 
-      // ---- Edge bubbles (steady, ride the wave) ----
-      for (const eb of state.edgeBubbles) {
-        const wobbled = wobbledLoops[eb.loopIdx];
-        const samples = state.loopSamples[eb.loopIdx];
-        if (!wobbled || eb.sampleIdx >= wobbled.length) continue;
-        const pt = wobbled[eb.sampleIdx];
-        const sN = samples[eb.sampleIdx];
-        // Gentle slow size breath per-bubble so the row doesn't feel robotic.
-        const br = edgeBubbleR * eb.rFrac * (0.85 + 0.15 * Math.sin(t * 0.9 + eb.wobblePhase));
-        // Bubble sits inside the border — offset inward by its radius
-        // (tangent to inner edge) + an extra inset so there's a visible
-        // margin between the bubble and the outline.
-        const inset = br + pxCell * EDGE_BUBBLE_EXTRA_INSET_FRAC;
-        const ox = pt[0] - sN.nx * inset;
-        const oy = pt[1] - sN.ny * inset;
-        drawBubble(bubbleGfx, ox, oy, br);
+      // ---- Edge bubbles (cycle through grow / hold / pop, slot-based) ----
+      // Per-component slot pool capped by the number of perimeter slots
+      // (max). Each live bubble owns one slot; bubbles run a long life and
+      // then pop, freeing the slot for a new one. Initial fill spawns
+      // without stagger up to MIN_FRAC of slots so the count never starts
+      // empty; remaining spawns stagger across one life so subsequent pops
+      // are spread out in time rather than syncing.
+      const edgeMax = state.edgeSlots.length;
+      const edgeMin = Math.floor(edgeMax * EDGE_BUBBLE_MIN_FRAC);
+      const edgeLive = state.edgeLive;
+      // Drop completed bubbles, freeing their slots.
+      for (let i = edgeLive.length - 1; i >= 0; i--) {
+        if (timeMs - edgeLive[i].birth >= EDGE_BUBBLE_LIFE_MS) {
+          edgeLive.splice(i, 1);
+        }
+      }
+      // Top up. Pick a slot not currently occupied; below the min floor,
+      // spawn immediately, otherwise stagger across one life.
+      if (edgeLive.length < edgeMax && edgeMax > 0) {
+        const occupied = new Set(edgeLive.map((b) => b.slotIdx));
+        const free = [];
+        for (let s = 0; s < edgeMax; s++) if (!occupied.has(s)) free.push(s);
+        while (edgeLive.length < edgeMax && free.length > 0) {
+          const pickIdx = Math.floor(rand() * free.length);
+          const slotIdx = free.splice(pickIdx, 1)[0];
+          const stagger = edgeLive.length < edgeMin
+            ? 0
+            : rand() * EDGE_BUBBLE_LIFE_MS;
+          edgeLive.push({
+            slotIdx,
+            birth: timeMs + stagger,
+            sizeFrac: 0.85 + 0.15 * rand(),
+            popSeed: rand() * Math.PI * 2,
+          });
+        }
+      }
+      const edgePopStart = 1 - EDGE_POP_FRAC;
+      for (const b of edgeLive) {
+        const age = timeMs - b.birth;
+        if (age < 0) continue;     // staggered — not yet started
+        const slot = state.edgeSlots[b.slotIdx];
+        const wobbled = wobbledLoops[slot.loopIdx];
+        const samples = state.loopSamples[slot.loopIdx];
+        if (!wobbled || slot.sampleIdx >= wobbled.length) continue;
+        const pt = wobbled[slot.sampleIdx];
+        const sN = samples[slot.sampleIdx];
+        // Gentle slow size breath so the perimeter doesn't feel robotic.
+        const breath = 0.85 + 0.15 * Math.sin(t * 0.9 + slot.wobblePhase);
+        const peakR = edgeBubbleR * slot.rFrac * b.sizeFrac * breath;
+        // Bubble sits fully inside the pit border. The wobbled samples ride
+        // the centerline of the pit's outline stroke; offset inward by
+        // bubble radius + a stroke (half pit + half bubble) + a small extra.
+        // Note: after the sign-flip in resampleBezierLoop, sN.{nx,ny} points
+        // INWARD, so we ADD the normal*inset to move further inward.
+        const inset = peakR + strokeW + pxCell * EDGE_BUBBLE_EXTRA_INSET_FRAC;
+        const ox = pt[0] + sN.nx * inset;
+        const oy = pt[1] + sN.ny * inset;
+        const t01 = age / EDGE_BUBBLE_LIFE_MS;
+        if (t01 < edgePopStart) {
+          // Quick grow at the start so a refill snaps into place rather
+          // than visibly inflating for half a second.
+          const grow = t01 < 0.08 ? t01 / 0.08 : 1;
+          const r = peakR * grow;
+          if (r > 0.5) drawBubble(bubbleGfx, ox, oy, r, strokeW, outlineHex);
+        } else {
+          const popT = (t01 - edgePopStart) / EDGE_POP_FRAC;
+          drawPopBurst(bubbleGfx, ox, oy, peakR, popT, b.popSeed, strokeW, outlineHex);
+        }
       }
 
       // ---- Interior bubbles (grow / pop) ----
@@ -157,9 +217,11 @@ export function renderAcidPits(scene, container, level, { pxCell, pxGap = BOARD_
       while (live.length < quota) {
         const cell = state.comp.cells[Math.floor(rand() * state.comp.cells.length)];
         // Inset within the cell's fill area so bubbles sit inside the blob.
+        // Padding accounts for bubble radius + stroke half-width + a small
+        // margin so the stroke never crosses the pit outline.
         const inner = pxCell * ACID_FILL_SCALE;
         const m = (pxCell - inner) / 2;
-        const pad = Math.max(2, intBubbleR * 1.2);
+        const pad = Math.max(2, intBubbleR + strokeW * 0.5 + 1);
         const x = cell.c * step + m + pad + rand() * (inner - 2 * pad);
         const y = cell.r * step + m + pad + rand() * (inner - 2 * pad);
         live.push({
@@ -182,10 +244,10 @@ export function renderAcidPits(scene, container, level, { pxCell, pxGap = BOARD_
         if (t01 < popStart) {
           const s = t01 < 0.3 ? t01 / 0.3 : 1;
           const r = peakR * s;
-          if (r > 0.5) drawBubble(bubbleGfx, b.x, b.y, r);
+          if (r > 0.5) drawBubble(bubbleGfx, b.x, b.y, r, strokeW, outlineHex);
         } else {
           const popT = (t01 - popStart) / POP_FRAC;
-          drawPopBurst(bubbleGfx, b.x, b.y, peakR, popT, b.popSeed);
+          drawPopBurst(bubbleGfx, b.x, b.y, peakR, popT, b.popSeed, strokeW, outlineHex);
         }
       }
     }
@@ -199,23 +261,23 @@ export function renderAcidPits(scene, container, level, { pxCell, pxGap = BOARD_
   };
 }
 
-// Bubble — transparent interior, black outline. Reads as a glassy
-// circle on top of the acid blob instead of a painted-on white dot.
-function drawBubble(gfx, x, y, r) {
-  gfx.lineStyle(1.2, 0x1a2332, 0.85);
+// Bubble — transparent interior with an outline that matches the pit's
+// border (same colour and thickness) so the bubble reads as carved out of
+// the same membrane as the pit perimeter.
+function drawBubble(gfx, x, y, r, strokeW, strokeHex) {
+  gfx.lineStyle(strokeW, strokeHex, 0.85);
   gfx.strokeCircle(x, y, r);
 }
 
-// Star-burst "pop" — a small, quick black-outline star. Juice dialled
-// down: short reach, thin spikes, no central dot.
-function drawPopBurst(gfx, x, y, peakR, popT, popSeed) {
+// Star-burst "pop" — short reach, spikes match the pit border thickness
+// and colour for visual continuity with the bubble outline.
+function drawPopBurst(gfx, x, y, peakR, popT, popSeed, strokeW, strokeHex) {
   const spikeAlpha = Math.max(0, 1 - popT);
   if (spikeAlpha <= 0) return;
   const ease = 1 - (1 - popT) * (1 - popT);
   const reach = peakR * (0.9 + ease * 0.6);   // topped out at ~1.5× peakR
-  const spikeW = Math.max(0.8, peakR * 0.1);
   const POINTS = 5;
-  gfx.lineStyle(spikeW, 0x1a2332, spikeAlpha);
+  gfx.lineStyle(strokeW, strokeHex, spikeAlpha);
   for (let i = 0; i < POINTS; i++) {
     const ang = popSeed + (i * 2 * Math.PI) / POINTS;
     const x1 = x + Math.cos(ang) * peakR * 0.25;
