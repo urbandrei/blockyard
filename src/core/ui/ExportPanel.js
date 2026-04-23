@@ -13,6 +13,27 @@ const PANEL_DEPTH  = 9001;
 const PANEL_FILL   = 0xffffff;
 const PANEL_STROKE = 0x1a2332;
 
+// Layout constants — keeping everything aligned to a simple grid so rows
+// stack predictably and the modal matches ImportModal's visual rhythm.
+const PANEL_PAD       = 24;
+const FIELD_ROW_H     = 44;
+const FIELD_LABEL_X   = 0;    // relative to content-left
+const FIELD_VALUE_X   = 88;
+const EDIT_BTN_W      = 60;
+const EDIT_BTN_H      = 28;
+const SHARE_BOX_H     = 90;
+const ACTION_BTN_W    = 150;
+const ACTION_BTN_H    = 40;
+const ACTION_GAP      = 12;
+const SECONDARY_BTN_W = 280;
+const SECONDARY_BTN_H = 34;
+const DIVIDER_COLOR   = 0xdbe3ee;
+
+// Base URL for shareable level links. Hardcoded to the Render static site
+// so a link copied from any context (itch iframe, localhost dev) points at
+// a reliable origin — matches CommunityScene._shareLevel.
+const SHARE_BASE_URL = 'https://www.block-yard.com';
+
 export class ExportPanel {
   /**
    * @param {Phaser.Scene} scene
@@ -40,10 +61,16 @@ export class ExportPanel {
       .setDepth(SHIELD_DEPTH).setInteractive();
 
     const panelW = Math.min(560, width - 60);
-    const panelH = 500;
+    const panelH = 560;
     const px = width / 2 - panelW / 2;
     const py = height / 2 - panelH / 2;
     this._panel = { px, py, panelW, panelH };
+
+    // Content column — everything anchors off contentL / contentR so rows
+    // stay aligned as the panel width varies with the viewport.
+    const contentL = px + PANEL_PAD;
+    const contentR = px + panelW - PANEL_PAD;
+    const contentW = contentR - contentL;
 
     this.bg = this.scene.add.graphics().setDepth(PANEL_DEPTH);
     this.bg.fillStyle(PANEL_FILL, 1);
@@ -51,88 +78,132 @@ export class ExportPanel {
     this.bg.fillRoundedRect(px, py, panelW, panelH, 16);
     this.bg.strokeRoundedRect(px, py, panelW, panelH, 16);
 
-    this._addText(width / 2, py + 30, 'EXPORT LEVEL', '24px', 'bold', '#1a2332');
+    // --- header bar: title centered, close top-right ---
+    this._addText(width / 2, py + 30, 'EXPORT LEVEL', '22px', 'bold', '#1a2332');
+    this._closeButton = this._smallButton(contentR - 18, py + 30, 36, 28, 'X', () => this._close());
 
-    // Name row.
-    this._addText(px + 20, py + 78, 'NAME', '12px', 'bold', '#1a2332', 0, 0.5);
-    this.nameDisplay = this.scene.add.text(px + 90, py + 78, this.level.name || 'untitled', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '18px', fontStyle: 'bold',
-      color: '#1a2332',
-    }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH);
-    this.nameEdit = this._smallButton(px + panelW - 90, py + 78, 60, 28, 'EDIT', () => this._editName());
-
-    // Author row.
-    this._addText(px + 20, py + 118, 'AUTHOR', '12px', 'bold', '#1a2332', 0, 0.5);
-    this.authorDisplay = this.scene.add.text(px + 90, py + 118, '\u2014', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#1a2332',
-    }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH);
-    this.authorEdit = this._smallButton(px + panelW - 90, py + 118, 60, 28, 'EDIT', () => this._editAuthor());
+    // --- form rows (name / author / hint) ---
+    const formY = py + 74;
+    this._buildFieldRow(contentL, formY + FIELD_ROW_H * 0, contentW, 'NAME',
+      () => this.level.name || 'untitled',
+      (display) => { this.nameDisplay = display; },
+      () => this._editName(),
+      { valueStyle: { fontSize: '18px', fontStyle: 'bold' } });
+    this._buildFieldRow(contentL, formY + FIELD_ROW_H * 1, contentW, 'AUTHOR',
+      () => '\u2014',
+      (display) => { this.authorDisplay = display; },
+      () => this._editAuthor(),
+      { valueStyle: { fontSize: '16px' } });
 
     // Hint row — the instructional text that appears in the blueprint's
     // top slot at play time. Blank = no hint (top slot stays open).
     // Disabled whenever an initial factory occupies slot row 0, because
-    // the hint pill and a top-row factory can't coexist in the same
-    // cell — the author has to move the factory first.
+    // the hint pill and a top-row factory can't coexist in the same cell.
     this._topRowBlocked = this._hasTopRowFactory();
-    this._addText(px + 20, py + 158, 'HINT', '12px', 'bold', '#1a2332', 0, 0.5);
     const hintColor = this._topRowBlocked
       ? '#a01010'
       : (this.level.instructionalText ? '#1a2332' : '#6b7a8f');
-    this.hintDisplay = this.scene.add.text(px + 90, py + 158, this._hintDisplayText(), {
-      fontFamily: 'system-ui, sans-serif', fontSize: '14px',
-      color: hintColor,
-      wordWrap: { width: panelW - 90 - 90 - 8 },
-    }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH);
-    this.hintEdit = this._smallButton(
-      px + panelW - 90, py + 158, 60, 28, 'EDIT',
+    this._buildFieldRow(contentL, formY + FIELD_ROW_H * 2, contentW, 'HINT',
+      () => this._hintDisplayText(),
+      (display) => { this.hintDisplay = display; },
       () => { if (!this._topRowBlocked) this._editHint(); },
-      { disabled: this._topRowBlocked },
-    );
+      {
+        valueStyle: { fontSize: '14px', color: hintColor, wordWrap: { width: contentW - FIELD_VALUE_X - EDIT_BTN_W - 16 } },
+        disabled: this._topRowBlocked,
+      });
 
-    // Share string row.
-    this._addText(px + 20, py + 198, 'SHARE STRING', '12px', 'bold', '#1a2332', 0, 0.5);
-    const shareBoxX = px + 20, shareBoxY = py + 218, shareBoxW = panelW - 40, shareBoxH = 80;
+    // --- divider ---
+    const dividerY = formY + FIELD_ROW_H * 3 + 8;
+    this._drawDivider(contentL, dividerY, contentW);
+
+    // --- share string box with COPY button inline in the header ---
+    const shareHeaderY = dividerY + 22;
+    this._addText(contentL, shareHeaderY, 'SHARE STRING', '12px', 'bold', '#1a2332', 0, 0.5);
+    this.copyBtn = this._smallButton(contentR - EDIT_BTN_W / 2, shareHeaderY, EDIT_BTN_W, EDIT_BTN_H, 'COPY', () => this._copyShare());
+
+    const shareBoxY = shareHeaderY + 20;
     this.shareBg = this.scene.add.graphics().setDepth(PANEL_DEPTH);
     this.shareBg.fillStyle(0xeef3fb, 1);
     this.shareBg.lineStyle(1, PANEL_STROKE, 0.6);
-    this.shareBg.fillRoundedRect(shareBoxX, shareBoxY, shareBoxW, shareBoxH, 8);
-    this.shareBg.strokeRoundedRect(shareBoxX, shareBoxY, shareBoxW, shareBoxH, 8);
+    this.shareBg.fillRoundedRect(contentL, shareBoxY, contentW, SHARE_BOX_H, 8);
+    this.shareBg.strokeRoundedRect(contentL, shareBoxY, contentW, SHARE_BOX_H, 8);
     const shareText = this._encodeShareString(this.level);
-    this.shareLabel = this.scene.add.text(shareBoxX + 8, shareBoxY + 8,
-      truncate(shareText, 220), {
+    this.shareLabel = this.scene.add.text(contentL + 10, shareBoxY + 10,
+      truncate(shareText, 240), {
       fontFamily: 'monospace', fontSize: '11px', color: '#1a2332',
-      wordWrap: { width: shareBoxW - 16 },
+      wordWrap: { width: contentW - 20 },
     }).setOrigin(0, 0).setDepth(PANEL_DEPTH);
     this._shareString = shareText;
-    this.copyBtn = this._smallButton(px + panelW - 70, shareBoxY + shareBoxH - 18, 100, 28, 'COPY', () => this._copyShare());
 
-    // Action row. Export actions (Download/Save/Publish) sit in the main
-    // row, EDIT MORE sits just above in a dimmer style so it's clearly a
-    // "rewind" option rather than an export destination.
-    const actionY = py + panelH - 90;
-    const actionW = 130, actionH = 40, gap = 12;
-    const totalW = actionW * 3 + gap * 2;
-    const startX = px + (panelW - totalW) / 2;
+    // --- divider between share-string and actions ---
+    const dividerY2 = shareBoxY + SHARE_BOX_H + 20;
+    this._drawDivider(contentL, dividerY2, contentW);
+
+    // --- primary action row: DOWNLOAD / SAVE / PUBLISH ---
+    const actionRowY = dividerY2 + 32;
+    const actionsTotalW = ACTION_BTN_W * 3 + ACTION_GAP * 2;
+    const actionsStartX = px + (panelW - actionsTotalW) / 2;
     this._actions = [
-      this._actionButton(startX + actionW / 2,                       actionY, actionW, actionH, 'DOWNLOAD JSON', () => this._downloadJson()),
-      this._actionButton(startX + actionW + gap + actionW / 2,       actionY, actionW, actionH, 'SAVE TO LIBRARY', () => this._saveToLibrary()),
-      this._actionButton(startX + (actionW + gap) * 2 + actionW / 2, actionY, actionW, actionH, 'PUBLISH',         () => this._publish()),
+      this._actionButton(actionsStartX + ACTION_BTN_W / 2,                          actionRowY, ACTION_BTN_W, ACTION_BTN_H, 'DOWNLOAD JSON',   () => this._downloadJson()),
+      this._actionButton(actionsStartX + ACTION_BTN_W + ACTION_GAP + ACTION_BTN_W / 2, actionRowY, ACTION_BTN_W, ACTION_BTN_H, 'SAVE TO LIBRARY', () => this._saveToLibrary()),
+      this._actionButton(actionsStartX + (ACTION_BTN_W + ACTION_GAP) * 2 + ACTION_BTN_W / 2, actionRowY, ACTION_BTN_W, ACTION_BTN_H, 'PUBLISH',       () => this._publish()),
     ];
-    // EDIT MORE — returns to pre-blueprint design mode. Only shown when a
-    // handler is provided (exit logic lives in EditorScene).
+
+    // --- secondary row: EDIT MORE (if applicable) + COPY SHARE LINK ---
+    const secondaryRowY = actionRowY + ACTION_BTN_H + 16;
+    const secondaryPair = [];
     if (this.opts.onEditMore) {
-      this._editMoreBtn = this._secondaryButton(
-        px + 100, actionY - 54, 160, 34, '\u2190 EDIT MORE',
-        () => { const cb = this.opts.onEditMore; this._close(); cb(); },
-      );
+      secondaryPair.push({
+        label: '\u2190 EDIT MORE',
+        onTap: () => { const cb = this.opts.onEditMore; this._close(); cb(); },
+      });
     }
+    secondaryPair.push({
+      label: 'COPY SHARE LINK',
+      onTap: () => this._copyShareLink(),
+      shareLink: true,
+    });
+    const pairW = secondaryPair.length === 2 ? SECONDARY_BTN_W * 0.72 : SECONDARY_BTN_W;
+    const pairGap = 12;
+    const pairTotalW = pairW * secondaryPair.length + pairGap * (secondaryPair.length - 1);
+    const pairStartX = px + (panelW - pairTotalW) / 2;
+    secondaryPair.forEach((b, i) => {
+      const cx = pairStartX + pairW / 2 + i * (pairW + pairGap);
+      const btn = this._secondaryButton(cx, secondaryRowY, pairW, SECONDARY_BTN_H, b.label, b.onTap);
+      if (b.shareLink) this._shareLinkBtn = btn;
+      else             this._editMoreBtn  = btn;
+    });
 
-    this._closeButton = this._smallButton(px + panelW - 28, py + 28, 36, 28, 'X', () => this._close());
-
-    // Status text shown after save/publish.
-    this.status = this.scene.add.text(width / 2, py + panelH - 32, '', {
+    // --- status line at the bottom ---
+    this.status = this.scene.add.text(width / 2, py + panelH - 22, '', {
       fontFamily: 'system-ui, sans-serif', fontSize: '12px', color: '#1a2332',
     }).setOrigin(0.5).setDepth(PANEL_DEPTH);
+  }
+
+  // Draws one label + value + EDIT-button row. All three pieces anchor off
+  // (rowX, rowY) which is the row's left edge + vertical center.
+  _buildFieldRow(rowX, rowY, rowW, label, getValue, setDisplay, onEdit, opts = {}) {
+    this._addText(rowX + FIELD_LABEL_X, rowY, label, '12px', 'bold', '#1a2332', 0, 0.5);
+    const valueStyle = Object.assign({
+      fontFamily: 'system-ui, sans-serif', fontSize: '16px', color: '#1a2332',
+    }, opts.valueStyle || {});
+    const display = this.scene.add.text(rowX + FIELD_VALUE_X, rowY, getValue(), valueStyle)
+      .setOrigin(0, 0.5).setDepth(PANEL_DEPTH);
+    setDisplay(display);
+    (this._fieldDisplays || (this._fieldDisplays = [])).push(display);
+    const editX = rowX + rowW - EDIT_BTN_W / 2;
+    const btn = this._smallButton(editX, rowY, EDIT_BTN_W, EDIT_BTN_H, 'EDIT', onEdit, { disabled: !!opts.disabled });
+    (this._fieldEditBtns || (this._fieldEditBtns = [])).push(btn);
+  }
+
+  _drawDivider(x, y, w) {
+    const g = this.scene.add.graphics().setDepth(PANEL_DEPTH);
+    g.lineStyle(1, DIVIDER_COLOR, 1);
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + w, y);
+    g.strokePath();
+    (this._dividers || (this._dividers = [])).push(g);
   }
 
   _addText(x, y, text, size, weight, color, ox = 0.5, oy = 0.5) {
@@ -302,6 +373,48 @@ export class ExportPanel {
     return chunk(b64, 60);
   }
 
+  // Copies a self-contained `?play=<base64>` deep link. Works for any
+  // level regardless of save/publish state — the share-string IS the level
+  // payload, so the recipient's client decodes it inline without needing
+  // to hit the server. That means pre-approval levels can be shared.
+  _copyShareLink() {
+    if (!this._boardSizeOk()) return;
+    // Strip the display-only line breaks we added in _encodeShareString so
+    // the URL param is a single contiguous base64 blob.
+    const raw = (this._shareString || this._encodeShareString(this.level)).replace(/\s+/g, '');
+    const url = `${SHARE_BASE_URL}/?play=${encodeURIComponent(raw)}`;
+    const done = (msg) => this._setStatus(msg);
+    const successMsg = 'Share link copied.';
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+        navigator.clipboard.writeText(url).then(
+          () => done(successMsg),
+          () => this._fallbackCopyString(url, () => done(successMsg)),
+        );
+      } else {
+        this._fallbackCopyString(url, () => done(successMsg));
+      }
+    } catch (e) {
+      this._setStatus('Copy failed: ' + e.message);
+    }
+  }
+
+  _fallbackCopyString(text, onDone) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      onDone();
+    } catch (e) {
+      this._setStatus('Could not copy link.');
+    }
+  }
+
   _copyShare() {
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -393,21 +506,23 @@ export class ExportPanel {
     if (this._destroyed) return;
     this._destroyed = true;
     if (this._nameInput)   { this._nameInput.destroy(); this._nameInput = null; }
+    if (this._hintInput)   { this._hintInput.destroy(); this._hintInput = null; }
     if (this._authorPrompt) { this._authorPrompt.destroy(); this._authorPrompt = null; }
     this.shield.destroy();
     this.bg.destroy();
-    this.nameDisplay.destroy();
-    this.authorDisplay.destroy();
     this.shareBg.destroy();
     this.shareLabel.destroy();
     this.status.destroy();
-    // Headings / section labels added via _addText aren't tracked per-field
-    // — they accumulate in `this._labels`. Without this loop they'd stick
-    // around on the scene after close as ghost text.
-    for (const t of this._labels) { if (t) t.destroy(); }
-    this._labels.length = 0;
-    const all = [this.nameEdit, this.authorEdit, this.copyBtn, this._closeButton, this._editMoreBtn, ...(this._actions || [])];
-    for (const b of all) {
+    for (const t of (this._labels || [])) { if (t) t.destroy(); }
+    if (this._labels) this._labels.length = 0;
+    for (const d of (this._fieldDisplays || [])) { if (d) d.destroy(); }
+    for (const g of (this._dividers || [])) { if (g) g.destroy(); }
+    const buttons = [
+      this.copyBtn, this._closeButton, this._editMoreBtn, this._shareLinkBtn,
+      ...(this._actions || []),
+      ...(this._fieldEditBtns || []),
+    ];
+    for (const b of buttons) {
       if (b) { b.rect.destroy(); b.text.destroy(); }
     }
   }

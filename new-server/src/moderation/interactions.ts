@@ -18,7 +18,6 @@ import { verifyKey, InteractionType, InteractionResponseType } from 'discord-int
 import { env } from '../env.js';
 import { db, schema } from '../db/client.js';
 import { buildSubmissionEmbed, buildCopyOnlyRow } from './embed.js';
-import { chunkShareString } from '../share.js';
 
 export const discordRoutes = new Hono();
 
@@ -62,7 +61,7 @@ async function handleComponent(c: any, interaction: DiscordInteraction) {
 
   if (action === 'approve') return approve(c, id, moderator);
   if (action === 'deny')    return openDenyModal(c, id);
-  if (action === 'copy')    return copyCode(c, id);
+  if (action === 'link')    return socialLink(c, id);
   return c.json(ephemeralText('unknown action'));
 }
 
@@ -102,19 +101,20 @@ function openDenyModal(c: any, levelId: string) {
   });
 }
 
-async function copyCode(c: any, levelId: string) {
+// Build a self-contained deep-link URL — the share_code IS the level
+// payload (base64 of the minified JSON), so the recipient's client decodes
+// it inline without a server fetch. Works pre- and post-approval.
+async function socialLink(c: any, levelId: string) {
   const [row] = await db.select({ shareCode: schema.levels.shareCode, name: schema.levels.name })
     .from(schema.levels).where(eq(schema.levels.id, levelId)).limit(1);
   if (!row) return c.json(ephemeralText('level not found'));
 
-  const chunks = chunkShareString(row.shareCode);
-  const first = chunks[0] ?? '';
-  const rest = chunks.length > 1 ? `\n_(${chunks.length - 1} more chunk(s) truncated — re-export if needed)_` : '';
+  const url = `${env.SHARE_BASE_URL.replace(/\/+$/, '')}/?play=${encodeURIComponent(row.shareCode)}`;
   return c.json({
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
     data: {
       flags: 64,                             // ephemeral
-      content: `**Share code for ${row.name}** (paste into Import Level):\n\`\`\`\n${first}\n\`\`\`${rest}`,
+      content: `**${row.name}** — share link:\n${url}`,
     },
   });
 }

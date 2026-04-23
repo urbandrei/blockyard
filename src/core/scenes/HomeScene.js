@@ -18,6 +18,7 @@ import { Simulation } from '../sim/Simulation.js';
 import { shapeSquash } from '../render/pulse.js';
 import { genId } from '../model/level.js';
 import { COLOR_HEX } from '../model/shape.js';
+import { platform } from '../../platform/index.js';
 import { BOARD_GAP, CYCLE_MS, SHAPE_SCALE, motionWarp, outlineWidth } from '../constants.js';
 
 // Home menu rendered as a miniature live level. Three factory "buttons" sit
@@ -65,6 +66,13 @@ export default class HomeScene extends Phaser.Scene {
 
   async create() {
     disableMenuBg();
+
+    // Shareable deep-link: `?level=<id>` on any origin (our Render static
+    // site, itch's forwarded query, localhost) jumps straight into the
+    // Player. Checked before fadeIn so we don't flash the home screen
+    // between the fetch and the scene transition.
+    if (await this._handleDeepLink()) return;
+
     fadeIn(this);
     // Phaser keeps scene instances alive across `scene.start`, so flags
     // like `_letterboxWired` survive into a re-entry. Resetting here
@@ -621,6 +629,56 @@ export default class HomeScene extends Phaser.Scene {
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.update(time);
     if (this.borderFunnelParticles)  this.borderFunnelParticles.update(time);
   }
+
+  // Returns true when a deep link was handled (and the scene is already
+  // fading to Player), so create() can bail before building home UI.
+  // Two URL params are supported:
+  //   ?play=<base64>  — self-contained share-string, works for any level
+  //                     (even unapproved). Matches ExportPanel's encoding.
+  //   ?level=<id>     — fetches a public level by server id.
+  async _handleDeepLink() {
+    let params = null;
+    try { params = new URL(window.location.href).searchParams; }
+    catch (e) { return false; }
+    const playB64 = params.get('play');
+    const id = params.get('level');
+    if (!playB64 && !id) return false;
+
+    // Always strip the param — whether we succeed or not, a page refresh
+    // shouldn't replay the deep link forever.
+    try { window.history.replaceState({}, '', window.location.pathname); }
+    catch (e) {}
+
+    if (playB64) {
+      const body = decodeInlineShareString(playB64);
+      if (!body) return false;
+      fadeTo(this, 'Player', { levelData: body });
+      return true;
+    }
+
+    let res = null;
+    try { res = await platform.fetchLevel(id); } catch (e) {}
+    const body = res && res.level;
+    if (!body) return false;
+
+    fadeTo(this, 'Player', { levelData: body });
+    return true;
+  }
+}
+
+// Inverse of ExportPanel._encodeShareString — accepts either the chunked
+// (newline-wrapped) form or a plain base64 string; strips whitespace and
+// decodes. Returns null on any parse failure so the caller can fall back
+// to the normal Home flow.
+function decodeInlineShareString(s) {
+  try {
+    const clean = String(s || '').replace(/\s+/g, '');
+    if (!clean) return null;
+    const utf8 = atob(clean);
+    const json = decodeURIComponent(escape(utf8));
+    const obj = JSON.parse(json);
+    return obj && typeof obj === 'object' ? obj : null;
+  } catch (e) { return null; }
 }
 
 // Local copy of the same helper used in PlayerScene / EditorScene — kept

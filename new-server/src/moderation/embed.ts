@@ -54,21 +54,21 @@ export function buildReviewButtons(levelId: string): Record<string, unknown> {
   return {
     type: ACTION_ROW,
     components: [
-      { type: BUTTON, style: STYLE_SUCCESS,   label: 'Approve',   custom_id: `by:approve:${levelId}` },
-      { type: BUTTON, style: STYLE_DANGER,    label: 'Deny…',     custom_id: `by:deny:${levelId}` },
-      { type: BUTTON, style: STYLE_SECONDARY, label: 'Copy Code', custom_id: `by:copy:${levelId}` },
+      { type: BUTTON, style: STYLE_SUCCESS,   label: 'Approve',     custom_id: `by:approve:${levelId}` },
+      { type: BUTTON, style: STYLE_DANGER,    label: 'Deny…',       custom_id: `by:deny:${levelId}` },
+      { type: BUTTON, style: STYLE_SECONDARY, label: 'Social Link', custom_id: `by:link:${levelId}` },
     ],
   };
 }
 
 // After a level is approved or rejected the Approve/Deny buttons disappear
-// — only the Copy Code option remains so moderators can still grab the
-// share string.
+// — only the Social Link option remains so moderators can still share the
+// level URL for announcements / previews.
 export function buildCopyOnlyRow(levelId: string): Record<string, unknown> {
   return {
     type: ACTION_ROW,
     components: [
-      { type: BUTTON, style: STYLE_SECONDARY, label: 'Copy Code', custom_id: `by:copy:${levelId}` },
+      { type: BUTTON, style: STYLE_SECONDARY, label: 'Social Link', custom_id: `by:link:${levelId}` },
     ],
   };
 }

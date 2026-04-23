@@ -23,10 +23,3 @@ export function decodeShareString(s: string): Record<string, unknown> | null {
     return obj && typeof obj === 'object' ? obj as Record<string, unknown> : null;
   } catch { return null; }
 }
-
-// Discord messages cap at 2000 chars; leave headroom for the code fence.
-export function chunkShareString(s: string, max = 1900): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < s.length; i += max) out.push(s.slice(i, i + max));
-  return out;
-}

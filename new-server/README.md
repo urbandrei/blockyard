@@ -75,16 +75,20 @@ Rate limits (per-process, reset on restart): 10 publishes / 24h per token+IP, 60
 
 ## Discord setup (one-time)
 
-1. **Create the application.** Go to <https://discord.com/developers/applications> → **New Application**. Copy **Application ID** and **Public Key** from the General Information page. No bot token is needed — we're doing HTTPS-only interactions.
-2. **Create the review channel webhook.** In your private review server → target channel → **Edit Channel → Integrations → Webhooks → New Webhook**. Copy the full webhook URL into `DISCORD_WEBHOOK_URL`.
-3. **Point the Interactions Endpoint at the server.** In the app's General Information page, set **Interactions Endpoint URL** to `https://<your-render-host>/discord/interactions`. When you save, Discord immediately sends a PING request — your server must be running and verifying correctly or Discord rejects the URL.
-4. **Invite the app to the review server** (only needed so its commands show up — the webhook is what actually posts). OAuth2 → URL Generator, `applications.commands` scope, paste the URL into a browser.
+The server posts submission embeds **via a bot user**, not a channel webhook. Manually-created channel webhooks can't attach interactive components to messages — Discord silently drops buttons on those. Only application-owned bots can, so the bot route is the only one that makes Approve / Deny / Social Link render.
+
+1. **Create the application.** Go to <https://discord.com/developers/applications> → **New Application**. From the General Information page, copy **Application ID** → `DISCORD_APP_ID` and **Public Key** → `DISCORD_PUBLIC_KEY`.
+2. **Create the bot user.** In the app's **Bot** tab, click **Reset Token** and copy the token → `DISCORD_BOT_TOKEN`. Leave privileged intents off; we don't use any.
+3. **Invite the bot to your review server.** In **OAuth2 → URL Generator**, check scopes `bot` and `applications.commands`. Under Bot Permissions, check `Send Messages` and `Embed Links`. Open the generated URL in a browser and pick your private review server.
+4. **Copy the review channel id.** In Discord, enable Developer Mode (User Settings → Advanced), then right-click your `#level-reviews` channel → **Copy Channel ID** → `DISCORD_CHANNEL_ID`. Make sure the bot has Send Messages permission in that specific channel (or inherits it from the category).
+5. **Point the Interactions Endpoint at the server.** In the app's General Information page, set **Interactions Endpoint URL** to `https://<your-render-host>/discord/interactions`. When you save, Discord immediately sends a signed PING request — your server must be running and verifying correctly or Discord rejects the URL.
+6. **Set `SHARE_BASE_URL`** to your game's public domain (e.g. `https://www.block-yard.com`). The Social Link button produces URLs from this base.
 
 Each submission posts an embed + three buttons:
 
-- **Approve** — DB flips to `public`; embed re-rendered in green; buttons collapse to Copy-Code only.
+- **Approve** — DB flips to `public`; embed re-rendered in green; buttons collapse to Social-Link-only.
 - **Deny…** — opens a modal; the reason is saved to `rejected_reason`; embed re-rendered in red.
-- **Copy Code** — replies ephemerally with the share-string in a code block (paste into the game's Import Level modal).
+- **Social Link** — replies ephemerally with a self-contained deep-link URL (`…/?play=<base64>`). Works pre- and post-approval since the level payload is embedded in the URL, so mods can test-play before approving.
 
 ## Render deployment
 
@@ -93,7 +97,7 @@ Each submission posts an embed + three buttons:
 Secrets you still need to set in the Render dashboard (marked `sync: false` in the YAML):
 
 - `ALLOWED_ORIGINS` — comma-separated list of your game build origins (e.g. `https://my-game.itch.io,https://www.newgrounds.com,https://www.crazygames.com`)
-- `DISCORD_APP_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_WEBHOOK_URL`
+- `DISCORD_APP_ID`, `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID`, `SHARE_BASE_URL`
 
 `buildCommand` runs `npm run build && npm run db:migrate`, so each deploy re-applies any new migrations before the server boots.
 

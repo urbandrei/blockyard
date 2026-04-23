@@ -371,6 +371,39 @@ export default class CommunityScene extends Phaser.Scene {
     });
   }
 
+  // Shareable deep-link base. Hardcoded to the Render static site so a link
+  // copied from any context (itch iframe, localhost dev) still points at a
+  // reliable origin. Receiving side works on both Render and itch because
+  // HomeScene._handleDeepLink reads `?level=` from whatever origin served
+  // the game.
+  _shareLevel(id, name) {
+    const url = `https://www.block-yard.com/?level=${encodeURIComponent(id)}`;
+    const done = (msg) => this._toast(msg || `Share link copied${name ? ` — ${name}` : ''}`);
+    // navigator.clipboard is async and can reject when the page isn't in a
+    // secure context or the user denies permission. Fall back to a legacy
+    // execCommand approach so the button still works on older iframes.
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(url).then(() => done(), () => this._fallbackCopy(url, done));
+    } else {
+      this._fallbackCopy(url, done);
+    }
+  }
+
+  _fallbackCopy(text, onDone) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      onDone();
+    } catch (e) {
+      onDone('Could not copy link');
+    }
+  }
+
   _toast(message) {
     if (this._toastText) this._toastText.destroy();
     const y = (this._listBottom || (this.scale.height - 80)) - 8;
@@ -523,6 +556,9 @@ export default class CommunityScene extends Phaser.Scene {
         },
         onEdit: editable
           ? () => fadeTo(this, 'Editor', { designerMode: true, levelId: level.id })
+          : undefined,
+        onShare: isRemote
+          ? () => this._shareLevel(level.id, level.name)
           : undefined,
       });
       for (const p of LevelCard.pieces(card)) this._scrollContainer.add(p);

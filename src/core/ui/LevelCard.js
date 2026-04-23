@@ -29,6 +29,7 @@ export class LevelCard {
    * @param {boolean} opts.liked
    * @param {() => void} opts.onPlay
    * @param {() => void} opts.onToggleLike
+   * @param {() => void} [opts.onShare]   // optional: renders a share button when provided
    */
   constructor(scene, opts) {
     this.scene = scene;
@@ -125,6 +126,23 @@ export class LevelCard {
       const next = await this.opts.onToggleLike();
       this._setLiked(!!next);
     });
+
+    // Share button (only rendered when the caller wires onShare — i.e. for
+    // public/remote levels). Sits immediately left of the heart; uses the
+    // upwards-arrow glyph as a compact "share" mark.
+    if (this.opts.onShare) {
+      const shareCX = likeCX - likeR * 2 - 6;
+      this.shareBg = this.scene.add.circle(shareCX, playCY, likeR, 0x2a3b55, 1)
+        .setStrokeStyle(2, 0x1a2332, 1)
+        .setInteractive({ useHandCursor: true });
+      this.shareGlyph = this.scene.add.text(shareCX, playCY, '\u2197', {
+        fontFamily: 'system-ui, sans-serif', fontSize: '18px', fontStyle: 'bold',
+        color: '#e6edf5',
+      }).setOrigin(0.5);
+      this.shareBg.on('pointerover', () => this.shareBg.setFillStyle(0x3a4d6f, 1));
+      this.shareBg.on('pointerout',  () => this.shareBg.setFillStyle(0x2a3b55, 1));
+      this.shareBg.on('pointerup', () => this.opts.onShare());
+    }
   }
 
   _setLiked(liked) {
@@ -145,6 +163,8 @@ export class LevelCard {
     if (this.editText) this.editText.destroy();
     this.likeBg.destroy();
     this.likeGlyph.destroy();
+    if (this.shareBg)    this.shareBg.destroy();
+    if (this.shareGlyph) this.shareGlyph.destroy();
   }
 
   // Every GameObject this card owns, in a flat array. Used by
@@ -157,6 +177,8 @@ export class LevelCard {
     if (card.playText) out.push(card.playText);
     if (card.editBg)   out.push(card.editBg);
     if (card.editText) out.push(card.editText);
+    if (card.shareBg)    out.push(card.shareBg);
+    if (card.shareGlyph) out.push(card.shareGlyph);
     return out;
   }
 }

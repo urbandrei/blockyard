@@ -13,7 +13,14 @@ const Schema = z.object({
 
   DISCORD_APP_ID: z.string().optional(),
   DISCORD_PUBLIC_KEY: z.string().optional(),
-  DISCORD_WEBHOOK_URL: z.string().url().optional(),
+  // Bot-authenticated channel POST (needed because manually-created
+  // channel webhooks can't attach interactive components to messages —
+  // only application-owned bots can).
+  DISCORD_BOT_TOKEN: z.string().optional(),
+  DISCORD_CHANNEL_ID: z.string().optional(),
+  // Base URL for shareable deep-links. Used by the "Social Link" button in
+  // the review embed. Must match the hardcoded SHARE_BASE_URL on the client.
+  SHARE_BASE_URL: z.string().url().default('https://www.block-yard.com'),
 
   ADMIN_TOKEN: z.string().optional(),
 
