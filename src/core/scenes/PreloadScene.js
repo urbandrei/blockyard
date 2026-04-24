@@ -35,6 +35,13 @@ export default class PreloadScene extends Phaser.Scene {
     for (let i = 1; i <= 3; i++) {
       this.load.audio(`layer_${i}`, [`audio/layer_${i}.ogg`, `audio/layer_${i}.mp3`]);
     }
+    // Decorative gear art around every factory perimeter. Loaded at
+    // 4× native viewBox so the rasterized texture stays crisp when
+    // FactoryGears scales it up to > 2 × pxCell.
+    this.load.svg('gear_quadrant',  'gears/01-quadrant.svg',  { width: 800, height: 800 });
+    this.load.svg('gear_chainring', 'gears/02-chainring.svg', { width: 800, height: 800 });
+    this.load.svg('gear_hexflex',   'gears/03-hexflex.svg',   { width: 800, height: 800 });
+    this.load.svg('gear_triad',     'gears/04-triad.svg',     { width: 800, height: 800 });
   }
 
   create() {

@@ -7,6 +7,7 @@ import { compute920Box } from '../ui/ContentBox.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
 import { renderBorder } from '../render/BorderRenderer.js';
 import { renderFactoryBody } from '../render/FactoryBodyRenderer.js';
+import { renderFactoryGears, spinFactoryGears } from '../render/FactoryGears.js';
 import { renderFunnels } from '../render/FunnelRenderer.js';
 import { renderBufferLabels } from '../render/BufferLabelRenderer.js';
 import {
@@ -31,6 +32,7 @@ import {
   subscribeAudioSettings,
 } from '../audio/settings.js';
 import { SettingsModal } from '../ui/SettingsModal.js';
+import { CreditsModal } from '../ui/CreditsModal.js';
 import { BOARD_GAP, CYCLE_MS, SHAPE_SCALE, motionWarp, outlineWidth } from '../constants.js';
 
 // Home menu rendered as a miniature live level. Three factory "buttons" sit
@@ -113,6 +115,10 @@ export default class HomeScene extends Phaser.Scene {
     // so pits paint over the checker but behind the flowing units and
     // their particles.
     this.acidPitContainer      = this.add.container(0, 0).setDepth(6);
+    // Depth 14 — below funnels (15) and the factory body (20), above
+    // shapes (10), so gears read as background machinery that the
+    // factory body + funnels render on top of.
+    this.gearContainer         = this.add.container(0, 0).setDepth(14);
     // Ambient funnel particles render BELOW shapes so emerging shapes paint
     // over their own preview particles instead of being veiled by them.
     this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(8);
@@ -136,6 +142,10 @@ export default class HomeScene extends Phaser.Scene {
     // frame + buttons so the icons always catch presses even when the
     // exterior checker paints across the upper-right.
     this.toolbarContainer      = this.add.container(0, 0).setDepth(210);
+    // Credits button — a factory-styled tile that sits on the lower-
+    // left buffer of the outer border. Same depth family as the
+    // toolbar so the exterior checker can't paint over it.
+    this.creditsContainer      = this.add.container(0, 0).setDepth(212);
 
     this.level = this._buildLevel();
     this.factoryRefs   = new Map();   // id → { bodyWrap, funnelWrap }
@@ -193,7 +203,9 @@ export default class HomeScene extends Phaser.Scene {
       }
       if (this._laserPrev) this._laserPrev.clear();
       this._destroyToolbar();
+      this._destroyCreditsButton();
       if (this._settingsModal) { try { this._settingsModal.destroy(); } catch (e) {} this._settingsModal = null; }
+      if (this._creditsModal)  { try { this._creditsModal.destroy();  } catch (e) {} this._creditsModal  = null; }
       if (this._titleTexts) for (const t of this._titleTexts) { try { t.destroy(); } catch (e) {} }
       this._titleTexts = null;
     });
@@ -323,6 +335,7 @@ export default class HomeScene extends Phaser.Scene {
     const setPos = (cnt, x, y) => cnt.setPosition(x, y);
     setPos(this.boardContainer,        L.boardOriginX, L.boardOriginY);
     setPos(this.acidPitContainer,      L.boardOriginX, L.boardOriginY);
+    if (this.gearContainer) setPos(this.gearContainer, L.boardOriginX, L.boardOriginY);
     if (this.fxContainer) setPos(this.fxContainer, L.boardOriginX, L.boardOriginY);
     setPos(this.shapeContainer,        L.boardOriginX, L.boardOriginY);
     setPos(this.laserContainer,        L.boardOriginX, L.boardOriginY);
@@ -376,6 +389,7 @@ export default class HomeScene extends Phaser.Scene {
     this._destroyButtons();
     this._buildFactoryButtons(L);
     this._buildToolbar(L);
+    this._buildCreditsButton(L);
 
     // Letterbox checker so the brown pattern wraps the canvas just like in
     // Player. Must run after `pxCell` + board origin are known.
@@ -552,6 +566,7 @@ export default class HomeScene extends Phaser.Scene {
     this.boardContainer.removeAll(true);
     this.funnelContainer.removeAll(true);
     this.interactiveContainer.removeAll(true);
+    if (this.gearContainer) this.gearContainer.removeAll(true);
     this.flowContainer.removeAll(true);
     this.exteriorContainer.removeAll(true);
     this.shadowContainer.removeAll(true);
@@ -589,8 +604,10 @@ export default class HomeScene extends Phaser.Scene {
 
     const funnelWrap = this.add.container(cx, cy);
     const bodyWrap   = this.add.container(cx, cy);
+    const gearWrap   = this.add.container(cx, cy);
     this.interactiveContainer.add(bodyWrap);
     this.funnelContainer.add(funnelWrap);
+    if (this.gearContainer) this.gearContainer.add(gearWrap);
 
     const funnels = renderFunnels(this, funnelWrap, absFunnels, {
       pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
@@ -604,7 +621,17 @@ export default class HomeScene extends Phaser.Scene {
     // No renderFlow() on Home — the dashed manifold would read as
     // distracting UI. Shapes still stream through via the sim; just no
     // per-factory flow graph overlay.
-    this.factoryRefs.set(factory.id, { bodyWrap, funnelWrap, absCells });
+    const gearSet = renderFactoryGears(this, gearWrap, {
+      id: factory.id, cells: absCells, funnels: absFunnels,
+    }, {
+      pxCell: this.pxCell, pxGap: BOARD_GAP,
+      seed: factory.id,
+    });
+    this.factoryRefs.set(factory.id, {
+      bodyWrap, funnelWrap, gearWrap,
+      absCells,
+      gears: gearSet.gears,
+    });
   }
 
   // ---------- Buttons ----------
@@ -849,6 +876,82 @@ export default class HomeScene extends Phaser.Scene {
     });
   }
 
+  _openCredits() {
+    if (this._creditsModal) return;
+    this._creditsModal = new CreditsModal(this, {
+      onClose: () => { this._creditsModal = null; },
+    });
+  }
+
+  // Credits tile — factory-shaped button tucked into the lower-left
+  // corner of the outer buffer. Same renderFactoryBody + label + tap
+  // juice as the LEVEL SELECT / COMMUNITY factories so it reads as
+  // part of the same button family, just living outside the playable
+  // frame. 2 cells wide at (row = BOARD_ROWS - 1, cols 0..1).
+  _buildCreditsButton(L) {
+    this._destroyCreditsButton();
+    const pxCell = L.pxCell;
+    const step = pxCell + BOARD_GAP;
+    const row = BOARD_ROWS - 1;
+    const colStart = 1;
+    const colSpan = 2;
+    const localCells = Array.from({ length: colSpan }, (_, c) => ({ r: 0, c }));
+    const [localCenterX, localCenterY] = factoryCenter(localCells, pxCell, BOARD_GAP);
+    // Center of the cell span in world coords — use BOARD_GAP so the
+    // two cells merge visually the same way the factory bars do.
+    const cx = L.boardOriginX + colStart * step + localCenterX;
+    const cy = L.boardOriginY + row * step + localCenterY;
+
+    const bodyWrap = this.add.container(cx, cy);
+    this.creditsContainer.add(bodyWrap);
+    const body = renderFactoryBody(this, bodyWrap, {
+      cells: localCells, pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
+    });
+    body.setPosition(-localCenterX, -localCenterY);
+
+    const fontSize = Math.max(11, Math.min(26, Math.floor(pxCell * 0.38)));
+    const label = this.add.text(0, 0, 'CREDITS', {
+      fontFamily: 'system-ui, sans-serif', fontSize: `${fontSize}px`,
+      fontStyle: 'bold', color: '#ffffff',
+    }).setOrigin(0.5);
+    bodyWrap.add(label);
+
+    const footprintW = localCenterX * 2;
+    const hit = this.add.rectangle(cx, cy, footprintW - 4, pxCell - 4, 0xffffff, 0)
+      .setInteractive({ useHandCursor: true });
+    this.creditsContainer.add(hit);
+
+    // Tap juice — mirror the factory buttons so the tile springs +
+    // settles on press. No pulse envelope here since the credits tile
+    // isn't part of the sim-synced pulse loop; use a direct scale
+    // tween instead of a multiplier.
+    const killAll = () => { try { this.tweens.killTweensOf(bodyWrap); } catch (e) {} };
+    const tweenScale = (to, duration, ease) => {
+      killAll();
+      this.tweens.add({ targets: bodyWrap, scaleX: to, scaleY: to, duration, ease });
+    };
+    hit.on('pointerover', () => tweenScale(1.04, 140, 'Sine.Out'));
+    hit.on('pointerout',  () => tweenScale(1.0,  180, 'Sine.Out'));
+    hit.on('pointerdown', () => tweenScale(0.93,  90, 'Sine.Out'));
+    hit.on('pointerup', (p, lx, ly, e) => {
+      if (e) e.stopPropagation();
+      tweenScale(1.0, 240, 'Back.Out');
+      playOnce(this.game, 'ui_click', { throttleMs: 80, volume: 0.5 });
+      this._openCredits();
+    });
+
+    this._creditsButton = { bodyWrap, body, label, hit };
+  }
+
+  _destroyCreditsButton() {
+    const b = this._creditsButton;
+    if (!b) return;
+    try { this.tweens.killTweensOf(b.bodyWrap); } catch (e) {}
+    try { b.bodyWrap.destroy(true); } catch (e) {}
+    try { b.hit.destroy(); } catch (e) {}
+    this._creditsButton = null;
+  }
+
   _destroyTitle() {
     if (this._titleTexts) for (const t of this._titleTexts) { try { t.destroy(); } catch (e) {} }
     this._titleTexts = null;
@@ -965,6 +1068,8 @@ export default class HomeScene extends Phaser.Scene {
       const m = (entry._juice && entry._juice.mult) || 1;
       if (entry.bodyWrap)   { entry.bodyWrap.scaleX   = sq.body.scaleX    * m; entry.bodyWrap.scaleY   = sq.body.scaleY    * m; }
       if (entry.funnelWrap) { entry.funnelWrap.scaleX = sq.funnels.scaleX * m; entry.funnelWrap.scaleY = sq.funnels.scaleY * m; }
+      if (entry.gearWrap)   { entry.gearWrap.scaleX   = sq.body.scaleX    * m; entry.gearWrap.scaleY   = sq.body.scaleY    * m; }
+      if (entry.gears && entry.gears.length) spinFactoryGears(entry.gears, this.simTime);
     }
     if (this.borderFunnelWraps) {
       for (const w of this.borderFunnelWraps) { w.scaleX = sq.funnels.scaleX; w.scaleY = sq.funnels.scaleY; }

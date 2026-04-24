@@ -5,6 +5,7 @@ import {
 } from '../model/shape.js';
 import { renderBorder } from '../render/BorderRenderer.js';
 import { renderFactoryBody, renderLockedTint, drawBoltInto } from '../render/FactoryBodyRenderer.js';
+import { renderFactoryGears, spinFactoryGears } from '../render/FactoryGears.js';
 import { renderAcidPits } from '../render/AcidPitRenderer.js';
 import { renderFunnels } from '../render/FunnelRenderer.js';
 import { renderFlow } from '../render/FlowRenderer.js';
@@ -107,6 +108,17 @@ export default class PlayerScene extends Phaser.Scene {
     this.shadowContainer       = this.add.container(0, 0).setDepth(4);
     this.frameContainer        = this.add.container(0, 0).setDepth(5);
     this.acidPitContainer      = this.add.container(0, 0).setDepth(7);
+    // Decorative gear sprites scattered around factory perimeters. Sits
+    // below shapes / funnels / the factory body so each gear only
+    // shows the slice that pokes past the body edge — the rest hides
+    // behind the body fill. One gearWrap child per factory; each wrap
+    // moves / rotates with the factory's body via the same tween
+    // targets used for bodyWrap + funnelWrap.
+    // Depth 14 — below the factory funnels (15) and the factory body
+    // (interactive at 20), so each gear peeks out only where it
+    // extends past those layers. Sits above shape/laser/particle
+    // layers so flowing shapes don't clip in front of the gears.
+    this.gearContainer         = this.add.container(0, 0).setDepth(14);
     // Funnel particles render BELOW shapes so emerging shapes paint over
     // their own preview particles instead of being veiled by them.
     this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(8);
@@ -504,6 +516,8 @@ export default class PlayerScene extends Phaser.Scene {
         anchor: { ...p.anchor },
         cells: rot.cells,
         funnels: rot.funnels,
+        baseCells: p.baseCells,
+        baseFunnels: p.baseFunnels,
         converter: p.converter,
         locked: p.locked,
         rotation: p.rotation || 0,
@@ -606,6 +620,7 @@ export default class PlayerScene extends Phaser.Scene {
     const setPos = (cnt, x, y) => cnt.setPosition(x, y);
     setPos(this.boardContainer,        this.boardOriginX, this.boardOriginY);
     if (this.acidPitContainer) setPos(this.acidPitContainer, this.boardOriginX, this.boardOriginY);
+    if (this.gearContainer) setPos(this.gearContainer, this.boardOriginX, this.boardOriginY);
     setPos(this.interactiveContainer,  this.boardOriginX, this.boardOriginY);
     setPos(this.flowContainer,         this.boardOriginX, this.boardOriginY);
     setPos(this.shapeContainer,        this.boardOriginX, this.boardOriginY);
@@ -669,10 +684,22 @@ export default class PlayerScene extends Phaser.Scene {
     const absCells = factory.cells.map((cc) => ({ ...cc, r: factory.anchor.row + cc.r, c: factory.anchor.col + cc.c }));
     const absFunnels = (factory.funnels || []).map((f) => ({ ...f, r: factory.anchor.row + f.r, c: factory.anchor.col + f.c }));
     const [cx, cy] = factoryCenter(absCells, this.pxCell, BOARD_GAP);
+    // Gear wrap is anchored at the BASE factory's world center — fixed
+    // across rotations — with `wrap.rotation = factory.rotation * π/2`
+    // bringing the gears to their rotated visual positions. This keeps
+    // every gear pinned to the same physical cell-edge through the
+    // blueprint → ghost → board → rotate journey.
+    const baseCells   = factory.baseCells   || factory.cells;
+    const baseFunnels = factory.baseFunnels || factory.funnels || [];
+    const baseAbsCells = baseCells.map((cc) => ({ ...cc, r: factory.anchor.row + cc.r, c: factory.anchor.col + cc.c }));
+    const [bcx, bcy] = factoryCenter(baseAbsCells, this.pxCell, BOARD_GAP);
     const funnelWrap = this.add.container(cx, cy);
     const bodyWrap   = this.add.container(cx, cy);
+    const gearWrap   = this.add.container(bcx, bcy);
+    gearWrap.rotation = (factory.rotation || 0) * Math.PI / 2;
     this.interactiveContainer.add(bodyWrap);
     this.funnelContainer.add(funnelWrap);
+    this.gearContainer.add(gearWrap);
     const funnels = renderFunnels(this, funnelWrap, absFunnels, {
       pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
     });
@@ -697,7 +724,19 @@ export default class PlayerScene extends Phaser.Scene {
       cells: absCells, funnels: absFunnels, pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
     });
     this.flowUpdaters.push(flow);
-    return { bodyWrap, funnelWrap, body, funnels, tintGfx, locked: !!factory.locked, factoryId: factory.id };
+    const gearSet = renderFactoryGears(this, gearWrap, {
+      id: factory.id, cells: baseCells, funnels: baseFunnels,
+    }, {
+      pxCell: this.pxCell, pxGap: BOARD_GAP,
+      seed: factory.id,
+    });
+    return {
+      bodyWrap, funnelWrap, gearWrap,
+      body, funnels, tintGfx,
+      gears: gearSet.gears,
+      locked: !!factory.locked,
+      factoryId: factory.id,
+    };
   }
 
   // Render every stage's border funnels with stage-colored cell tints. The
@@ -764,6 +803,7 @@ export default class PlayerScene extends Phaser.Scene {
     this.flowUpdaters.length = 0;
     this.interactiveContainer.removeAll(true);
     this.funnelContainer.removeAll(true);
+    if (this.gearContainer) this.gearContainer.removeAll(true);
     this.exteriorContainer.removeAll(true);
     this.shadowContainer.removeAll(true);
     this.borderFunnelContainer.removeAll(true);
@@ -1099,16 +1139,33 @@ export default class PlayerScene extends Phaser.Scene {
 
     const funnelWrap = this.add.container(ox + cx, oy + cy);
     const bodyWrap   = this.add.container(ox + cx, oy + cy);
+    // Gears sit at the BASE factory center (invariant under rotation)
+    // with the wrap carrying `rotation * π/2`. Matches the board copy
+    // so picking a factory off the blueprint reads as a seamless lift.
+    const baseCellsLocal   = def.baseCells.map((c) => ({ ...c }));
+    const baseFunnelsLocal = (def.baseFunnels || []).map((f) => ({ ...f }));
+    const [baseCx, baseCy] = factoryCenter(baseCellsLocal, slotPx, 0);
+    const gearWrap = this.add.container(ox + baseCx, oy + baseCy);
+    gearWrap.rotation = (def.rotation || 0) * Math.PI / 2;
     // Non-current stage factories render transparent + non-interactive.
-    if (!isTop) { funnelWrap.setAlpha(0.55); bodyWrap.setAlpha(0.55); }
+    if (!isTop) { funnelWrap.setAlpha(0.55); bodyWrap.setAlpha(0.55); gearWrap.setAlpha(0.55); }
     else if (!isCurrentStage) {
       const a = def.stageIdx < currentIdx ? PAST_STAGE_ALPHA : FUTURE_STAGE_ALPHA;
-      funnelWrap.setAlpha(a); bodyWrap.setAlpha(a);
+      funnelWrap.setAlpha(a); bodyWrap.setAlpha(a); gearWrap.setAlpha(a);
     }
-    // Funnels first → they render BELOW the body (matches the board +
+    // Gears first → they sit BELOW funnels + body, same stacking as
+    // the board (gearContainer at depth 14 is below funnelContainer 15
+    // and interactiveContainer 20).
+    this.blueprintBodyContainer.add(gearWrap);
+    // Funnels next → they render BELOW the body (matches the board +
     // ghost stack, where funnelContainer sits below interactiveContainer).
     this.blueprintBodyContainer.add(funnelWrap);
     this.blueprintBodyContainer.add(bodyWrap);
+    const bpGears = renderFactoryGears(this, gearWrap, {
+      id: def.id, cells: baseCellsLocal, funnels: baseFunnelsLocal,
+    }, {
+      pxCell: slotPx, pxGap: 0, seed: def.id,
+    });
     const funnels = renderFunnels(this, funnelWrap, funnelsLocal, { pxCell: slotPx, pxGap: 0, scale: SHAPE_SCALE });
     funnels.setPosition(-cx, -cy);
     const body = renderFactoryBody(this, bodyWrap, {
@@ -1143,7 +1200,9 @@ export default class PlayerScene extends Phaser.Scene {
       if (!this.blueprintParticleSystems) this.blueprintParticleSystems = [];
       this.blueprintParticleSystems.push(slotParticles);
     }
-    if (isTop) this.blueprintRefs.set(def.id, { bodyWrap, funnelWrap, body, funnels });
+    if (isTop) this.blueprintRefs.set(def.id, {
+      bodyWrap, funnelWrap, gearWrap, body, funnels, gears: bpGears.gears,
+    });
   }
 
   // ---------- Icon island — Home / Level Select / Reset ----------
@@ -1476,9 +1535,12 @@ export default class PlayerScene extends Phaser.Scene {
   // Build a detached ghost container (body + funnels + flow + particles) for a
   // factory at the given world position. Returns { root, destroy }. The ghost
   // lives in this.ghostContainer so it sits above the board/blueprint.
-  _buildHintGhost({ worldX, worldY, baseCells, baseFunnels, rotation, converter }) {
+  _buildHintGhost({ worldX, worldY, baseCells, baseFunnels, rotation, converter, id }) {
     const rot = rotateFactoryShape({ cells: baseCells, funnels: baseFunnels }, rotation);
     const [lcx, lcy] = factoryCenter(rot.cells, this.pxCell, BOARD_GAP);
+    // Base center inside root-local coords — root is at the rotated
+    // top-left, so the base centroid sits at factoryCenter(baseCells).
+    const [baseLcx, baseLcy] = factoryCenter(baseCells, this.pxCell, BOARD_GAP);
     const root = this.add.container(worldX - lcx, worldY - lcy);
     root.setDepth(70);
     // Particles first so they render behind body+funnels.
@@ -1486,6 +1548,16 @@ export default class PlayerScene extends Phaser.Scene {
     particles.setFunnels(
       collectFactoryFunnelsForParticles(rot.cells, rot.funnels, this.pxCell, BOARD_GAP, SHAPE_SCALE),
     );
+    // Gears before funnels/body so they stack BELOW — matches the
+    // board (gearContainer 14 < funnelContainer 15 < interactive 20).
+    const gearWrap = this.add.container(baseLcx, baseLcy);
+    gearWrap.rotation = (rotation || 0) * Math.PI / 2;
+    root.add(gearWrap);
+    const ghostGears = renderFactoryGears(this, gearWrap, {
+      id: id || 'ghost', cells: baseCells, funnels: baseFunnels,
+    }, {
+      pxCell: this.pxCell, pxGap: BOARD_GAP, seed: id || 'ghost',
+    });
     const funnelWrap = this.add.container(lcx, lcy);
     const bodyWrap   = this.add.container(lcx, lcy);
     root.add(funnelWrap);
@@ -1528,7 +1600,7 @@ export default class PlayerScene extends Phaser.Scene {
     const ghost = this._buildHintGhost({
       worldX: startCenter.x, worldY: startCenter.y,
       baseCells: p.baseCells, baseFunnels: p.baseFunnels,
-      rotation: p.rotation, converter: p.converter,
+      rotation: p.rotation, converter: p.converter, id: p.id,
     });
 
     // Remove from board state + re-render (the live factory disappears;
@@ -1593,7 +1665,7 @@ export default class PlayerScene extends Phaser.Scene {
     // matches what the player just saw.
     const ghost = this._buildHintGhost({
       worldX: startCenter.x, worldY: startCenter.y,
-      baseCells, baseFunnels, rotation: startRotation, converter,
+      baseCells, baseFunnels, rotation: startRotation, converter, id: factoryId,
     });
 
     const targetRotation = 0;
@@ -1799,6 +1871,12 @@ export default class PlayerScene extends Phaser.Scene {
           entry.funnelWrap.scaleX = idlePowered ? 1 : sq.funnels.scaleX;
           entry.funnelWrap.scaleY = idlePowered ? 1 : sq.funnels.scaleY;
         }
+        if (entry.gearWrap) {
+          // Gears ride the body pulse — they sit inside the body's
+          // footprint so any other scale feels visually detached.
+          entry.gearWrap.scaleX = idlePowered ? 1 : sq.body.scaleX;
+          entry.gearWrap.scaleY = idlePowered ? 1 : sq.body.scaleY;
+        }
       };
       // Locked factories dim to 0.65 when the sim isn't running so the player
       // can read the dark grid-cell tint through the body; full alpha during
@@ -1847,6 +1925,19 @@ export default class PlayerScene extends Phaser.Scene {
         const alongY = shape.dy !== 0 ? warpStretch : 1 / warpStretch;
         this.shapeRenderer.update(shape, base * alongX, base * alongY);
       }
+    }
+    // Spin decorative gears — rotation angle tracks cumulativeDistance
+    // of simTime so gears slow through shape-slow phases and speed up
+    // through the fast phases. simTime stays at 0 while idle so gears
+    // sit still until the player presses PLAY.
+    for (const ref of this.factoryRefs.values()) {
+      if (ref.gears && ref.gears.length) spinFactoryGears(ref.gears, this.simTime);
+    }
+    for (const ref of this.blueprintRefs.values()) {
+      if (ref.gears && ref.gears.length) spinFactoryGears(ref.gears, this.simTime);
+    }
+    if (this.ghostPulse && this.ghostPulse.gears && this.ghostPulse.gears.length) {
+      spinFactoryGears(this.ghostPulse.gears, this.simTime);
     }
     // Lasers + bolt pulse always refresh (they clear themselves when the
     // sim isn't running, since sim.lasers is empty and boltPowered is a
@@ -2049,7 +2140,11 @@ export default class PlayerScene extends Phaser.Scene {
     const rot = rotateFactoryShape({ cells: p.baseCells, funnels: p.baseFunnels }, newRot);
     const ref = this.factoryRefs.get(p.id);
     if (!this._cellsFitOnBoard(p.anchor.row, p.anchor.col, rot.cells, p.id)) {
-      if (ref) this._shakeRefusal([ref.bodyWrap, ref.funnelWrap], (ref.body && ref.body.labels) || []);
+      if (ref) {
+        const shakeTargets = [ref.bodyWrap, ref.funnelWrap];
+        if (ref.gearWrap) shakeTargets.push(ref.gearWrap);
+        this._shakeRefusal(shakeTargets, (ref.body && ref.body.labels) || []);
+      }
       this._playRotateRefusalSfx();
       return;
     }
@@ -2077,6 +2172,16 @@ export default class PlayerScene extends Phaser.Scene {
         this._renderAll();
       },
     });
+    // Gears wrap is anchored at the BASE factory center (fixed across
+    // rotations) — only rotate it, don't translate.
+    if (ref.gearWrap) {
+      this.tweens.add({
+        targets: ref.gearWrap,
+        rotation: `+=${Math.PI / 2}`,
+        duration: 220,
+        ease: 'Sine.InOut',
+      });
+    }
     // Counter-rotate the cell labels so their glyphs stay upright even
     // while their position rotates around the bodyWrap origin.
     const labels = (ref.body && ref.body.labels) || [];
@@ -2282,10 +2387,22 @@ export default class PlayerScene extends Phaser.Scene {
       collectFactoryFunnelsForParticles(rot.cells, rot.funnels, this.pxCell, BOARD_GAP, SHAPE_SCALE),
     );
     const [cx, cy] = factoryCenter(rot.cells, this.pxCell, BOARD_GAP);
+    // Gears at the BASE factory centroid with `rotation * π/2` applied
+    // to the wrap — pinned to the same physical cell-edge as the board
+    // and blueprint copies.
+    const [dragGearCx, dragGearCy] = factoryCenter(baseCells, this.pxCell, BOARD_GAP);
+    const gWrap = this.add.container(dragGearCx, dragGearCy);
+    gWrap.rotation = (rotation || 0) * Math.PI / 2;
+    this.ghostContainer.add(gWrap);
     const fWrap = this.add.container(cx, cy);
     const bWrap = this.add.container(cx, cy);
     this.ghostContainer.add(fWrap);
     this.ghostContainer.add(bWrap);
+    const dragGearSet = renderFactoryGears(this, gWrap, {
+      id: factoryId, cells: baseCells, funnels: baseFunnels,
+    }, {
+      pxCell: this.pxCell, pxGap: BOARD_GAP, seed: factoryId,
+    });
     const fns = renderFunnels(this, fWrap, rot.funnels, { pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE });
     fns.setPosition(-cx, -cy);
     const body = renderFactoryBody(this, bWrap, {
@@ -2298,7 +2415,7 @@ export default class PlayerScene extends Phaser.Scene {
       cells: rot.cells, funnels: rot.funnels,
       pxCell: this.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
     });
-    this.ghostPulse = { bodyWrap: bWrap, funnelWrap: fWrap };
+    this.ghostPulse = { bodyWrap: bWrap, funnelWrap: fWrap, gearWrap: gWrap, gears: dragGearSet.gears };
     this.ghostContainer.setAlpha(0.95);
 
     this.drag = {

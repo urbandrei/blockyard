@@ -30,6 +30,11 @@ const HEADER_FRAME_FILL   = 0xffffff;
 const HEADER_FRAME_STROKE = 0x1a2332;
 const HEADER_TEXT_COLOR   = '#1a2332';
 
+// Themed section titles, one per group of 10 levels. The order here
+// must match the catalog's section order (sections 1..4 = levels 1-10,
+// 11-20, 21-30, 31-40).
+const SECTION_TITLES = ['BLOCK YARD', 'PAINT SPILL', 'ACID SWAMP', 'LASER FIELD'];
+
 // Unified inter-block margin. Used between every stacked element — header
 // to row, row to boss, boss to next section, and between level tiles
 // within a row — so the layout reads as an evenly spaced column.
@@ -73,7 +78,7 @@ export default class LevelSelectScene extends Phaser.Scene {
   }
 
   _relayout() {
-    for (const g of this._gfx)   g.destroy();
+    for (const g of this._gfx)   { try { this.tweens.killTweensOf(g); } catch (e) {} g.destroy(true); }
     for (const h of this._hits)  h.destroy();
     for (const t of this._texts) t.destroy();
     this._gfx = []; this._hits = []; this._texts = [];
@@ -141,13 +146,15 @@ export default class LevelSelectScene extends Phaser.Scene {
     const cols = 5;
     const btnSize = Math.floor((bpW - BLOCK_GAP * (cols - 1)) / cols);
 
-    // ---- Top-justified stack: header + sections ----
+    // ---- Top-justified stack: themed header per section, then tiles ----
     let y = boxY + TOP_MARGIN;
-    this._drawHeaderBox(centerX, y + HEADER_H / 2, bpW, HEADER_H, 'LEVEL SELECT');
-    y += HEADER_H + BLOCK_GAP;
 
     for (let si = 0; si < SECTIONS.length; si++) {
       const section = SECTIONS[si];
+      const title = SECTION_TITLES[si] || section.name.toUpperCase();
+      this._drawHeaderBox(centerX, y + HEADER_H / 2, bpW, HEADER_H, title);
+      y += HEADER_H + BLOCK_GAP;
+
       const startX = centerX - bpW / 2;
       // Lay out the regular levels in a 5-column grid that wraps over as
       // many rows as the section needs. Each section ends with its boss
@@ -199,27 +206,61 @@ export default class LevelSelectScene extends Phaser.Scene {
     else if (isNext) { fill = COLOR_BLUE;  stroke = COLOR_BLUE_STROKE;  clickable = true;  }
     else             { fill = COLOR_GREY;  stroke = COLOR_GREY_STROKE;  clickable = false; }
 
-    const gfx = this.add.graphics().setDepth(10);
+    // Wrap gfx + number in a container so hover/press tweens scale the
+    // whole tile around its own center without fighting the absolute
+    // positioning of each child.
+    const tile = this.add.container(cx, cy).setDepth(10);
+    const gfx = this.add.graphics();
     gfx.fillStyle(fill, 1);
     gfx.lineStyle(2, stroke, 1);
-    gfx.fillRoundedRect(cx - size / 2, cy - size / 2, size, size, BUTTON_CORNER_R);
-    gfx.strokeRoundedRect(cx - size / 2, cy - size / 2, size, size, BUTTON_CORNER_R);
-    this._gfx.push(gfx);
+    gfx.fillRoundedRect(-size / 2, -size / 2, size, size, BUTTON_CORNER_R);
+    gfx.strokeRoundedRect(-size / 2, -size / 2, size, size, BUTTON_CORNER_R);
+    tile.add(gfx);
 
-    const num = this.add.text(cx, cy, String(level.number), {
+    const num = this.add.text(0, 0, String(level.number), {
       fontFamily: 'system-ui, sans-serif',
       fontSize: `${Math.floor(size * 0.42)}px`,
       fontStyle: 'bold',
       color: '#ffffff',
-    }).setOrigin(0.5).setDepth(11);
-    this._texts.push(num);
+    }).setOrigin(0.5);
+    tile.add(num);
+    this._gfx.push(tile);
 
     if (clickable) {
-      const hit = this.add.rectangle(cx, cy, size, size, 0xffffff, 0)
+      const hit = this.add.rectangle(cx, cy, size, size, 0xffffff, 0.001)
         .setInteractive({ useHandCursor: true }).setDepth(12);
-      hit.on('pointerup', () => fadeTo(this, 'Player', { levelId: level.id }));
+      this._attachTileJuice(hit, tile, () => fadeTo(this, 'Player', { levelId: level.id }));
       this._hits.push(hit);
     }
+  }
+
+  // Hover/press/release juice for a tile container. Mirrors
+  // HomeScene._attachTapJuice — uses direct scale tweens since
+  // LevelSelect doesn't run a per-frame pulse to fight.
+  _attachTileJuice(hit, target, onTap) {
+    const killAll = () => { try { this.tweens.killTweensOf(target); } catch (e) {} };
+    const tweenScale = (to, duration, ease) => {
+      killAll();
+      this.tweens.add({ targets: target, scaleX: to, scaleY: to, duration, ease });
+    };
+    let pressed = false;
+    hit.on('pointerover', () => { if (!pressed) tweenScale(1.06, 140, 'Sine.Out'); });
+    hit.on('pointerout',  () => { pressed = false; tweenScale(1.0, 180, 'Sine.Out'); });
+    hit.on('pointerdown', () => { pressed = true;  tweenScale(0.92,  90, 'Sine.Out'); });
+    hit.on('pointerup',   () => {
+      pressed = false;
+      // Snap back past 1.0 for a springy release, then settle.
+      killAll();
+      this.tweens.add({
+        targets: target, scaleX: 1.12, scaleY: 1.12, duration: 90, ease: 'Sine.Out',
+        onComplete: () => {
+          this.tweens.add({
+            targets: target, scaleX: 1, scaleY: 1, duration: 160, ease: 'Back.Out',
+          });
+        },
+      });
+      if (onTap) onTap();
+    });
   }
 
   _drawBossTile(cx, cy, w, h, section) {

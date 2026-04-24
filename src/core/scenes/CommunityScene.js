@@ -66,7 +66,7 @@ const CARD_H   = 88;
 const CARD_GAP = 10;
 const PAGE_SIZE = 5;
 
-const DISCORD_URL = 'https://discord.gg/TODO';   // TODO: swap for the real invite once it exists
+const DISCORD_URL = 'https://discord.gg/Rhb3wbZedF';
 
 // The filter menu is split into two arrays: FILTER_TOP is the default
 // visible stack (max 5 rows), FILTER_MORE is revealed when the user
