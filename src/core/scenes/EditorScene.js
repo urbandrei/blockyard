@@ -7,6 +7,11 @@ import {
 import { BossPhaseIndicator } from '../ui/BossPhaseIndicator.js';
 import { FunnelParticleSystem, collectFunnelsForParticles, collectFactoryFunnelsForParticles } from '../render/FunnelParticleSystem.js';
 import { getCommunityLevelById, saveLocal as saveCommunityLocal } from '../community.js';
+import { resumeMusic, resetLayersToInitial } from '../audio/MusicEngine.js';
+import {
+  playOnce, wireUiClicks, spawnEmptyClickParticles,
+  playSfxSound, createLoopingSfx,
+} from '../audio/sfx.js';
 import { SaveMenu } from '../ui/SaveMenu.js';
 import { TextInputOverlay } from '../ui/TextInputOverlay.js';
 import {
@@ -41,7 +46,8 @@ import { HelpModal } from '../editor/HelpModal.js';
 import { ConfirmModal } from '../editor/ConfirmModal.js';
 import { TOOLS_BY_SLOT, SLOT, findTool } from '../editor/tools.js';
 import { applyToolAt } from '../editor/applyTool.js';
-import { drawBackChevron, drawHome, drawQuestion, drawTrash, drawPlus, drawMinus } from '../ui/Icons.js';
+import { drawBackChevron, drawHome, drawQuestion, drawTrash, drawPlus, drawMinus, drawGear } from '../ui/Icons.js';
+import { SettingsModal } from '../ui/SettingsModal.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
 import { compute920Box } from '../ui/ContentBox.js';
 import { Simulation } from '../sim/Simulation.js';
@@ -67,7 +73,7 @@ const SHAPE_WARP_AMP = 0.15;
 //   • Play/Stop in the toolbar runs the sim (shapes flow through factories).
 
 const TOOLBAR_H = TitleBar.HEIGHT + 8;    // space reserved above the play area
-const ICON_SLOTS = 4;                     // fixed — HOME, START_OVER, -, +
+const ICON_SLOTS = 5;                     // fixed — HOME, START_OVER, -, +, GEAR
 
 // Blueprint (draft-composer) chrome. Grid + a small separate icon island
 // sitting below the grid in its own rounded-rect panel.
@@ -101,6 +107,7 @@ const SLOT_HOME       = 0;
 const SLOT_START_OVER = 1;
 const SLOT_SHRINK     = 2;
 const SLOT_GROW       = 3;
+const SLOT_GEAR       = 4;
 
 // Board resize clamps (for the +/- buttons; testing-only knob).
 const BOARD_MIN_DIM = 3;
@@ -135,8 +142,20 @@ export default class EditorScene extends Phaser.Scene {
   }
 
   async create() {
+    wireUiClicks(this);
     disableMenuBg();
     fadeIn(this);
+    // The music bed plays everywhere; PlayerScene pauses it while the
+    // sim is idle and resumes on sim start. In the editor the sim is
+    // always auto-running (for live funnel output), so we just force
+    // the bed back on in case it was paused by a prior PlayerScene
+    // transition that didn't cleanly release it. resetLayersToInitial
+    // then snaps layers 2..N back to muted + layer 1 to DEFAULT_VOL so
+    // the editor always sounds like "layer 1 only" regardless of what
+    // state the MusicEngine was left in by the previous scene (e.g.
+    // mid-fade after a victory swell).
+    try { resumeMusic(); } catch (e) {}
+    try { resetLayersToInitial(); } catch (e) {}
     // Synchronous field init BEFORE the await so update() never sees undefined
     // state on the first frame.
     this.ready = false;
@@ -228,18 +247,7 @@ export default class EditorScene extends Phaser.Scene {
     this.sim = new Simulation({
       pxCell: this.pxCell,
       pxGap: BOARD_GAP,
-      onSpawn: (shape) => this.shapeRenderer.spawn(shape),
-      onRemove: (shape, pop, cause) => this.shapeRenderer.remove(shape, pop, cause),
-      onSinkResolve: (funnel, accepted) => {
-        this.bufferMarkerRenderer.mark(funnel, accepted);
-        if (accepted && funnel.ownerId === 'border') {
-          this._onEditorOutputSatisfied(funnel);
-        }
-      },
-      onCollectorSatisfied: (c) => {
-        if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(c, true);
-        this._onEditorCatcherSatisfied(c);
-      },
+      ...this._simCallbacks(),
     });
     this.factoryFunnelParticles = new FunnelParticleSystem(this, this.factoryFunnelParticleContainer, { pxCell: this.pxCell });
     this.borderFunnelParticles  = new FunnelParticleSystem(this, this.borderFunnelParticleContainer,  { pxCell: this.pxCell });
@@ -329,6 +337,12 @@ export default class EditorScene extends Phaser.Scene {
 
     this.events.on('shutdown', () => {
       this.sim.stop();
+      if (this._settingsModal) { try { this._settingsModal.destroy(); } catch (e) {} this._settingsModal = null; }
+      if (this._laserBeamSound) {
+        try { this._laserBeamSound.stop(); this._laserBeamSound.destroy(); } catch (e) {}
+        this._laserBeamSound = null;
+      }
+      if (this._laserPrev) this._laserPrev.clear();
       this.dragCtrl && this.dragCtrl.destroy();
       if (this.saveMenu)  { this.saveMenu.close(); this.saveMenu = null; }
       if (this.nameInput) { this.nameInput.destroy(); this.nameInput = null; }
@@ -441,6 +455,7 @@ export default class EditorScene extends Phaser.Scene {
 
     this.sim.update(time);
     if (this.laserRenderer) this.laserRenderer.update(time, this.sim.lasers, this.sim.emitters);
+    this._updateLaserSounds();
     this._updateBoltVisuals();
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.update(time);
     if (this.borderFunnelParticles)  this.borderFunnelParticles.update(time);
@@ -463,6 +478,106 @@ export default class EditorScene extends Phaser.Scene {
 
   // Per-frame refresh of bolt + factory-perimeter electricity. Each bolt
   // lerps its `glow` toward the sim-reported target. The factory's aggregate
+  // Build the sim-callback bundle with SFX wired in. The editor's sim
+  // runs continuously (live preview), so every callback branches to
+  // playOnce with aggressive throttles — one shape_exit / shape_pop /
+  // zap / acid_bubble per cycle at most, and a per-funnel first-hit
+  // dedupe on red border funnels that resets whenever the author
+  // restarts the sim.
+  _simCallbacks() {
+    return {
+      onSpawn: (shape) => {
+        this.shapeRenderer.spawn(shape);
+        this._playShapeExitOnce();
+      },
+      onRemove: (shape, pop, cause) => {
+        this.shapeRenderer.remove(shape, pop, cause);
+        if (pop) this._playShapePopOnce();
+      },
+      onSinkResolve: (funnel, accepted) => {
+        this.bufferMarkerRenderer.mark(funnel, accepted);
+        if (!this._borderFunnelSounded) this._borderFunnelSounded = new Set();
+        if (funnel.ownerId === 'border' && !this._borderFunnelSounded.has(funnel.key)) {
+          this._borderFunnelSounded.add(funnel.key);
+          playOnce(this.game, accepted ? 'funnel_right' : 'funnel_wrong', { throttleMs: 120, volume: 0.5 });
+        }
+        if (accepted && funnel.ownerId === 'border') {
+          this._onEditorOutputSatisfied(funnel);
+        }
+      },
+      onSinkHit: (funnel) => {
+        if (funnel.ownerId !== 'border') {
+          playOnce(this.game, 'factory_pass', { throttleMs: 90, volume: 0.15 });
+        }
+      },
+      onShapeApproachSink: () => {
+        playOnce(this.game, 'funnel_suck', { throttleMs: 40, volume: 0.22 });
+      },
+      onShapeElectrocuted: () => {
+        playOnce(this.game, 'zap', { throttleMs: 100, volume: 0.5 });
+      },
+      onShapeEnterAcid: () => {
+        playOnce(this.game, 'acid_bubble', { throttleMs: 120, volume: 0.22 });
+      },
+      onCollectorSatisfied: (c) => {
+        if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(c, true);
+        this._onEditorCatcherSatisfied(c);
+      },
+    };
+  }
+
+  // Cycle-throttled shape-exit chirp. Wall-clock CYCLE_MS buckets keep
+  // multiple same-cycle spawns (border inputs + any factory whose sinks
+  // latched last tick) down to one audible click.
+  _playShapeExitOnce() {
+    if (!this.game) return;
+    const cycleIdx = Math.floor(this.time.now / CYCLE_MS);
+    if (this._lastShapeExitCycle === cycleIdx) return;
+    this._lastShapeExitCycle = cycleIdx;
+    playSfxSound(this.game, 'shape_exit', { volume: 0.5 });
+  }
+
+  // Multi-shape wall / laser / wrong-sink pops collapse to one sound
+  // per 80ms window — matches PlayerScene's behavior.
+  _playShapePopOnce() {
+    if (!this.game) return;
+    const now = this.game.loop.time;
+    if (this._shapePopCooldownUntil && now < this._shapePopCooldownUntil) return;
+    this._shapePopCooldownUntil = now + 80;
+    playSfxSound(this.game, 'shape_pop', { volume: 0.5 });
+  }
+
+  // Per-frame laser sound state machine — same contract as PlayerScene.
+  // The editor's sim runs continuously for live preview, so these fire
+  // whenever an emitter the author just placed begins charging / firing.
+  _updateLaserSounds() {
+    const emitters = this.sim && this.sim.emitters;
+    if (!emitters) return;
+    if (!this._laserPrev) this._laserPrev = new Map();
+    let anyFiring = false;
+    for (const e of emitters) {
+      const curPower = e.power || 0;
+      const curFiring = !!e.firing;
+      const prev = this._laserPrev.get(e.key) || { power: 0, firing: false };
+      if (prev.power === 0 && curPower > 0) {
+        playOnce(this.game, 'laser_charge', { throttleMs: 60, volume: 0.45 });
+      }
+      if (!prev.firing && curFiring) {
+        playOnce(this.game, 'laser_fire',   { throttleMs: 60, volume: 0.55 });
+      }
+      if (curFiring) anyFiring = true;
+      prev.power = curPower;
+      prev.firing = curFiring;
+      this._laserPrev.set(e.key, prev);
+    }
+    if (anyFiring && !this._laserBeamSound) {
+      this._laserBeamSound = createLoopingSfx(this.game, 'laser_beam', 0.3);
+    } else if (!anyFiring && this._laserBeamSound) {
+      this._laserBeamSound.destroy();
+      this._laserBeamSound = null;
+    }
+  }
+
   // power (max across its bolts) drives the animated perimeter electricity
   // on "powered" factories.
   _updateBoltVisuals() {
@@ -494,6 +609,17 @@ export default class EditorScene extends Phaser.Scene {
   _restartSim() {
     if (!this.sim) return;
     this.sim.stop();
+    // Drop laser SFX state: emitter keys can change when factories are
+    // added/removed and the running beam loop must stop if the mutation
+    // removed the only firing emitter.
+    if (this._laserPrev) this._laserPrev.clear();
+    if (this._laserBeamSound) {
+      this._laserBeamSound.destroy();
+      this._laserBeamSound = null;
+    }
+    // Fresh preview cycle — let red-border funnels chirp again on their
+    // first hit so the author hears whether a tweak re-breaks the flow.
+    if (this._borderFunnelSounded) this._borderFunnelSounded.clear();
     if (this.shapeRenderer) this.shapeRenderer.clearAll();
     if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.clearAll();
     // Mutations may invalidate the previously-captured solution; force the
@@ -1536,6 +1662,10 @@ export default class EditorScene extends Phaser.Scene {
     const tool = toolId ? findTool(toolId) : null;
     if (!tool) return;
     this._paletteDrag = { slotIdx, tool };
+    // Pickup click — same ui_click the rest of the editor fires when
+    // a GameObject is pressed. Keeps the palette feeling tactile when
+    // you lift a tool out of its slot.
+    playOnce(this.game, 'ui_click', { throttleMs: 100, volume: 0.5 });
     // Fresh ghost graphics — own object so we can reposition cheaply.
     if (this._paletteGhost) { this._paletteGhost.destroy(); this._paletteGhost = null; }
     const g = this.make.graphics({ add: false });
@@ -1565,6 +1695,24 @@ export default class EditorScene extends Phaser.Scene {
     this._snapshotForUndo();
     const result = applyToolAt(this, drag.tool, target);
     if (result && result.mutated) {
+      // Palette-drop SFX:
+      //   • Acid-pit targets or tools that CREATE an acid pit → splash.
+      //   • Border targets or tools that CREATE a border funnel → metal hit.
+      //   • Anything else → plain ui_click so every successful drop
+      //     lands with a tactile cue.
+      const payload = drag.tool && drag.tool.payload;
+      const payloadKind = payload && payload.kind;
+      const isAcid = target.kind === 'acidPit' || payloadKind === 'acid';
+      const isBorder = target.kind === 'borderFunnel' ||
+                       target.kind === 'borderEdge' ||
+                       payloadKind === 'borderFunnel';
+      if (isAcid) {
+        playSfxSound(this.game, 'acid_pit_tap', { volume: 0.5 });
+      } else if (isBorder) {
+        playSfxSound(this.game, 'border_item_tap', { volume: 0.5 });
+      } else {
+        playOnce(this.game, 'ui_click', { throttleMs: 100, volume: 0.5 });
+      }
       this._persist();
       this._renderAll();
       this._renderDrawGrid();
@@ -1587,6 +1735,7 @@ export default class EditorScene extends Phaser.Scene {
     // Acid pit?
     const pit = this._acidPitAt(grabR, grabC);
     if (pit) {
+      playSfxSound(this.game, 'acid_pit_tap', { volume: 0.5 });
       this._snapshotForUndo();
       this._pickupDrag = {
         kind: 'acidPit',
@@ -1605,6 +1754,7 @@ export default class EditorScene extends Phaser.Scene {
     const bfArr = (this.level.border && this.level.border.funnels) || [];
     const bf = bfArr.find((f) => f.r === grabR && f.c === grabC);
     if (bf) {
+      playSfxSound(this.game, 'border_item_tap', { volume: 0.5 });
       const typedEntry = this._lookupBorderType(bf);
       const toolId =
         bf.role === 'input'   ? 'board.borderInput'   :
@@ -1677,6 +1827,9 @@ export default class EditorScene extends Phaser.Scene {
     // already removed it from level state, so we just keep that removal
     // and persist. Pickup-start snapshot is kept so undo restores it.
     if (this._iconSlotAt(px, py)) {
+      // Rustle (no click) — same delete cue as factory/draft deletes.
+      playOnce(this.game, 'click_empty', { throttleMs: 60, volume: 0.22 });
+      spawnEmptyClickParticles(this, px, py);
       this._deactivateTrashIsland();
       this._persist();
       this._renderAll();
@@ -2303,6 +2456,7 @@ export default class EditorScene extends Phaser.Scene {
     addGlyph(SLOT_START_OVER, drawTrash);
     addGlyph(SLOT_SHRINK,     drawMinus);
     addGlyph(SLOT_GROW,       drawPlus);
+    addGlyph(SLOT_GEAR,       drawGear);
   }
 
   _renderDraftShape() {
@@ -2901,6 +3055,11 @@ export default class EditorScene extends Phaser.Scene {
     // Drop-destination priority: delete-zone (icon island during a board
     // factory or draft drag) → board cell → draw grid → cancel.
     if (this._factoryDragActive && this._iconSlotAt(px, py)) {
+      // Delete drop: rustle instead of a click. "With no click" — so
+      // the whole delete cue is a quiet shape-leaves-the-board puff,
+      // distinct from the clack of a placement snap.
+      playOnce(this.game, 'click_empty', { throttleMs: 60, volume: 0.22 });
+      spawnEmptyClickParticles(this, px, py);
       // No snapshot here — drag start already pushed one capturing the
       // pre-drag state (factory on the board / draft populated). Undo
       // will restore that.
@@ -2919,6 +3078,9 @@ export default class EditorScene extends Phaser.Scene {
       this._clearDrag();
       return;
     }
+    // Any other drop (board placement, draft move, or cancel-restore)
+    // is a "snap" — one shared click cue.
+    playOnce(this.game, 'ui_click', { throttleMs: 100, volume: 0.5 });
     if (boardRC && this._tryPlaceOnBoard(boardRC)) {
       this._clearDrag();
       return;
@@ -3698,6 +3860,14 @@ export default class EditorScene extends Phaser.Scene {
       if (this._bossMode && this._bossMaxVisitedIdx > 0) return;
       this._resizeBoard(+1);
     });
+    makeHit(SLOT_GEAR, () => this._openSettings());
+  }
+
+  _openSettings() {
+    if (this._settingsModal) return;
+    this._settingsModal = new SettingsModal(this, {
+      onClose: () => { this._settingsModal = null; },
+    });
   }
 
   // Grow or shrink the interior board by one cell in each dimension. Wipes
@@ -3744,18 +3914,7 @@ export default class EditorScene extends Phaser.Scene {
     this.sim = new Simulation({
       pxCell: this.pxCell,
       pxGap: BOARD_GAP,
-      onSpawn: (shape) => this.shapeRenderer.spawn(shape),
-      onRemove: (shape, pop, cause) => this.shapeRenderer.remove(shape, pop, cause),
-      onSinkResolve: (funnel, accepted) => {
-        this.bufferMarkerRenderer.mark(funnel, accepted);
-        if (accepted && funnel.ownerId === 'border') {
-          this._onEditorOutputSatisfied(funnel);
-        }
-      },
-      onCollectorSatisfied: (c) => {
-        if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(c, true);
-        this._onEditorCatcherSatisfied(c);
-      },
+      ...this._simCallbacks(),
     });
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.resize(this.pxCell);
     if (this.borderFunnelParticles)  this.borderFunnelParticles.resize(this.pxCell);
@@ -3815,18 +3974,7 @@ export default class EditorScene extends Phaser.Scene {
     this.sim = new Simulation({
       pxCell: this.pxCell,
       pxGap: BOARD_GAP,
-      onSpawn: (shape) => this.shapeRenderer.spawn(shape),
-      onRemove: (shape, pop, cause) => this.shapeRenderer.remove(shape, pop, cause),
-      onSinkResolve: (funnel, accepted) => {
-        this.bufferMarkerRenderer.mark(funnel, accepted);
-        if (accepted && funnel.ownerId === 'border') {
-          this._onEditorOutputSatisfied(funnel);
-        }
-      },
-      onCollectorSatisfied: (c) => {
-        if (this.bufferMarkerRenderer) this.bufferMarkerRenderer.mark(c, true);
-        this._onEditorCatcherSatisfied(c);
-      },
+      ...this._simCallbacks(),
     });
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.resize(this.pxCell);
     if (this.borderFunnelParticles)  this.borderFunnelParticles.resize(this.pxCell);

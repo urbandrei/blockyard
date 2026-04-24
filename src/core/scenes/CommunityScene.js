@@ -7,6 +7,7 @@ import {
 import { ConfirmModal } from '../ui/ConfirmModal.js';
 import { RateLevelModal } from '../ui/RateLevelModal.js';
 import { shareLevel as nativeShareLevel, encodeShareString as encodeShareForClient } from '../ui/socialShare.js';
+import { wireUiClicks, wireEmptyClicks } from '../audio/sfx.js';
 import { LevelCard } from '../ui/LevelCard.js';
 import { TextInputOverlay } from '../ui/TextInputOverlay.js';
 import { ImportModal } from '../ui/ImportModal.js';
@@ -17,7 +18,8 @@ import { copyText } from '../ui/clipboard.js';
 import { enableMenuBg } from '../ui/MenuBackground.js';
 import { compute920Box } from '../ui/ContentBox.js';
 import { BOARD_GAP, BLUEPRINT_BG, BLUEPRINT_STROKE, BLUEPRINT_DOT } from '../constants.js';
-import { drawHome } from '../ui/Icons.js';
+import { drawHome, drawGear } from '../ui/Icons.js';
+import { SettingsModal } from '../ui/SettingsModal.js';
 import { TitleBar } from '../ui/TitleBar.js';
 
 // Community hub — styled to match LevelSelect / Home: a content-box-anchored
@@ -99,6 +101,8 @@ export default class CommunityScene extends Phaser.Scene {
   constructor() { super({ key: 'Community' }); }
 
   async create() {
+    wireUiClicks(this);
+    wireEmptyClicks(this);
     enableMenuBg();
     fadeIn(this);
 
@@ -131,6 +135,7 @@ export default class CommunityScene extends Phaser.Scene {
     this.scale.on('resize', this._onResize);
     this.events.on('shutdown', () => {
       if (this._onResize) this.scale.off('resize', this._onResize);
+      if (this._settingsModal) { try { this._settingsModal.destroy(); } catch (e) {} this._settingsModal = null; }
       this._teardown();
     });
   }
@@ -296,24 +301,41 @@ export default class CommunityScene extends Phaser.Scene {
     frame.strokeRoundedRect(-BLUEPRINT_PAD, -BLUEPRINT_PAD, islandW + BLUEPRINT_PAD * 2, islandH + BLUEPRINT_PAD * 2, BLUEPRINT_RADIUS);
     this._gfx.push(frame);
 
-    const slot = this.add.graphics().setDepth(10);
-    slot.x = originX; slot.y = originY;
-    slot.fillStyle(BLUEPRINT_BG, 1);
-    slot.lineStyle(1, BLUEPRINT_STROKE, 0.5);
+    // Two slots — HOME + SETTINGS.
+    const slots = this.add.graphics().setDepth(10);
+    slots.x = originX; slots.y = originY;
+    slots.fillStyle(BLUEPRINT_BG, 1);
+    slots.lineStyle(1, BLUEPRINT_STROKE, 0.5);
     const slotPad = 4;
-    slot.fillRoundedRect(slotPad, slotPad, islandW - slotPad * 2, islandH - slotPad * 2, 8);
-    this._gfx.push(slot);
+    const slotW = islandW / 2;
+    slots.fillRoundedRect(slotPad, slotPad, slotW - slotPad * 2, islandH - slotPad * 2, 8);
+    slots.fillRoundedRect(slotW + slotPad, slotPad, slotW - slotPad * 2, islandH - slotPad * 2, 8);
+    this._gfx.push(slots);
 
-    const iconSize = Math.round(Math.min(islandW, islandH) * 0.55);
-    const icon = this.add.graphics().setDepth(11);
-    icon.x = originX; icon.y = originY;
-    drawHome(icon, islandW / 2, islandH / 2, iconSize, BLUEPRINT_DOT);
-    this._gfx.push(icon);
+    const iconSize = Math.round(Math.min(slotW, islandH) * 0.55);
+    const cy = islandH / 2;
+    const addGlyph = (slotIdx, drawFn, onTap) => {
+      const icon = this.add.graphics().setDepth(11);
+      icon.x = originX; icon.y = originY;
+      drawFn(icon, slotIdx * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
+      this._gfx.push(icon);
+      const hit = this.add.rectangle(
+        originX + slotIdx * slotW + slotW / 2,
+        originY + islandH / 2,
+        slotW - 6, islandH - 6, 0xffffff, 0,
+      ).setInteractive({ useHandCursor: true }).setDepth(12);
+      hit.on('pointerup', onTap);
+      this._hits.push(hit);
+    };
+    addGlyph(0, drawHome, () => fadeTo(this, 'Home'));
+    addGlyph(1, drawGear, () => this._openSettings());
+  }
 
-    const hit = this.add.rectangle(originX + islandW / 2, originY + islandH / 2, islandW - 6, islandH - 6, 0xffffff, 0)
-      .setInteractive({ useHandCursor: true }).setDepth(12);
-    hit.on('pointerup', () => fadeTo(this, 'Home'));
-    this._hits.push(hit);
+  _openSettings() {
+    if (this._settingsModal) return;
+    this._settingsModal = new SettingsModal(this, {
+      onClose: () => { this._settingsModal = null; },
+    });
   }
 
   // ---------- search + filter ----------

@@ -75,7 +75,7 @@ export async function shareLevel(opts) {
   }
 
   const name = level.name || 'Blockyard level';
-  const text = `Check out "${name}" on Blockyard — can you solve it?`;
+  const text = `Check out "${name}" on Blockyard. Can you solve it?`;
   const filename = safeFilename(name) + '.png';
 
   try {

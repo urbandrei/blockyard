@@ -72,7 +72,7 @@ function isSink(f)   { return isShapeFunnel(f) && ((f.ownerId === 'border' && f.
 function isSource(f) { return isShapeFunnel(f) && ((f.ownerId === 'border' && f.role === 'input')  || (f.ownerId !== 'border' && f.role === 'output')); }
 
 export class Simulation {
-  constructor({ pxCell, pxGap, onSpawn, onRemove, onSinkResolve, onCollectorSatisfied }) {
+  constructor({ pxCell, pxGap, onSpawn, onRemove, onSinkResolve, onCollectorSatisfied, onSinkHit, onShapeElectrocuted, onShapeEnterAcid, onShapeApproachSink }) {
     this.pxCell = pxCell;
     this.pxGap = pxGap;
     this.cellStep = pxCell + pxGap;
@@ -84,6 +84,14 @@ export class Simulation {
     // either way; this is purely the side-channel the scene listens on for
     // ✓/X markers). Untyped sinks are wildcards and don't fire this.
     this.onSinkResolve = onSinkResolve || (() => {});
+    this.onSinkHit = onSinkHit || (() => {});     // every sink hit, border + factory
+    // Fires ONCE per shape the first frame the shape enters its
+    // shrink zone (the "slow-mode" pull-in before it reaches its sink).
+    // Scenes use this to play a sucked-in whoosh that lands ahead of
+    // the actual sink-hit consumption.
+    this.onShapeApproachSink = onShapeApproachSink || (() => {});
+    this.onShapeElectrocuted = onShapeElectrocuted || (() => {}); // shape first touches live beam
+    this.onShapeEnterAcid    = onShapeEnterAcid || (() => {});    // shape enters a labeled acid cell
     // Fires the first time a border laser collector is hit by any beam.
     // Win-condition plumbing reads `sim.satisfiedCollectors` directly; this
     // callback is the side-channel for scenes that want to mark the visual.
@@ -124,7 +132,12 @@ export class Simulation {
     // Acid pits: shapes flow over them, but labeled pits gradually retint
     // a passing shape. Shapes aren't blocked — walls are unchanged.
     this.acidByCell = new Map();
+    // Full set of acid cells (labeled + colorless) so the enter-acid
+    // event can fire on any first entry, not only when the label
+    // retargets the shape's color.
+    this.acidCellSet = new Set();
     for (const pit of (level.acidPits || [])) {
+      this.acidCellSet.add(`${pit.r},${pit.c}`);
       if (pit.label && pit.label.color) this.acidByCell.set(`${pit.r},${pit.c}`, pit.label.color);
     }
     // Pre-compute the required sink set per interior factory. Used each sink
@@ -271,18 +284,45 @@ export class Simulation {
       s.y = s.birthY + s.dy * delta;
     }
 
+    // Approach-sink detection — fires once per shape the first frame
+    // it gets within APPROACH_DIST of its border sink. Tuned so the
+    // clip STARTS a beat or two before the shrink-in and the tail
+    // lands right as the shape is consumed: ~3 cells is the sweet
+    // spot between "trails the pop" and "fires with nothing visible".
+    const APPROACH_DIST = this.cellStep * 0.6;
+    for (const s of this.shapes) {
+      if (s.dead || s.electrocuted || s._approachFired || !s.sinkIsBorder) continue;
+      if (!Number.isFinite(s.sinkDist)) continue;
+      const traveled = (s.x - s.birthX) * s.dx + (s.y - s.birthY) * s.dy;
+      if (s.sinkDist - traveled < APPROACH_DIST) {
+        s._approachFired = true;
+        try { this.onShapeApproachSink(s); } catch (e) { console.warn('[sim] onShapeApproachSink handler threw', e); }
+      }
+    }
+
     // Acid-pit transitions: per shape, look up the acid label at the
     // current cell; start/retarget a color transition when entering a
     // labeled cell, advance progress each frame, and commit to shape.color
     // when the transition completes. Shapes that exit a pit mid-transition
     // keep advancing toward their last target — a shape dipping through a
     // red pit finishes red even if the next cell isn't acid.
-    if (this.acidByCell.size > 0 || progressDelta > 0) {
+    if (this.acidCellSet.size > 0 || progressDelta > 0) {
       for (const s of this.shapes) {
         if (s.dead) continue;
         const cr = Math.floor(s.y / this.cellStep);
         const cc = Math.floor(s.x / this.cellStep);
-        const label = this.acidByCell.get(`${cr},${cc}`) || null;
+        const cellKey = `${cr},${cc}`;
+        const label = this.acidByCell.get(cellKey) || null;
+        const onAcid = this.acidCellSet.has(cellKey);
+        // Fire the enter-acid event on EVERY first entry into an acid
+        // cell, labeled or not — colorless pits, matching-color pits,
+        // and mismatched pits all trigger the bubble SFX equally. The
+        // per-shape "was on acid last frame" bit coalesces a run of
+        // consecutive acid cells into one event.
+        if (onAcid && !s._wasOnAcid) {
+          try { this.onShapeEnterAcid(s); } catch (e) { console.warn('[sim] onShapeEnterAcid threw', e); }
+        }
+        s._wasOnAcid = onAcid;
         if (label && label !== s.color && label !== s._acidTargetName) {
           // (Re)target. Start from the CURRENT visible tint, not the shape's
           // canonical color — so retargeting mid-transition doesn't snap.
@@ -319,6 +359,7 @@ export class Simulation {
       if (this._laserPops(s)) {
         s.electrocuted = true;
         s.electrocuteStart = now;
+        try { this.onShapeElectrocuted(s); } catch (e) { console.warn('[sim] onShapeElectrocuted threw', e); }
         continue;
       }
       const f = this._funnelHit(s);
@@ -557,6 +598,11 @@ export class Simulation {
   // pass-through stamp used by `_spawn` when the source funnel has no typed
   // entry of its own.
   _recordSinkHit(funnel, now, consumed) {
+    // Fire the generic sink-hit hook up-front. Scenes use this to drive
+    // progression-tied music layers — the caller filters by ownerId /
+    // funnel.key to avoid double-counting. Wrapped in a try so a buggy
+    // handler can't derail the sim.
+    try { this.onSinkHit(funnel, consumed); } catch (e) { console.warn('[sim] onSinkHit handler threw', e); }
     const ownerId = funnel.ownerId;
     let set = this.hitsThisCycle.get(ownerId);
     if (!set) { set = new Set(); this.hitsThisCycle.set(ownerId, set); }
@@ -611,6 +657,7 @@ export class Simulation {
     // per live shape per frame. Valid because dx/dy and the funnel set are
     // both constant for the life of the shape.
     let sinkDist = Infinity;
+    let sinkIsBorder = false;
     const R = this.hitRadius;
     for (const f of this.funnels) {
       if (!isSink(f)) continue;
@@ -620,7 +667,10 @@ export class Simulation {
       if (along <= 0) continue;
       const perp = toFx * funnel.dy - toFy * funnel.dx;
       if ((perp < 0 ? -perp : perp) > R) continue;
-      if (along < sinkDist) sinkDist = along;
+      if (along < sinkDist) {
+        sinkDist = along;
+        sinkIsBorder = f.ownerId === 'border';
+      }
     }
     const shape = {
       id: this.nextId++,
@@ -634,6 +684,11 @@ export class Simulation {
       dx: funnel.dx, dy: funnel.dy,
       sourceKey: funnel.key,
       sinkDist,
+      // Whether the NEAREST sink this shape will pass through is a
+      // red border output. onShapeApproachSink only fires for these,
+      // since factory sinks have their own whoosh cue via onSinkHit.
+      sinkIsBorder,
+      _approachFired: false,
       form, color,
       scale: 0,
       dead: false,

@@ -186,6 +186,28 @@ export function drawShareNet(gfx, cx, cy, size, color = 0xffffff) {
   }
 }
 
+// Eight-tooth cog — outlined, with a hollow center ring. Used for
+// "settings" slots on every icon island + the home-screen toolbar.
+export function drawGear(gfx, cx, cy, size, color = 0xffffff) {
+  const outerR = size * 0.46;
+  const innerR = outerR * 0.68;
+  const holeR  = outerR * 0.34;
+  const teeth  = 8;
+  const stroke = Math.max(2, Math.round(size * 0.08));
+  gfx.lineStyle(stroke, color, 1);
+  gfx.beginPath();
+  for (let i = 0; i < teeth * 2; i++) {
+    const a = (i / (teeth * 2)) * Math.PI * 2 - Math.PI / 2;
+    const rr = (i % 2 === 0) ? outerR : innerR;
+    const x = cx + Math.cos(a) * rr;
+    const y = cy + Math.sin(a) * rr;
+    if (i === 0) gfx.moveTo(x, y); else gfx.lineTo(x, y);
+  }
+  gfx.closePath();
+  gfx.strokePath();
+  gfx.strokeCircle(cx, cy, holeR);
+}
+
 // Three vertical dots — the standard "more actions" overflow glyph.
 export function drawKebab(gfx, cx, cy, size, color = 0xffffff) {
   const r = Math.max(2, Math.round(size * 0.12));

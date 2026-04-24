@@ -1,5 +1,6 @@
 import { drawHome, drawQuestion } from './Icons.js';
 import { StepIndicator } from './StepIndicator.js';
+import { beatPulse } from '../render/beat.js';
 
 // Title bar above the play area.
 //
@@ -145,16 +146,30 @@ export class TitleBar {
       this._nameAreaY = y;
       this._nameAreaW = nameMaxW;
     } else {
-      // Number pill.
+      // Number pill — wrapped in a container so a 110 BPM beat pulse
+      // (see render/beat.js) can scale the whole pill from its center.
       const pillCX = leftX + PILL_PADDING_X + PILL_SIZE / 2;
       const pillCY = y;
-      this.pill = scene.add.graphics().setDepth(TITLE_DEPTH);
+      this._pillContainer = scene.add.container(pillCX, pillCY).setDepth(TITLE_DEPTH);
+      this.pill = scene.add.graphics();
       this.pill.fillStyle(PILL_FILL, 1);
-      this.pill.fillCircle(pillCX, pillCY, PILL_SIZE / 2);
-      this.pillText = scene.add.text(pillCX, pillCY, String(levelNumber ?? 0), {
+      this.pill.fillCircle(0, 0, PILL_SIZE / 2);
+      this._pillContainer.add(this.pill);
+      this.pillText = scene.add.text(0, 0, String(levelNumber ?? 0), {
         fontFamily: 'system-ui, sans-serif', fontSize: '24px', fontStyle: 'bold',
         color: PILL_TEXT,
-      }).setOrigin(0.5).setDepth(TITLE_DEPTH);
+      }).setOrigin(0.5);
+      this._pillContainer.add(this.pillText);
+
+      // Drive the pulse off the game's global clock (survives scene
+      // transitions) so the rhythm stays coherent as the player hops
+      // Home → Player → LevelSelect.
+      this._beatTick = () => {
+        if (!this._pillContainer) return;
+        const s = beatPulse(scene.game.loop.time);
+        this._pillContainer.setScale(s);
+      };
+      scene.events.on('update', this._beatTick, this);
 
       // Author label (right-aligned inside the left frame, drawn first so
       // we can measure it and reserve width for the name on its left).
@@ -338,6 +353,11 @@ export class TitleBar {
   }
 
   destroy() {
+    if (this._beatTick) {
+      this.scene.events.off('update', this._beatTick, this);
+      this._beatTick = null;
+    }
+    if (this._pillContainer) { this._pillContainer.destroy(true); this._pillContainer = null; }
     if (this.leftBox)   this.leftBox.destroy();
     if (this.pill)      this.pill.destroy();
     if (this.pillText)  this.pillText.destroy();

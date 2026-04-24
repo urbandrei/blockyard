@@ -28,14 +28,24 @@ import { compute920Box } from '../ui/ContentBox.js';
 import { Simulation } from '../sim/Simulation.js';
 import { DragController } from '../input/DragController.js';
 import { shapeSquash } from '../render/pulse.js';
-import { drawHome, drawGrid, drawCircleArrow, drawPlayTriangle, drawShareNet } from '../ui/Icons.js';
+import { drawHome, drawGrid, drawCircleArrow, drawPlayTriangle, drawShareNet, drawGear } from '../ui/Icons.js';
+import { SettingsModal } from '../ui/SettingsModal.js';
+import { addDomBand } from '../ui/DomDim.js';
 import { shareLevel as nativeShareLevel, encodeShareString as encodeShareForClient } from '../ui/socialShare.js';
+import {
+  resumeMusic, fadeInAllLayers,
+  fadeOutToLayerOne, resetLayersToInitial,
+} from '../audio/MusicEngine.js';
+import {
+  playOnce, wireUiClicks, spawnEmptyClickParticles,
+  playSfxSound, createLoopingSfx, playTimedSfx,
+} from '../audio/sfx.js';
 import { getLevelById, nextLevelAfter } from '../catalog/index.js';
 import { markBeaten } from '../progress.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
 import { disableMenuBg } from '../ui/MenuBackground.js';
 import {
-  BOARD_GAP, CYCLE_MS, SHAPE_SCALE, motionWarp,
+  BOARD_GAP, CYCLE_MS, BEAT_MS, SHAPE_SCALE, motionWarp,
   BLUEPRINT_BG, BLUEPRINT_DOT, BLUEPRINT_STROKE,
 } from '../constants.js';
 
@@ -46,14 +56,10 @@ const BLUEPRINT_PAD       = 10;
 const BLUEPRINT_RADIUS    = 12;
 const ISLAND_TO_GRID_GAP  = 14;
 
-// Icon island — four evenly-spread shortcuts. PLAY / RESET that drive the
+// Icon island — evenly-spread shortcuts. PLAY / RESET that drive the
 // actual simulation have been promoted out of the island into a prominent
-// overlay in the blueprint area (see _renderBlueprint).
-const ICON_SLOTS           = 4;
-const SLOT_HOME            = 0;
-const SLOT_LEVEL_SELECT    = 1;
-const SLOT_SHARE           = 2;
-const SLOT_RESET           = 3;
+// overlay in the blueprint area (see _renderBlueprint). The `share` slot
+// is omitted on campaign levels (see _iconSlotSpecs).
 
 // Player scene: load a level (catalog or sandbox), present an interactive
 // blueprint of starting factories, let the player drag/rotate them onto the
@@ -76,6 +82,7 @@ export default class PlayerScene extends Phaser.Scene {
   }
 
   async create() {
+    wireUiClicks(this);
     disableMenuBg();
     fadeIn(this);
     this.ready = false;
@@ -83,6 +90,9 @@ export default class PlayerScene extends Phaser.Scene {
     this.simTime  = 0;             // virtual clock — only advances when running
     this.satisfiedOutputs = new Set();
     this.satisfiedCollectors = new Set();
+    // Red border funnels that have already played their right/wrong SFX
+    // this play run — keyed by funnel.key. Reset on each _startPlay.
+    this._borderFunnelSounded = new Set();
     this.victory = null;
     this.factoryRefs = new Map();  // id → { bodyWrap, funnelWrap }
     this.blueprintRefs = new Map();// id → { bodyWrap, funnelWrap }
@@ -131,6 +141,11 @@ export default class PlayerScene extends Phaser.Scene {
     // catalog level by id → editor sandbox fallback.
     let source = this._inlineLevel || (this._levelId ? getLevelById(this._levelId) : null);
     if (!source) source = await loadLevel();
+    // Campaign levels come from getLevelById and don't set inlineLevel;
+    // every other entry point (Community, deep-link, editor) passes an
+    // inline level. We hide the island's social-share slot on campaign
+    // runs since sharing a curated catalog level doesn't mean much.
+    this._isCampaign = !this._inlineLevel;
     // Boss levels: keep the original around for future round transitions
     // and use the round-0 composition as the active sourceLevel. RESET
     // and scene shutdown both put the boss back at round 0 (no mid-boss
@@ -170,11 +185,49 @@ export default class PlayerScene extends Phaser.Scene {
     this.sim = new Simulation({
       pxCell: this.pxCell,
       pxGap: BOARD_GAP,
-      onSpawn: (shape) => this.shapeRenderer.spawn(shape),
-      onRemove: (shape, pop, cause) => this.shapeRenderer.remove(shape, pop, cause),
+      onSpawn: (shape) => {
+        this.shapeRenderer.spawn(shape);
+        this._playShapeExitOnce();
+      },
+      onRemove: (shape, pop, cause) => {
+        this.shapeRenderer.remove(shape, pop, cause);
+        // Laser-caused pop: the zap plays at electrocute-start via
+        // onShapeElectrocuted, and the actual pop animation fires
+        // ELECTROCUTE_MS (400ms) later here — so the two SFX land
+        // in the correct order without explicit scheduling.
+        if (pop) this._playShapePopOnce();
+      },
       onSinkResolve: (funnel, accepted) => {
         this.bufferMarkerRenderer.mark(funnel, accepted);
+        // Red border funnels get exactly ONE right/wrong sound per play
+        // run — the first shape to arrive. Later arrivals into the same
+        // funnel still mark the buffer but stay silent, so a steady
+        // stream of correct shapes doesn't chirp every cycle.
+        if (funnel.ownerId === 'border' && !this._borderFunnelSounded.has(funnel.key)) {
+          this._borderFunnelSounded.add(funnel.key);
+          playOnce(this.game, accepted ? 'funnel_right' : 'funnel_wrong', { throttleMs: 120, volume: 0.5 });
+        }
         if (accepted && funnel.ownerId === 'border') this._onOutputSatisfied(funnel);
+      },
+      onSinkHit: (funnel) => {
+        // Factory input — whoosh as the shape enters the body.
+        // Border sinks get their pull-in cue earlier via
+        // onShapeApproachSink; no sound here would double up.
+        if (funnel.ownerId !== 'border') {
+          playOnce(this.game, 'factory_pass', { throttleMs: 90, volume: 0.15 });
+        }
+      },
+      onShapeApproachSink: () => {
+        // Shape has just entered its shrink zone toward a red border
+        // funnel — play the suck-in pop here (ahead of the actual
+        // sink-hit) so the audio matches the visual pull-in.
+        playOnce(this.game, 'funnel_suck', { throttleMs: 40, volume: 0.22 });
+      },
+      onShapeElectrocuted: () => {
+        playOnce(this.game, 'zap', { throttleMs: 100, volume: 0.5 });
+      },
+      onShapeEnterAcid: () => {
+        playOnce(this.game, 'acid_bubble', { throttleMs: 120, volume: 0.22 });
       },
       onCollectorSatisfied: (c) => this._onCollectorSatisfied(c),
     });
@@ -191,7 +244,7 @@ export default class PlayerScene extends Phaser.Scene {
       isOverCell:      (x, y) => this._cellAt(x, y),
       isOverEdge:      () => null,
       isOverBoardCell: (x, y) => this._boardCellAt(x, y),
-      onToggleCell:    (info) => this._onTapCell(info),
+      onToggleCell:    (info, pointer) => this._onTapCell(info, pointer),
       onToggleFunnel:  () => {},
       onDragStart:     (info) => this._onDragStart(info),
       onDragMove:      (x, y) => this._onDragMove(x, y),
@@ -212,6 +265,24 @@ export default class PlayerScene extends Phaser.Scene {
 
     this.events.on('shutdown', () => {
       this.sim && this.sim.stop();
+      if (this._settingsModal) { try { this._settingsModal.destroy(); } catch (e) {} this._settingsModal = null; }
+      // Stop the laser-beam loop so it doesn't continue into the next
+      // scene. Other SFX are fire-and-forget and free themselves.
+      if (this._laserBeamSound) {
+        this._laserBeamSound.destroy();
+        this._laserBeamSound = null;
+      }
+      if (this._rotateSfx) {
+        this._rotateSfx.stop();
+        this._rotateSfx = null;
+      }
+      if (this._laserPrev) this._laserPrev.clear();
+      // Intentionally NOT snapping layers here — the victory fade-out
+      // is scheduled on the MusicEngine's own step loop, which keeps
+      // running across scene transitions. Snapping here would cut the
+      // fade the instant the scene swap begins. The next _startPlay
+      // will snap cleanly when the user presses PLAY on the new level.
+      resumeMusic();
       this.dragCtrl && this.dragCtrl.destroy();
       this._resetStuckPopup();
       if (this._hintModal) { this._hintModal.destroy(); this._hintModal = null; }
@@ -221,6 +292,7 @@ export default class PlayerScene extends Phaser.Scene {
       if (this.ghostParticles) { this.ghostParticles.destroy(); this.ghostParticles = null; }
       if (this.blueprintParticleSystems) { for (const s of this.blueprintParticleSystems) s.destroy(); this.blueprintParticleSystems = null; }
       if (this._victoryTextBg) { this._victoryTextBg.destroy(); this._victoryTextBg = null; }
+      if (this._victoryBandDom) { try { this._victoryBandDom(); } catch (e) {} this._victoryBandDom = null; }
       if (this._victoryTextName) { this._victoryTextName.destroy(); this._victoryTextName = null; }
       if (this._victoryTextSub)  { this._victoryTextSub.destroy();  this._victoryTextSub  = null; }
       if (this._acidPits)        { this._acidPits.destroy();        this._acidPits        = null; }
@@ -505,7 +577,7 @@ export default class PlayerScene extends Phaser.Scene {
     const boardH = board.rows * cellPx + (board.rows - 1) * BOARD_GAP;
     this.boardW = boardW;
     this.titleBarW = Math.round(titleBarW);
-    this.islandSlotW = bpW / ICON_SLOTS;
+    this.islandSlotW = bpW / this._iconSlotCount();
     // Center the full stack vertically inside the content box — matches
     // the horizontal centering so leftover slack splits evenly top/bottom.
     const stackH =
@@ -900,7 +972,9 @@ export default class PlayerScene extends Phaser.Scene {
     tweens.push(this.tweens.add({
       targets: [resetBg, playBg],
       scale: { from: 1.0, to: 1.035 },
-      duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.InOut',
+      // One beat up, one beat down → 2-beat breath on the PLAY tiles,
+      // same grid every other animated element lands on.
+      duration: BEAT_MS, yoyo: true, repeat: -1, ease: 'Sine.InOut',
     }));
 
     const squash = (target) => this.tweens.add({
@@ -1074,13 +1148,48 @@ export default class PlayerScene extends Phaser.Scene {
 
   // ---------- Icon island — Home / Level Select / Reset ----------
 
+  // Slot layout — `share` drops out on campaign runs so catalog levels
+  // render a 3-slot island, everything else renders 4 slots.
+  _iconSlotSpecs() {
+    const specs = [
+      { key: 'home',   draw: drawHome,        onTap: () => {
+        this.sim && this.sim.stop();
+        fadeTo(this, 'Home');
+      }},
+      { key: 'select', draw: drawGrid,        onTap: () => {
+        this.sim && this.sim.stop();
+        const isCommunity = this.sourceLevel.origin === 'local' || this.sourceLevel.origin === 'imported';
+        fadeTo(this, isCommunity ? 'Community' : 'LevelSelect');
+      }},
+    ];
+    if (!this._isCampaign) {
+      specs.push({ key: 'share', draw: drawShareNet, onTap: () => this._nativeShareCurrentLevel() });
+    }
+    specs.push({ key: 'reset',  draw: drawCircleArrow, onTap: () => this._resetPlay() });
+    specs.push({ key: 'gear',   draw: drawGear,        onTap: () => this._openSettings() });
+    return specs;
+  }
+
+  _iconSlotCount() {
+    return this._isCampaign ? 4 : 5;
+  }
+
+  _openSettings() {
+    if (this._settingsModal) return;
+    this._settingsModal = new SettingsModal(this, {
+      onClose: () => { this._settingsModal = null; },
+    });
+  }
+
   _renderIconIsland() {
     this.iconIslandContainer.removeAll(true);
     if (this.iconHits) for (const h of this.iconHits) h.destroy();
     this.iconHits = [];
 
+    const specs = this._iconSlotSpecs();
+    const slotCount = specs.length;
     const slotW = this.islandSlotW;
-    const islandW = slotW * ICON_SLOTS;
+    const islandW = slotW * slotCount;
     const islandH = this.islandH;
 
     const frame = this.make.graphics({ add: false });
@@ -1092,7 +1201,7 @@ export default class PlayerScene extends Phaser.Scene {
 
     const slotsGfx = this.make.graphics({ add: false });
     const slotPad = 4;
-    for (let s = 0; s < ICON_SLOTS; s++) {
+    for (let s = 0; s < slotCount; s++) {
       slotsGfx.fillStyle(BLUEPRINT_BG, 1);
       slotsGfx.lineStyle(1, BLUEPRINT_STROKE, 0.5);
       slotsGfx.fillRoundedRect(s * slotW + slotPad, slotPad, slotW - slotPad * 2, islandH - slotPad * 2, 8);
@@ -1102,41 +1211,17 @@ export default class PlayerScene extends Phaser.Scene {
     const iconSize = Math.round(Math.min(slotW, islandH) * 0.55);
     const cy = islandH / 2;
 
-    const home = this.make.graphics({ add: false });
-    drawHome(home, SLOT_HOME * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
-    this.iconIslandContainer.add(home);
-
-    const levelSelect = this.make.graphics({ add: false });
-    drawGrid(levelSelect, SLOT_LEVEL_SELECT * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
-    this.iconIslandContainer.add(levelSelect);
-
-    const share = this.make.graphics({ add: false });
-    drawShareNet(share, SLOT_SHARE * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
-    this.iconIslandContainer.add(share);
-
-    const reset = this.make.graphics({ add: false });
-    drawCircleArrow(reset, SLOT_RESET * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
-    this.iconIslandContainer.add(reset);
-
-    const makeHit = (slot, onTap) => {
-      const cx = this.iconIslandOriginX + slot * slotW + slotW / 2;
+    specs.forEach((spec, i) => {
+      const icon = this.make.graphics({ add: false });
+      spec.draw(icon, i * slotW + slotW / 2, cy, iconSize, BLUEPRINT_DOT);
+      this.iconIslandContainer.add(icon);
+      const cx = this.iconIslandOriginX + i * slotW + slotW / 2;
       const ay = this.iconIslandOriginY + islandH / 2;
       const rect = this.add.rectangle(cx, ay, slotW - 6, islandH - 6, 0xffffff, 0)
         .setInteractive({ useHandCursor: true });
-      rect.on('pointerup', onTap);
+      rect.on('pointerup', spec.onTap);
       this.iconHits.push(rect);
-    };
-    makeHit(SLOT_HOME, () => {
-      this.sim && this.sim.stop();
-      fadeTo(this, 'Home');
     });
-    makeHit(SLOT_LEVEL_SELECT, () => {
-      this.sim && this.sim.stop();
-      const isCommunity = this.sourceLevel.origin === 'local' || this.sourceLevel.origin === 'imported';
-      fadeTo(this, isCommunity ? 'Community' : 'LevelSelect');
-    });
-    makeHit(SLOT_SHARE, () => this._nativeShareCurrentLevel());
-    makeHit(SLOT_RESET, () => this._resetPlay());
   }
 
   async _nativeShareCurrentLevel() {
@@ -1290,9 +1375,18 @@ export default class PlayerScene extends Phaser.Scene {
       }
     }
 
-    // Blueprint-to-board.
+    // Blueprint-to-board. Only consider factories that are ACTUALLY
+    // in the blueprint right now. Any factory already on the board —
+    // correctly placed OR misplaced — is handled by the misplaced
+    // branch above (or, if correctly placed, skipped entirely).
+    // Without this guard the hint can pick a well-placed factory,
+    // fail to pop it from a stack that doesn't contain it, and fly a
+    // ghost from the factory's old blueprint slot to its current
+    // on-board spot — which reads as a ghost drifting into a piece
+    // that's already correct.
     const candidates = [];
     for (const def of this.blueprintFactories.values()) {
+      if (this.placed.has(def.id)) continue;
       const sf = solById.get(def.id);
       if (!sf) continue;
       const { blockers, lockedBlocker } = blockersFor(def.id, sf.anchor, sf.cells);
@@ -1454,6 +1548,8 @@ export default class PlayerScene extends Phaser.Scene {
         def.slot = { ...slot };
         def.rotation = p.rotation;
         this._pushToSlot(def.slot, blockerId);
+        // Snap-click as the blocker lands back in its blueprint slot.
+        playOnce(this.game, 'ui_click', { throttleMs: 80, volume: 0.5 });
         this._renderBlueprint();
         this._renderIconIsland();
         done && done();
@@ -1526,6 +1622,9 @@ export default class PlayerScene extends Phaser.Scene {
       // picks the factory back up, it doesn't revert to an odd orientation.
       const def = this.blueprintFactories.get(factoryId);
       if (def) def.rotation = targetRotation;
+      // Click at the moment the ghost snaps into its solution cell —
+      // reads as "snapped into place" rather than a silent land.
+      playOnce(this.game, 'ui_click', { throttleMs: 80, volume: 0.5 });
       this._renderAll();
       this._renderBlueprint();
       this._renderIconIsland();
@@ -1564,6 +1663,9 @@ export default class PlayerScene extends Phaser.Scene {
     const ghostLabels = (ghost.body && ghost.body.labels) || [];
     const doNextRotation = () => {
       if (stepIdx >= steps) { slideToTarget(); return; }
+      // Same projector whir the user hears on manual rotation — fires
+      // once per 90° step so a 180° auto-rotate sounds twice.
+      this._playRotateSfx();
       this.tweens.add({
         targets: [ghost.bodyWrap, ghost.funnelWrap],
         rotation: `+=${stepRad}`,
@@ -1667,6 +1769,13 @@ export default class PlayerScene extends Phaser.Scene {
 
   update(time, delta) {
     if (!this.ready) return;
+    // Layer 1 plays throughout PlayerScene — even while the player is
+    // arranging factories before PLAY — so the bed is always under them.
+    // Layers 2..5 are progression-tied and only fade in while the sim
+    // is running (onSinkHit → fadeInNextLayer). No pause tied to sim
+    // state anymore; if the tab blurs, MusicEngine's own blur handler
+    // pauses everything and restores on focus.
+    this._updateLaserSounds();
     if (this.simState === 'running') this.simTime += delta;
     // 30fps cosmetic tick — flow repaint + squash/stretch are visual-only
     // and don't need to run every frame. Halves per-frame GPU cost at 60fps;
@@ -1834,21 +1943,78 @@ export default class PlayerScene extends Phaser.Scene {
     return false;
   }
 
-  _onTapCell(info) {
+  _onTapCell(info, pointer) {
     if (!info) return;
     if (this.simState !== 'idle' || this.victory) return;
     if (this._rotateTweenBusy || this._hintTweenBusy) return;
     if (info.kind === 'board') {
       const placed = this._placedAtBoardCell(info.r, info.c);
-      if (placed) this._rotatePlaced(placed);
+      if (placed) {
+        // Locked factories can't be rotated or dragged — taps read as
+        // "this is part of the board furniture", so they get the same
+        // metal-hit cue + particle burst as a border funnel.
+        if (placed.locked) { this._tapBorderItem(info.r, info.c); return; }
+        this._rotatePlaced(placed);
+        return;
+      }
+      // Acid pit tap → splash. Border-funnel tap → metal hit. Both
+      // override the default empty-tap rustle so each piece type gets
+      // its own tactile cue + particle juice.
+      const pit = (this.sourceLevel.acidPits || []).find((p) => p.r === info.r && p.c === info.c);
+      if (pit) { this._tapAcidPit(info.r, info.c); return; }
+      const borderFunnels = (this.sourceLevel.border && this.sourceLevel.border.funnels) || [];
+      const bf = borderFunnels.find((f) => f.r === info.r && f.c === info.c);
+      if (bf) { this._tapBorderItem(info.r, info.c); return; }
+      this._playEmptyTapRustle(pointer);
     } else if (info.kind === 'blueprint') {
       const hit = this._findBlueprintFactoryAt(info.r, info.c);
-      if (!hit) return;
+      if (!hit) { this._playEmptyTapRustle(pointer); return; }
       const def = this.blueprintFactories.get(hit.factoryId);
       if (!def) return;
       if (def.interactable === false) return;
-      this._rotateBlueprint(def);
+      // Rotate around the tapped cell — same feel as the editor's
+      // draft composer. info.{r,c} is absolute slot coords; the pivot
+      // invariant repositions the factory's anchor so the clicked cell
+      // stays put.
+      this._rotateBlueprint(def, { slotR: info.r, slotC: info.c, localCell: hit.localCell });
     }
+  }
+
+  // Empty-cell tap on the board or blueprint: fire the same rustle +
+  // tiny shape puffs used everywhere else a press lands on "nothing"
+  // interactive. Pointer coords come from the DragController so the
+  // puff lands under the cursor, not the cell center.
+  _playEmptyTapRustle(pointer) {
+    playOnce(this.game, 'click_empty', { throttleMs: 60, volume: 0.18 });
+    if (pointer) spawnEmptyClickParticles(this, pointer.x, pointer.y);
+  }
+
+  // Acid pit tap: splash sound + a tight 8-particle burst centered on
+  // the pit cell. Particles use the full Form×Color palette but at
+  // half the radius/count of a funnel firework — reads as a splash,
+  // not a celebration.
+  _tapAcidPit(r, c) {
+    playSfxSound(this.game, 'acid_pit_tap', { volume: 0.5 });
+    this._spawnCellBurst(r, c, { count: 8, radius: this.pxCell * 0.45, particleR: 4 });
+  }
+
+  _tapBorderItem(r, c) {
+    playSfxSound(this.game, 'border_item_tap', { volume: 0.5 });
+    this._spawnCellBurst(r, c, { count: 10, radius: this.pxCell * 0.5, particleR: 5 });
+  }
+
+  // Shared helper that paints an outward-scatter of tiny shapes around
+  // a given board cell. Uses the same fxContainer that hosts firework
+  // bursts so depth + cleanup match.
+  _spawnCellBurst(r, c, { count, radius, particleR }) {
+    if (!this.fxContainer) return;
+    const step = this.pxCell + BOARD_GAP;
+    const cx = this.boardOriginX + c * step + this.pxCell / 2;
+    const cy = this.boardOriginY + r * step + this.pxCell / 2;
+    spawnFunnelFirework(this, this.fxContainer, {
+      x: cx, y: cy, radius, count,
+      particleR, strokeW: 1,
+    });
   }
 
   // Find the blueprint factory whose rotated footprint covers the given
@@ -1884,6 +2050,7 @@ export default class PlayerScene extends Phaser.Scene {
     const ref = this.factoryRefs.get(p.id);
     if (!this._cellsFitOnBoard(p.anchor.row, p.anchor.col, rot.cells, p.id)) {
       if (ref) this._shakeRefusal([ref.bodyWrap, ref.funnelWrap], (ref.body && ref.body.labels) || []);
+      this._playRotateRefusalSfx();
       return;
     }
     if (!ref || !ref.bodyWrap || !ref.funnelWrap) {
@@ -1891,6 +2058,7 @@ export default class PlayerScene extends Phaser.Scene {
       this._renderAll();
       return;
     }
+    this._playRotateSfx();
     const newAbsCells = rot.cells.map((cc) => ({
       ...cc, r: p.anchor.row + cc.r, c: p.anchor.col + cc.c,
     }));
@@ -1922,20 +2090,80 @@ export default class PlayerScene extends Phaser.Scene {
     }
   }
 
-  _rotateBlueprint(def) {
+  // Rotate a blueprint factory 90° CW. If `pivot` is provided, the
+  // rotation pivots around the tapped cell (same rule as the editor's
+  // draft composer) — the anchor slides so the clicked cell stays in
+  // place. Without a pivot, falls back to rotate-about-self (used by
+  // non-tap callers). Out-of-bounds rotations refuse with a shake.
+  _rotateBlueprint(def, pivot = null) {
     const ref = this.blueprintRefs.get(def.id);
+    const newRot = (def.rotation + 1) % 4;
+    const curRot = rotateFactoryShape({ cells: def.baseCells, funnels: def.baseFunnels }, def.rotation || 0);
+    const nextRot = rotateFactoryShape({ cells: def.baseCells, funnels: def.baseFunnels }, newRot);
+
+    // Pick the new anchor slot:
+    //   • Pivot-based: find the cell index the user tapped, then place
+    //     the new anchor so that same cell index lands back at the
+    //     pivot's absolute slot.
+    //   • Fallback: keep the existing anchor (rotate-about-self).
+    let newSlot = { r: def.slot.r, c: def.slot.c };
+    if (pivot && pivot.localCell) {
+      const idx = curRot.cells.findIndex(
+        (cc) => cc.r === pivot.localCell.r && cc.c === pivot.localCell.c,
+      );
+      if (idx >= 0 && nextRot.cells[idx]) {
+        newSlot = {
+          r: pivot.slotR - nextRot.cells[idx].r,
+          c: pivot.slotC - nextRot.cells[idx].c,
+        };
+      }
+    }
+
+    // Bounds check: factories are allowed to rotate PARTIALLY off the
+    // blueprint grid (same rule the editor uses for the draft), so the
+    // player can pivot a long bar around a corner cell even when one
+    // arm would spill outside the composer. Only reject a rotation
+    // that would leave zero cells inside the grid — at that point
+    // there's nothing visible to tap for a follow-up rotation.
+    const slotRows = this._slotRows();
+    const slotCols = this._slotCols();
+    const anyInside = nextRot.cells.some((cc) => {
+      const r = newSlot.r + cc.r, c = newSlot.c + cc.c;
+      return r >= 0 && c >= 0 && r < slotRows && c < slotCols;
+    });
+    if (!anyInside) {
+      if (ref) this._shakeRefusal([ref.bodyWrap, ref.funnelWrap], (ref.body && ref.body.labels) || []);
+      this._playRotateRefusalSfx();
+      return;
+    }
+
+    // Move the factory's blueprint-stack entry to the new anchor slot
+    // so _findBlueprintFactoryAt + drag resolution track it correctly.
+    const oldSlot = def.slot;
+    if (oldSlot.r !== newSlot.r || oldSlot.c !== newSlot.c) {
+      const oldKey = slotKey(oldSlot.r, oldSlot.c);
+      const stack = this.blueprint.get(oldKey);
+      if (stack) {
+        const idxInStack = stack.indexOf(def.id);
+        if (idxInStack >= 0) stack.splice(idxInStack, 1);
+        if (stack.length === 0) this.blueprint.delete(oldKey);
+      }
+      this._pushToSlot(newSlot, def.id);
+    }
+
     if (!ref || !ref.bodyWrap || !ref.funnelWrap) {
-      def.rotation = (def.rotation + 1) % 4;
+      def.rotation = newRot;
+      def.slot = newSlot;
       this._renderBlueprint();
       return;
     }
-    const newRot = (def.rotation + 1) % 4;
-    const rot = rotateFactoryShape({ cells: def.baseCells, funnels: def.baseFunnels }, newRot);
+
     const slotPx = this.slotPx;
-    const cellsLocal = rot.cells.map((c) => ({ ...c }));
+    const cellsLocal = nextRot.cells.map((c) => ({ ...c }));
     const [cx, cy] = factoryCenter(cellsLocal, slotPx, 0);
-    const newWrapX = def.slot.c * slotPx + cx;
-    const newWrapY = def.slot.r * slotPx + cy;
+    const newWrapX = newSlot.c * slotPx + cx;
+    const newWrapY = newSlot.r * slotPx + cy;
+    this._playRotateSfx();
     this._rotateTweenBusy = true;
     this.tweens.add({
       targets: [ref.bodyWrap, ref.funnelWrap],
@@ -1946,6 +2174,7 @@ export default class PlayerScene extends Phaser.Scene {
       ease: 'Sine.InOut',
       onComplete: () => {
         def.rotation = newRot;
+        def.slot = newSlot;
         this._rotateTweenBusy = false;
         this._renderBlueprint();
       },
@@ -2107,6 +2336,10 @@ export default class PlayerScene extends Phaser.Scene {
     const pointer = this.input.activePointer;
     const px = pointer ? pointer.x : 0;
     const py = pointer ? pointer.y : 0;
+    // PlayerScene has no delete island — every drag-end is a placement
+    // attempt (board drop, slot drop, or cancel-restore). All three
+    // feel like a "snap" so they share the same click cue.
+    playOnce(this.game, 'ui_click', { throttleMs: 100, volume: 0.5 });
     if (boardRC && this._tryPlaceOnBoard(boardRC)) { this._clearDrag(); return; }
     const slot = this._slotAt(px, py);
     if (slot) {
@@ -2273,7 +2506,16 @@ export default class PlayerScene extends Phaser.Scene {
     if (!this._canPlay()) return;
     this.satisfiedOutputs.clear();
     this.satisfiedCollectors.clear();
+    this._borderFunnelSounded.clear();
     this.simTime = 0;
+    // Reset the shape-exit SFX tracker so the first cycle of this run
+    // plays a fresh pop (otherwise RESET → PLAY would skip the first
+    // one because cycleIdx lands back at 0).
+    this._lastShapeExitCycle = -1;
+    // Snap every layer back to its initial state — layer 1 only. All
+    // 2..5 stay muted until victory, at which point they swell in
+    // together (see _fireVictory → fadeInAllLayers).
+    try { resetLayersToInitial(); } catch (e) {}
     this.sim.start(this._composeLevel(), this.simTime);
     this.simState = 'running';
     this._renderIconIsland();
@@ -2302,6 +2544,7 @@ export default class PlayerScene extends Phaser.Scene {
     // Drop any in-flight victory visuals — reset means "start the level
     // over clean", including nuking the delayed "completed" banner.
     if (this._victoryTextBg)   { this._victoryTextBg.destroy();   this._victoryTextBg = null; }
+    if (this._victoryBandDom)  { try { this._victoryBandDom(); } catch (e) {} this._victoryBandDom = null; }
     if (this._victoryTextName) { this._victoryTextName.destroy(); this._victoryTextName = null; }
     if (this._victoryTextSub)  { this._victoryTextSub.destroy();  this._victoryTextSub  = null; }
     this.victory = null;
@@ -2319,6 +2562,7 @@ export default class PlayerScene extends Phaser.Scene {
       this.satisfiedCollectors && this.satisfiedCollectors.clear();
       this.simState = 'idle';
       this.simTime = 0;
+      try { resetLayersToInitial(); } catch (e) {}
       this._initRuntime();
       this._renderAll();
       this._renderBlueprint();
@@ -2332,6 +2576,10 @@ export default class PlayerScene extends Phaser.Scene {
     this.satisfiedCollectors.clear();
     this.simState = 'idle';
     this.simTime = 0;
+    // RESET drops any progression-tied layers so the idle bed is back
+    // to layer 1 only. Press PLAY again to start fading them in fresh.
+    if (this._musicEventsSeen) this._musicEventsSeen.clear();
+    try { resetLayersToInitial(); } catch (e) {}
     // Restore: every initial factory back to its starting slot + rotation;
     // every locked factory remains placed (we never removed them since
     // _canDrag short-circuits on locked).
@@ -2394,7 +2642,7 @@ export default class PlayerScene extends Phaser.Scene {
   _inIconIsland(x, y) {
     const lx = x - this.iconIslandOriginX;
     const ly = y - this.iconIslandOriginY;
-    return lx >= 0 && ly >= 0 && lx <= ICON_SLOTS * this.islandSlotW && ly <= this.islandH;
+    return lx >= 0 && ly >= 0 && lx <= this._iconSlotCount() * this.islandSlotW && ly <= this.islandH;
   }
 
   _inBlueprintArea(x, y) {
@@ -2442,6 +2690,83 @@ export default class PlayerScene extends Phaser.Scene {
     this._checkVictory();
   }
 
+
+  // Shapes leave their source funnel in bursts every sim cycle — border
+  // inputs + any factories whose sinks were satisfied last cycle all
+  // fire in the same cycle tick. Throttle by cycle index (not wall
+  // clock) so one cycle = exactly one SFX hit regardless of how many
+  // shapes spawn or how those spawns stagger across Phaser frames.
+  _playShapeExitOnce() {
+    if (!this.game) return;
+    const cycleIdx = Math.floor(this.simTime / CYCLE_MS);
+    if (this._lastShapeExitCycle === cycleIdx) return;
+    this._lastShapeExitCycle = cycleIdx;
+    playSfxSound(this.game, 'shape_exit', { volume: 0.5 });
+  }
+
+  // Per-frame laser sound state machine. Tracks each emitter's
+  // power/firing on the sim; plays a one-shot laser_charge when power
+  // begins ramping up, a one-shot laser_fire the instant firing latches
+  // on, and loops laser_beam continuously while ANY emitter is firing.
+  // Multiple simultaneous events dedupe through playOnce's throttle.
+  _updateLaserSounds() {
+    const emitters = this.sim && this.sim.emitters;
+    if (!emitters) return;
+    if (!this._laserPrev) this._laserPrev = new Map();
+    let anyFiring = false;
+    for (const e of emitters) {
+      const curPower = e.power || 0;
+      const curFiring = !!e.firing;
+      const prev = this._laserPrev.get(e.key) || { power: 0, firing: false };
+      if (prev.power === 0 && curPower > 0) {
+        playOnce(this.game, 'laser_charge', { throttleMs: 60, volume: 0.45 });
+      }
+      if (!prev.firing && curFiring) {
+        playOnce(this.game, 'laser_fire',   { throttleMs: 60, volume: 0.55 });
+      }
+      if (curFiring) anyFiring = true;
+      prev.power = curPower;
+      prev.firing = curFiring;
+      this._laserPrev.set(e.key, prev);
+    }
+    if (anyFiring && !this._laserBeamSound) {
+      this._laserBeamSound = createLoopingSfx(this.game, 'laser_beam', 0.3);
+    } else if (!anyFiring && this._laserBeamSound) {
+      this._laserBeamSound.destroy();
+      this._laserBeamSound = null;
+    }
+  }
+
+  // Factory rotation: a projector-whir that plays for exactly the
+  // rotation tween duration (220ms), giving the motion a satisfying
+  // mechanical sound. Re-firing rapidly (impatient taps) stops the
+  // previous instance first so two don't stack.
+  _playRotateSfx() {
+    if (!this.game) return;
+    if (this._rotateSfx) { this._rotateSfx.stop(); this._rotateSfx = null; }
+    this._rotateSfx = playTimedSfx(this.game, 'factory_rotate', 220, { volume: 0.45 });
+  }
+
+  // Rotation refused (wouldn't fit on board): play a tiny bite of the
+  // funnel_wrong sound — enough to register "nope" without the full
+  // buzzer playing over the shake.
+  _playRotateRefusalSfx() {
+    if (!this.game) return;
+    playTimedSfx(this.game, 'funnel_wrong', 140, { volume: 0.45 });
+  }
+
+  // Multi-shape wall / acid / wrong-output collisions tend to fire in
+  // the same frame — walltimer throttle so N simultaneous pops stack to
+  // one sound instead of a wall of overlapping copies. 80ms is short
+  // enough that a second pop a tenth of a second later still plays.
+  _playShapePopOnce() {
+    if (!this.game) return;
+    const now = this.game.loop.time;
+    if (this._shapePopCooldownUntil && now < this._shapePopCooldownUntil) return;
+    this._shapePopCooldownUntil = now + 80;
+    playSfxSound(this.game, 'shape_pop', { volume: 0.5 });
+  }
+
   _onCollectorSatisfied(collector) {
     this.satisfiedCollectors.add(collector.key);
     // Stamp the green check on the collector's buffer tile — same visual
@@ -2486,6 +2811,10 @@ export default class PlayerScene extends Phaser.Scene {
     } else if (this.sourceLevel.id) {
       markBeaten(this.sourceLevel.id);
     }
+    // All red border funnels are now satisfied — swell every remaining
+    // layer to full volume. If events already unlocked everything this
+    // is a no-op; otherwise it fills the mix for the victory hold.
+    try { fadeInAllLayers(); } catch (e) {}
     // Community-level victory: stash an id for CommunityScene to pick up
     // and show its rating prompt when the user returns. Writing to the
     // game registry survives scene.start so the data is still there
@@ -2589,6 +2918,9 @@ export default class PlayerScene extends Phaser.Scene {
 
   _showVictoryText() {
     if (!this.scene || !this.victory || this._victoryTextName) return;
+    // Trumpet fanfare at the top of the victory banner, before the
+    // staggered firework volley starts.
+    playSfxSound(this.game, 'victory_fanfare', { volume: 0.6 });
     // Anchor the message over the playable board, not the whole scene, so
     // it sits on the interesting bit of the screen.
     const boardCX = this.boardOriginX + this.boardW / 2;
@@ -2596,9 +2928,19 @@ export default class PlayerScene extends Phaser.Scene {
     const boardH = rows * this.pxCell + (rows - 1) * BOARD_GAP;
     const boardCY = this.boardOriginY + boardH / 2;
     const bandH = 190;
+    const bandTop = boardCY - bandH / 2;
+    // Canvas-wide fill inside Phaser, plus DOM strips on each side of
+    // the canvas so the dark band reads as a single uninterrupted
+    // strip across the whole viewport, letterbox included.
     this._victoryTextBg = this.add.graphics().setDepth(8998);
     this._victoryTextBg.fillStyle(0x000000, 0.45);
-    this._victoryTextBg.fillRect(this.boardOriginX, boardCY - bandH / 2, this.boardW, bandH);
+    this._victoryTextBg.fillRect(0, bandTop, this.scale.width, bandH);
+    this._victoryBandDom = addDomBand({
+      canvasTop: bandTop,
+      canvasHeight: bandH,
+      color: '#000000',
+      alpha: 0.45,
+    });
     const name = (this.sourceLevel && this.sourceLevel.name) || 'Level';
     this._victoryTextName = this.add.text(boardCX, boardCY - 30, name, {
       fontFamily: 'system-ui, sans-serif', fontSize: '52px', fontStyle: 'bold',
@@ -2610,12 +2952,63 @@ export default class PlayerScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(8999);
     // Disable input during the message so stray taps can't derail auto-advance.
     if (this.input) this.input.enabled = false;
-    // Longer display (2s) so the name reads clearly before the transition.
-    this.time.delayedCall(2000, () => this._advanceAfterVictory());
+    // Launch a staggered volley of 4 fireworks that runs the full length
+    // of the banner hold. Each burst fills ~half the board width; they
+    // sit around the banner (two above, two below) so the text stays
+    // readable.
+    this._launchVictoryFireworks(boardCX, boardCY, bandH);
+    // Hold the banner for 4s so the name + music swell both have time
+    // to register before the transition.
+    this.time.delayedCall(4000, () => this._advanceAfterVictory());
+  }
+
+  // Staggered level-complete fireworks. Four bursts spread across 4s,
+  // placed randomly in the four board quadrants around the banner band
+  // (top-left / top-right / bottom-left / bottom-right). Each burst
+  // plays `firework.ogg` and scatters 30 colored shape particles that
+  // spread to about half the board width.
+  _launchVictoryFireworks(boardCX, boardCY, bandH) {
+    if (!this.fxContainer) return;
+    const top    = this.boardOriginY + 40;
+    const bottom = this.boardOriginY + (this.sourceLevel.board.rows * this.pxCell + (this.sourceLevel.board.rows - 1) * BOARD_GAP) - 40;
+    const left   = this.boardOriginX + 60;
+    const right  = this.boardOriginX + this.boardW - 60;
+    const bannerTop    = boardCY - bandH / 2 - 20;
+    const bannerBottom = boardCY + bandH / 2 + 20;
+    const radius = Math.max(90, Math.round(this.boardW * 0.18));
+    const rand = (lo, hi) => lo + Math.random() * (hi - lo);
+    const quadrants = [
+      () => ({ x: rand(left,       boardCX - 20), y: rand(top,           bannerTop)    }),   // top-left
+      () => ({ x: rand(boardCX + 20, right),      y: rand(top,           bannerTop)    }),   // top-right
+      () => ({ x: rand(left,       boardCX - 20), y: rand(bannerBottom,  bottom)       }),   // bottom-left
+      () => ({ x: rand(boardCX + 20, right),      y: rand(bannerBottom,  bottom)       }),   // bottom-right
+    ];
+    // Shuffle so the same quadrant order doesn't repeat level-over-level.
+    for (let i = quadrants.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [quadrants[i], quadrants[j]] = [quadrants[j], quadrants[i]];
+    }
+    for (let i = 0; i < quadrants.length; i++) {
+      const delay = i * 900 + Math.floor(Math.random() * 180);
+      const pos = quadrants[i]();
+      this.time.delayedCall(delay, () => {
+        if (!this.victory || !this.fxContainer) return;
+        spawnFunnelFirework(this, this.fxContainer, {
+          x: pos.x, y: pos.y, radius, count: 30,
+          particleR: 11, strokeW: 2,
+        });
+        playSfxSound(this.game, 'firework', { volume: 0.55 });
+      });
+    }
   }
 
   _advanceAfterVictory() {
     if (!this.victory) return;           // reset in-flight; abort the auto-advance
+    // Victory screen is dismissing — fade layers 2..5 back down to 0
+    // over 6 beats, leaving layer 1 audible. The next level's
+    // _startPlay snaps everything to "1 on, 2..5 muted" and starts the
+    // swell again.
+    try { fadeOutToLayerOne(); } catch (e) {}
     const isCommunity = this.sourceLevel.origin === 'local' || this.sourceLevel.origin === 'imported';
     const next = (!isCommunity && this.sourceLevel.id) ? nextLevelAfter(this.sourceLevel.id) : null;
     // Re-enable input so SceneFader's own disable/enable cycle works cleanly.
@@ -2645,11 +3038,49 @@ export default class PlayerScene extends Phaser.Scene {
     this.sim = new Simulation({
       pxCell: this.pxCell,
       pxGap: BOARD_GAP,
-      onSpawn: (shape) => this.shapeRenderer.spawn(shape),
-      onRemove: (shape, pop, cause) => this.shapeRenderer.remove(shape, pop, cause),
+      onSpawn: (shape) => {
+        this.shapeRenderer.spawn(shape);
+        this._playShapeExitOnce();
+      },
+      onRemove: (shape, pop, cause) => {
+        this.shapeRenderer.remove(shape, pop, cause);
+        // Laser-caused pop: the zap plays at electrocute-start via
+        // onShapeElectrocuted, and the actual pop animation fires
+        // ELECTROCUTE_MS (400ms) later here — so the two SFX land
+        // in the correct order without explicit scheduling.
+        if (pop) this._playShapePopOnce();
+      },
       onSinkResolve: (funnel, accepted) => {
         this.bufferMarkerRenderer.mark(funnel, accepted);
+        // Red border funnels get exactly ONE right/wrong sound per play
+        // run — the first shape to arrive. Later arrivals into the same
+        // funnel still mark the buffer but stay silent, so a steady
+        // stream of correct shapes doesn't chirp every cycle.
+        if (funnel.ownerId === 'border' && !this._borderFunnelSounded.has(funnel.key)) {
+          this._borderFunnelSounded.add(funnel.key);
+          playOnce(this.game, accepted ? 'funnel_right' : 'funnel_wrong', { throttleMs: 120, volume: 0.5 });
+        }
         if (accepted && funnel.ownerId === 'border') this._onOutputSatisfied(funnel);
+      },
+      onSinkHit: (funnel) => {
+        // Factory input — whoosh as the shape enters the body.
+        // Border sinks get their pull-in cue earlier via
+        // onShapeApproachSink; no sound here would double up.
+        if (funnel.ownerId !== 'border') {
+          playOnce(this.game, 'factory_pass', { throttleMs: 90, volume: 0.15 });
+        }
+      },
+      onShapeApproachSink: () => {
+        // Shape has just entered its shrink zone toward a red border
+        // funnel — play the suck-in pop here (ahead of the actual
+        // sink-hit) so the audio matches the visual pull-in.
+        playOnce(this.game, 'funnel_suck', { throttleMs: 40, volume: 0.22 });
+      },
+      onShapeElectrocuted: () => {
+        playOnce(this.game, 'zap', { throttleMs: 100, volume: 0.5 });
+      },
+      onShapeEnterAcid: () => {
+        playOnce(this.game, 'acid_bubble', { throttleMs: 120, volume: 0.22 });
       },
       onCollectorSatisfied: (c) => this._onCollectorSatisfied(c),
     });

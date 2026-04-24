@@ -9,6 +9,8 @@
 // Callers wire callbacks for each resolved gesture. The controller does not
 // know about the data model; it's purely a pointer state machine.
 
+import { playOnce } from '../audio/sfx.js';
+
 const DRAG_THRESHOLD = 6;
 
 export class DragController {
@@ -56,11 +58,13 @@ export class DragController {
     const edge = this.cbs.isOverEdge ? this.cbs.isOverEdge(pointer.x, pointer.y) : null;
     if (edge) {
       this.pending = { kind: 'edge', edge, startX: pointer.x, startY: pointer.y };
+      playOnce(this.scene.game, 'ui_click', { throttleMs: 100, volume: 0.5 });
       return;
     }
     const cell = this.cbs.isOverCell ? this.cbs.isOverCell(pointer.x, pointer.y) : null;
     if (cell) {
       this.pending = { kind: 'cell', cell, startX: pointer.x, startY: pointer.y, dragStarted: false };
+      playOnce(this.scene.game, 'ui_click', { throttleMs: 100, volume: 0.5 });
     } else {
       this.pending = null;
     }
@@ -97,10 +101,13 @@ export class DragController {
     if (p.kind === 'cell') {
       if (p.dragStarted) {
         const boardRC = this.cbs.isOverBoardCell ? this.cbs.isOverBoardCell(pointer.x, pointer.y) : null;
-        this.cbs.onDragEnd && this.cbs.onDragEnd({ boardRC });
+        // Scene decides the drop SFX (ui_click vs. rustle for a
+        // delete-island drop) in onDragEnd — DragController stays
+        // mute here so the two don't stack.
+        this.cbs.onDragEnd && this.cbs.onDragEnd({ boardRC, pointer });
         return;
       }
-      this.cbs.onToggleCell && this.cbs.onToggleCell(p.cell);
+      this.cbs.onToggleCell && this.cbs.onToggleCell(p.cell, pointer);
     }
   }
 }

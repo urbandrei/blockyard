@@ -12,13 +12,25 @@ import { renderBufferLabels } from '../render/BufferLabelRenderer.js';
 import {
   renderInteriorFloor, renderExteriorCheckers, renderFrameShadow, renderFrameOutline,
 } from '../render/PlayAreaFrame.js';
+import { renderAcidPits } from '../render/AcidPitRenderer.js';
+import { spawnFunnelFirework } from '../render/FunnelFirework.js';
 import { ShapeRenderer } from '../render/ShapeRenderer.js';
+import { LaserRenderer } from '../render/LaserRenderer.js';
 import { FunnelParticleSystem, collectFunnelsForParticles } from '../render/FunnelParticleSystem.js';
 import { Simulation } from '../sim/Simulation.js';
 import { shapeSquash } from '../render/pulse.js';
 import { genId } from '../model/level.js';
 import { COLOR_HEX } from '../model/shape.js';
 import { platform } from '../../platform/index.js';
+import {
+  playOnce, wireUiClicks, spawnEmptyClickParticles,
+  playSfxSound, createLoopingSfx,
+} from '../audio/sfx.js';
+import {
+  toggleMusicMuted, toggleSfxMuted, isMusicMuted, isSfxMuted,
+  subscribeAudioSettings,
+} from '../audio/settings.js';
+import { SettingsModal } from '../ui/SettingsModal.js';
 import { BOARD_GAP, CYCLE_MS, SHAPE_SCALE, motionWarp, outlineWidth } from '../constants.js';
 
 // Home menu rendered as a miniature live level. Three factory "buttons" sit
@@ -51,8 +63,7 @@ const FACTORY_ROWS_ABS  = [4, 5, 6];  // absolute rows for the 3 button bars
 
 // Shape types per factory circuit (taken from the reference level).
 const TYPE_RED_TRI     = { form: 'triangle', color: 'red'   };
-const TYPE_BLUE_CIRCLE = { form: 'circle',   color: 'blue'  };
-const TYPE_GREEN_SQR   = { form: 'square',   color: 'green' };
+const TYPE_GREEN_TRI   = { form: 'triangle', color: 'green' };
 
 // Factory 1 gets a green body (the "play" factory) to signal QUICK PLAY —
 // or yellow once the player has cleared every level in the catalog.
@@ -65,6 +76,11 @@ export default class HomeScene extends Phaser.Scene {
   constructor() { super({ key: 'Home' }); }
 
   async create() {
+    wireUiClicks(this);
+    // wireEmptyClicks is intentionally NOT called here — the scene's
+    // own pointerdown handler (installed below) routes empty taps
+    // through _tapAcidPit / _tapBorderItem / rustle so each cell
+    // kind gets the right sound + juice without two handlers racing.
     disableMenuBg();
 
     // Shareable deep-link: `?level=<id>` on any origin (our Render static
@@ -93,10 +109,16 @@ export default class HomeScene extends Phaser.Scene {
     // Containers. Depths mirror PlayerScene so exterior checker covers the
     // outside of the board via the same cut-out trick.
     this.boardContainer        = this.add.container(0, 0).setDepth(0);
+    // Acid pit terrain sits between floor (depth 0) and shapes (depth 10)
+    // so pits paint over the checker but behind the flowing units and
+    // their particles.
+    this.acidPitContainer      = this.add.container(0, 0).setDepth(6);
     // Ambient funnel particles render BELOW shapes so emerging shapes paint
     // over their own preview particles instead of being veiled by them.
     this.factoryFunnelParticleContainer = this.add.container(0, 0).setDepth(8);
     this.shapeContainer        = this.add.container(0, 0).setDepth(10);
+    // Laser beams render above shapes so the electrocute flash reads on top.
+    this.laserContainer        = this.add.container(0, 0).setDepth(12);
     this.funnelContainer       = this.add.container(0, 0).setDepth(15);
     this.interactiveContainer  = this.add.container(0, 0).setDepth(20);
     this.flowContainer         = this.add.container(0, 0).setDepth(22);
@@ -107,6 +129,13 @@ export default class HomeScene extends Phaser.Scene {
     this.labelContainer        = this.add.container(0, 0).setDepth(150);
     this.frameContainer        = this.add.container(0, 0).setDepth(160);
     this.buttonHitContainer    = this.add.container(0, 0).setDepth(200);
+    // Tap-burst particles live here — above every board layer but
+    // below the toolbar and settings modal.
+    this.fxContainer           = this.add.container(0, 0).setDepth(205);
+    // Toolbar container for the audio/music/gear icons. Sits above
+    // frame + buttons so the icons always catch presses even when the
+    // exterior checker paints across the upper-right.
+    this.toolbarContainer      = this.add.container(0, 0).setDepth(210);
 
     this.level = this._buildLevel();
     this.factoryRefs   = new Map();   // id → { bodyWrap, funnelWrap }
@@ -117,6 +146,33 @@ export default class HomeScene extends Phaser.Scene {
     this.simTime = 0;
 
     this._layoutAndRender();
+
+    // Board-cell tap detection for the demo sim. Acid pits and border
+    // funnels each get their own sound + particle burst — the same
+    // cues the player scene fires, so Home sounds + feels consistent
+    // with gameplay. Factory buttons are handled upstream via their
+    // own hit rectangles (currentlyOver.length > 0), so we skip those
+    // here to avoid double-fire.
+    this.input.on('pointerdown', (pointer, currentlyOver) => {
+      if (currentlyOver && currentlyOver.length > 0) return;
+      const cell = this._boardCellAt(pointer.x, pointer.y);
+      if (cell) {
+        const pits = (this.level && this.level.acidPits) || [];
+        if (pits.some((p) => p.r === cell.r && p.c === cell.c)) {
+          this._tapAcidPit(cell.r, cell.c);
+          return;
+        }
+        const bfs = (this.level && this.level.border && this.level.border.funnels) || [];
+        if (bfs.some((f) => f.r === cell.r && f.c === cell.c)) {
+          this._tapBorderItem(cell.r, cell.c);
+          return;
+        }
+      }
+      // Empty click anywhere else — rustle + particle puff, matching
+      // the cue used on the player/editor empty cells.
+      playOnce(this.game, 'click_empty', { throttleMs: 60, volume: 0.18 });
+      spawnEmptyClickParticles(this, pointer.x, pointer.y);
+    });
 
     this._onResize = () => this._relayoutForViewport();
     this.scale.on('resize', this._onResize);
@@ -129,6 +185,15 @@ export default class HomeScene extends Phaser.Scene {
       this.flowUpdaters = [];
       if (this.factoryFunnelParticles) { this.factoryFunnelParticles.destroy(); this.factoryFunnelParticles = null; }
       if (this.borderFunnelParticles)  { this.borderFunnelParticles.destroy();  this.borderFunnelParticles  = null; }
+      if (this._acidPits) { this._acidPits.destroy(); this._acidPits = null; }
+      if (this.laserRenderer) { this.laserRenderer.destroy(); this.laserRenderer = null; }
+      if (this._laserBeamSound) {
+        this._laserBeamSound.destroy();
+        this._laserBeamSound = null;
+      }
+      if (this._laserPrev) this._laserPrev.clear();
+      this._destroyToolbar();
+      if (this._settingsModal) { try { this._settingsModal.destroy(); } catch (e) {} this._settingsModal = null; }
       if (this._titleTexts) for (const t of this._titleTexts) { try { t.destroy(); } catch (e) {} }
       this._titleTexts = null;
     });
@@ -159,13 +224,19 @@ export default class HomeScene extends Phaser.Scene {
       fill:   this._allComplete ? COMPLETE_FILL   : PLAY_FILL,
       stroke: this._allComplete ? COMPLETE_STROKE : PLAY_STROKE,
     };
+    // Fac 2 — the LEVEL SELECT button. Funnels are laser emitters on
+    // both sides: the border emitter at the right edge of row 5 hits
+    // fac 2's right emitter, triggering fac 2's LEFT emitter (sibling
+    // hit rule) which shoots outward to the left-border collector.
+    // Net visual: a laser beam enters from the right, crosses the
+    // factory body, and exits toward the left.
     const fac2 = {
       id: genId(),
       anchor: anchorAt(FACTORY_ROWS_ABS[1]),                // row 5
       cells: rowCells.map((cc) => ({ ...cc })),
       funnels: [
-        { r: 0, c: lastCol, side: 'right', role: 'input'  },
-        { r: 0, c: 0,       side: 'left',  role: 'output' },
+        { r: 0, c: lastCol, side: 'right', role: 'emitter' },
+        { r: 0, c: 0,       side: 'left',  role: 'emitter' },
       ],
     };
     const fac3 = {
@@ -180,22 +251,40 @@ export default class HomeScene extends Phaser.Scene {
     };
     const factories = [fac1, fac2, fac3];
 
-    // Border funnels mirror the reference JSON exactly.
+    // Border funnels mirror the reference JSON exactly — except the
+    // middle row (fac 2's circuit), which is now a laser beam pair
+    // instead of a typed shape flow.
     const borderFunnels = [
       // Fac 1 circuit — red triangle, top → right.
       { r: 0, c: FACTORY_COL,         side: 'bottom', role: 'input',  __type: TYPE_RED_TRI    },
       { r: 4, c: BOARD_COLS - 1,      side: 'left',   role: 'output', __type: TYPE_RED_TRI    },
-      // Fac 2 circuit — blue circle, right → left.
-      { r: 5, c: BOARD_COLS - 1,      side: 'left',   role: 'input',  __type: TYPE_BLUE_CIRCLE },
-      { r: 5, c: 0,                   side: 'right',  role: 'output', __type: TYPE_BLUE_CIRCLE },
-      // Fac 3 circuit — green square, one input (left) → two outputs (right + bottom).
-      { r: 6, c: 0,                   side: 'right',  role: 'input',  __type: TYPE_GREEN_SQR  },
-      { r: 6, c: BOARD_COLS - 1,      side: 'left',   role: 'output', __type: TYPE_GREEN_SQR  },
-      { r: BOARD_ROWS - 1, c: FACTORY_COL + lastCol, side: 'top', role: 'output', __type: TYPE_GREEN_SQR },
+      // Fac 2 circuit — laser. Right-border emitter fires leftward,
+      // hits fac 2's right emitter; fac 2's left emitter (sibling)
+      // fires leftward into the left-border collector.
+      { r: 5, c: BOARD_COLS - 1,      side: 'left',   role: 'emitter'   },
+      { r: 5, c: 0,                   side: 'right',  role: 'collector' },
+      // Fac 3 circuit — green triangle, one input (left) → two outputs (right + bottom).
+      { r: 6, c: 0,                   side: 'right',  role: 'input',  __type: TYPE_GREEN_TRI },
+      { r: 6, c: BOARD_COLS - 1,      side: 'left',   role: 'output', __type: TYPE_GREEN_TRI },
+      { r: BOARD_ROWS - 1, c: FACTORY_COL + lastCol, side: 'top', role: 'output', __type: TYPE_GREEN_TRI },
     ];
 
     const inputs  = borderFunnels.filter((f) => f.role === 'input').map(({ __type, ...f }) => ({ ...f, type: { ...__type } }));
     const outputs = borderFunnels.filter((f) => f.role === 'output').map(({ __type, ...f }) => ({ ...f, type: { ...__type } }));
+
+    // Acid pits scattered around the interior. One green pit sits to
+    // the LEFT of the BLOCK word (requested); the rest are spread
+    // across the playable area so the demo sim routinely retints
+    // shapes as they cross them. Placements dodge the vertical red
+    // column (abs col 2) and the green horizontal row (abs row 6) so
+    // the two live flows stay readable.
+    const acidPits = [
+      { r: 2, c: 1, label: { color: 'green' } },   // left of BLOCK
+      { r: 3, c: 1, label: { color: 'green' } },   // left of YARD
+      { r: 1, c: 6, label: { color: 'blue'  } },   // upper-right pocket
+      { r: 3, c: 7, label: { color: 'red'   } },   // right of YARD
+      { r: 7, c: 3, label: null                },   // below factories — colorless
+    ];
 
     return {
       board: { cols: BOARD_COLS, rows: BOARD_ROWS },
@@ -204,6 +293,7 @@ export default class HomeScene extends Phaser.Scene {
       factories,
       lockedFactories: [],
       initialFactories: [],
+      acidPits,
     };
   }
 
@@ -232,7 +322,10 @@ export default class HomeScene extends Phaser.Scene {
 
     const setPos = (cnt, x, y) => cnt.setPosition(x, y);
     setPos(this.boardContainer,        L.boardOriginX, L.boardOriginY);
+    setPos(this.acidPitContainer,      L.boardOriginX, L.boardOriginY);
+    if (this.fxContainer) setPos(this.fxContainer, L.boardOriginX, L.boardOriginY);
     setPos(this.shapeContainer,        L.boardOriginX, L.boardOriginY);
+    setPos(this.laserContainer,        L.boardOriginX, L.boardOriginY);
     if (this.factoryFunnelParticleContainer) setPos(this.factoryFunnelParticleContainer, L.boardOriginX, L.boardOriginY);
     setPos(this.funnelContainer,       L.boardOriginX, L.boardOriginY);
     setPos(this.interactiveContainer,  L.boardOriginX, L.boardOriginY);
@@ -282,6 +375,7 @@ export default class HomeScene extends Phaser.Scene {
     this._renderBoard();
     this._destroyButtons();
     this._buildFactoryButtons(L);
+    this._buildToolbar(L);
 
     // Letterbox checker so the brown pattern wraps the canvas just like in
     // Player. Must run after `pxCell` + board origin are known.
@@ -294,6 +388,15 @@ export default class HomeScene extends Phaser.Scene {
       this._letterboxWired = true;
     }
 
+    // Acid pits + laser renderer. Both recreated on relayout so they
+    // track the new pxCell.
+    if (this._acidPits) { this._acidPits.destroy(); this._acidPits = null; }
+    this._acidPits = renderAcidPits(this, this.acidPitContainer, this.level, {
+      pxCell: this.pxCell, pxGap: BOARD_GAP,
+    });
+    if (this.laserRenderer) this.laserRenderer.destroy();
+    this.laserRenderer = new LaserRenderer(this, this.laserContainer, { pxCell: this.pxCell });
+
     // Sim + shape renderer. Recreated on relayout so pxCell matches.
     if (this.shapeRenderer) this.shapeRenderer.clearAll && this.shapeRenderer.clearAll();
     this.shapeRenderer = new ShapeRenderer(this, this.shapeContainer, { pxCell: this.pxCell });
@@ -301,9 +404,37 @@ export default class HomeScene extends Phaser.Scene {
     this.sim = new Simulation({
       pxCell: this.pxCell,
       pxGap: BOARD_GAP,
-      onSpawn:  (shape) => this.shapeRenderer.spawn(shape),
-      onRemove: (shape, pop, cause) => this.shapeRenderer.remove(shape, pop, cause),
-      onSinkResolve: () => {},
+      onSpawn: (shape) => {
+        this.shapeRenderer.spawn(shape);
+        this._playShapeExitOnce();
+      },
+      onRemove: (shape, pop, cause) => {
+        this.shapeRenderer.remove(shape, pop, cause);
+        if (pop) this._playShapePopOnce();
+      },
+      // Border inputs in the demo sim don't get a "delivered" chirp —
+      // funnel_right is gameplay feedback and would clash with the
+      // ambient bed. funnel_wrong still plays so rejected shapes
+      // register audibly.
+      onSinkResolve: (funnel, accepted) => {
+        if (!accepted && funnel.ownerId === 'border') {
+          playOnce(this.game, 'funnel_wrong', { throttleMs: 140, volume: 0.45 });
+        }
+      },
+      onSinkHit: (funnel) => {
+        if (funnel.ownerId !== 'border') {
+          playOnce(this.game, 'factory_pass', { throttleMs: 90, volume: 0.12 });
+        }
+      },
+      onShapeApproachSink: () => {
+        playOnce(this.game, 'funnel_suck', { throttleMs: 40, volume: 0.18 });
+      },
+      onShapeElectrocuted: () => {
+        playOnce(this.game, 'zap', { throttleMs: 100, volume: 0.45 });
+      },
+      onShapeEnterAcid: () => {
+        playOnce(this.game, 'acid_bubble', { throttleMs: 120, volume: 0.2 });
+      },
     });
     this.simTime = 0;
     this.sim.start(this.level, 0);
@@ -318,6 +449,99 @@ export default class HomeScene extends Phaser.Scene {
     const { factory, border } = collectFunnelsForParticles(this.level, this.pxCell, BOARD_GAP, SHAPE_SCALE);
     this.factoryFunnelParticles.setFunnels(factory);
     this.borderFunnelParticles.setFunnels(border);
+  }
+
+  // Cycle-bucketed shape-exit chirp — same pattern as the editor. Uses
+  // the sim's own simTime (which ticks forward at ~1x on this scene)
+  // rather than wall-clock since the demo sim is the clock here.
+  _playShapeExitOnce() {
+    if (!this.game) return;
+    const cycleIdx = Math.floor((this.simTime || 0) / CYCLE_MS);
+    if (this._lastShapeExitCycle === cycleIdx) return;
+    this._lastShapeExitCycle = cycleIdx;
+    playSfxSound(this.game, 'shape_exit', { volume: 0.5 });
+  }
+
+  _playShapePopOnce() {
+    if (!this.game) return;
+    const now = this.game.loop.time;
+    if (this._shapePopCooldownUntil && now < this._shapePopCooldownUntil) return;
+    this._shapePopCooldownUntil = now + 80;
+    playSfxSound(this.game, 'shape_pop', { volume: 0.5 });
+  }
+
+  // Board-cell hit test — returns {r, c} for the cell under (px, py)
+  // in world coords, or null if outside. Mirrors PlayerScene's helper
+  // so the Home demo answers taps the same way gameplay does.
+  _boardCellAt(px, py) {
+    const lx = px - this.boardOriginX;
+    const ly = py - this.boardOriginY;
+    const step = this.pxCell + BOARD_GAP;
+    const c = Math.floor(lx / step);
+    const r = Math.floor(ly / step);
+    const rows = (this.level && this.level.board && this.level.board.rows) || 0;
+    const cols = (this.level && this.level.board && this.level.board.cols) || 0;
+    if (r < 0 || c < 0 || r >= rows || c >= cols) return null;
+    const localX = lx - c * step;
+    const localY = ly - r * step;
+    if (localX > this.pxCell || localY > this.pxCell) return null;
+    return { r, c };
+  }
+
+  _tapAcidPit(r, c) {
+    playSfxSound(this.game, 'acid_pit_tap', { volume: 0.5 });
+    this._spawnCellBurst(r, c, { count: 8, radius: this.pxCell * 0.45, particleR: 4 });
+  }
+
+  _tapBorderItem(r, c) {
+    playSfxSound(this.game, 'border_item_tap', { volume: 0.5 });
+    this._spawnCellBurst(r, c, { count: 10, radius: this.pxCell * 0.5, particleR: 5 });
+  }
+
+  _spawnCellBurst(r, c, { count, radius, particleR }) {
+    if (!this.fxContainer) return;
+    // fxContainer is positioned at the board origin, so burst coords
+    // stay board-local.
+    const step = this.pxCell + BOARD_GAP;
+    const cx = c * step + this.pxCell / 2;
+    const cy = r * step + this.pxCell / 2;
+    spawnFunnelFirework(this, this.fxContainer, {
+      x: cx, y: cy, radius, count,
+      particleR, strokeW: 1,
+    });
+  }
+
+  // Same laser SFX state machine as PlayerScene / EditorScene — a
+  // one-shot laser_charge when an emitter's power starts ramping, a
+  // one-shot laser_fire the instant firing latches on, and a looped
+  // laser_beam while ANY emitter is firing. On Home there's only the
+  // fac 2 circuit, but the logic handles an arbitrary set.
+  _updateLaserSounds() {
+    const emitters = this.sim && this.sim.emitters;
+    if (!emitters) return;
+    if (!this._laserPrev) this._laserPrev = new Map();
+    let anyFiring = false;
+    for (const e of emitters) {
+      const curPower = e.power || 0;
+      const curFiring = !!e.firing;
+      const prev = this._laserPrev.get(e.key) || { power: 0, firing: false };
+      if (prev.power === 0 && curPower > 0) {
+        playOnce(this.game, 'laser_charge', { throttleMs: 60, volume: 0.35 });
+      }
+      if (!prev.firing && curFiring) {
+        playOnce(this.game, 'laser_fire',   { throttleMs: 60, volume: 0.45 });
+      }
+      if (curFiring) anyFiring = true;
+      prev.power = curPower;
+      prev.firing = curFiring;
+      this._laserPrev.set(e.key, prev);
+    }
+    if (anyFiring && !this._laserBeamSound) {
+      this._laserBeamSound = createLoopingSfx(this.game, 'laser_beam', 0.22);
+    } else if (!anyFiring && this._laserBeamSound) {
+      this._laserBeamSound.destroy();
+      this._laserBeamSound = null;
+    }
   }
 
   _renderBoard() {
@@ -485,6 +709,146 @@ export default class HomeScene extends Phaser.Scene {
     this._buttons = [];
   }
 
+  // Upper-right toolbar: three icons (SFX toggle, music toggle, gear).
+  // Positioned above the board frame in the exterior-checker region so
+  // they sit "outside the border" per the request. Each icon is drawn
+  // as Phaser Graphics + a transparent hit rectangle, repainted when
+  // the audio-settings subscription fires so mute state stays in sync
+  // across icon taps and settings-modal changes.
+  _buildToolbar(L) {
+    this._destroyToolbar();
+
+    // Icons live inside the TOP-RIGHT border cells of the board — the
+    // three cells adjacent to the upper-right corner of the playable
+    // area. Glyphs are sized well inside their cells so they read as
+    // compact badges rather than filling the whole buffer square.
+    const step = L.pxCell + BOARD_GAP;
+    const size = Math.max(14, Math.round(L.pxCell * 0.55));
+    const cellCenter = (c) => L.boardOriginX + c * step + L.pxCell / 2;
+    const cy = L.boardOriginY + L.pxCell / 2;
+    // Cells (left-to-right) carry: audio (sfx), music, gear. Nudged
+    // one cell left from the corner so the strip sits fully on top
+    // buffer cells rather than the corner checker.
+    const iconCells = [
+      { cx: cellCenter(5) },   // sfx
+      { cx: cellCenter(6) },   // music
+      { cx: cellCenter(7) },   // gear
+    ];
+
+    const makeIcon = (idx, kind) => {
+      const cx = iconCells[idx].cx;
+      // Each icon lives in its own container so hover/press tweens can
+      // scale the glyph around its own center without affecting its
+      // siblings. The Graphics is drawn in LOCAL coords (around 0,0)
+      // so container.scale + container.rotation act as the pivot.
+      const group = this.add.container(cx, cy);
+      this.toolbarContainer.add(group);
+      const g = this.add.graphics();
+      group.add(g);
+      // Hit area is decoupled from visual size — even small icons stay
+      // easy to tap because the rectangle fills most of the cell.
+      const hitSize = Math.max(size + 10, Math.round(L.pxCell * 0.9));
+      const hit = this.add.rectangle(0, 0, hitSize, hitSize, 0xffffff, 0.001)
+        .setInteractive({ useHandCursor: true });
+      group.add(hit);
+      return { kind, cx, cy, g, hit, group, size };
+    };
+
+    this._toolbarIcons = [
+      makeIcon(0, 'sfx'),
+      makeIcon(1, 'music'),
+      makeIcon(2, 'gear'),
+    ];
+
+    const repaintAll = () => {
+      for (const it of this._toolbarIcons) {
+        it.g.clear();
+        const muted =
+          it.kind === 'sfx'   ? isSfxMuted()
+          : it.kind === 'music' ? isMusicMuted()
+          : false;
+        // Draw around (0, 0) so container transforms are the pivot.
+        drawIcon(it.g, 0, 0, it.size, it.kind, muted);
+      }
+    };
+    repaintAll();
+
+    // Hover / press / release juice. Tweens target the container so
+    // scale + rotation pivot around the icon's center (cx, cy) rather
+    // than the top-left of the Graphics' internal coords.
+    const killTweens = (target) => { try { this.tweens.killTweensOf(target); } catch (e) {} };
+    for (const it of this._toolbarIcons) {
+      const target = it.group;
+      it.hit.on('pointerover', () => {
+        killTweens(target);
+        this.tweens.add({
+          targets: target, scaleX: 1.15, scaleY: 1.15,
+          duration: 160, ease: 'Back.Out',
+        });
+      });
+      it.hit.on('pointerout', () => {
+        killTweens(target);
+        this.tweens.add({
+          targets: target, scaleX: 1, scaleY: 1, rotation: 0,
+          duration: 180, ease: 'Sine.InOut',
+        });
+      });
+      it.hit.on('pointerdown', () => {
+        killTweens(target);
+        this.tweens.add({
+          targets: target, scaleX: 0.82, scaleY: 0.82, rotation: -0.08,
+          duration: 90, ease: 'Sine.Out',
+        });
+      });
+      it.hit.on('pointerup', (pointer, lx, ly, ev) => {
+        if (ev) ev.stopPropagation();
+        killTweens(target);
+        // Snap back past 1.0 for a springy release, then settle.
+        this.tweens.add({
+          targets: target, scaleX: 1.22, scaleY: 1.22, rotation: 0.05,
+          duration: 110, ease: 'Sine.Out',
+          onComplete: () => {
+            this.tweens.add({
+              targets: target, scaleX: 1, scaleY: 1, rotation: 0,
+              duration: 180, ease: 'Back.Out',
+            });
+          },
+        });
+        if (it.kind === 'sfx')        { toggleSfxMuted();   playOnce(this.game, 'ui_click', { throttleMs: 80, volume: 0.5 }); }
+        else if (it.kind === 'music') { toggleMusicMuted(); playOnce(this.game, 'ui_click', { throttleMs: 80, volume: 0.5 }); }
+        else if (it.kind === 'gear')  {
+          // Extra little spin on the gear — feels distinctly mechanical
+          // versus the two toggles.
+          this.tweens.add({
+            targets: target, rotation: 0.62, duration: 320, ease: 'Sine.InOut',
+            onComplete: () => { target.rotation = 0; },
+          });
+          this._openSettings();
+        }
+      });
+    }
+
+    // Live sync — if the settings modal changes a mute, the icons
+    // redraw without waiting for the next scene event.
+    if (this._audioUnsub) this._audioUnsub();
+    this._audioUnsub = subscribeAudioSettings(() => repaintAll());
+  }
+
+  _destroyToolbar() {
+    if (this._audioUnsub) { this._audioUnsub(); this._audioUnsub = null; }
+    for (const it of (this._toolbarIcons || [])) {
+      try { it.group.destroy(true); } catch (e) {}
+    }
+    this._toolbarIcons = null;
+  }
+
+  _openSettings() {
+    if (this._settingsModal) return;
+    this._settingsModal = new SettingsModal(this, {
+      onClose: () => { this._settingsModal = null; },
+    });
+  }
+
   _destroyTitle() {
     if (this._titleTexts) for (const t of this._titleTexts) { try { t.destroy(); } catch (e) {} }
     this._titleTexts = null;
@@ -625,7 +989,10 @@ export default class HomeScene extends Phaser.Scene {
         const alongY = shape.dy !== 0 ? warpStretch : 1 / warpStretch;
         this.shapeRenderer.update(shape, base * alongX, base * alongY);
       }
+      if (this.laserRenderer) this.laserRenderer.update(time, this.sim.lasers, this.sim.emitters);
+      this._updateLaserSounds();
     }
+    if (this._acidPits) this._acidPits.tick(time);
     if (this.factoryFunnelParticles) this.factoryFunnelParticles.update(time);
     if (this.borderFunnelParticles)  this.borderFunnelParticles.update(time);
   }
@@ -697,6 +1064,94 @@ function decodeInlineShareString(s) {
 // inline to avoid a new export for a 10-line utility.
 function colorToCss(hex) {
   return '#' + hex.toString(16).padStart(6, '0');
+}
+
+// Glyph-style icon drawer for the toolbar. `kind` is one of 'sfx'
+// (speaker), 'music' (eighth note), 'gear' (cog). Rendered with a
+// BLACK outline at the same 3px weight the flowing shapes + factory
+// bodies + frame all share, over a fully transparent interior so the
+// exterior checker shows through each glyph. Muted toggles overlay a
+// red diagonal slash so the off state reads at a glance.
+function drawIcon(g, cx, cy, size, kind, muted) {
+  const strokeColor = 0xffffff;
+  const strokeW = outlineWidth();
+  g.lineStyle(strokeW, strokeColor, 1);
+
+  if (kind === 'sfx') {
+    const r = size / 2;
+    const nubW = r * 0.45;
+    const nubH = r * 0.55;
+    // Speaker — nub (small rect) merged into the cone (trapezoid), all
+    // as a single closed STROKE-only path.
+    g.beginPath();
+    g.moveTo(cx - r * 0.85,        cy - nubH / 2);
+    g.lineTo(cx - r * 0.85 + nubW, cy - nubH / 2);
+    g.lineTo(cx + r * 0.15,        cy - r * 0.95);
+    g.lineTo(cx + r * 0.15,        cy + r * 0.95);
+    g.lineTo(cx - r * 0.85 + nubW, cy + nubH / 2);
+    g.lineTo(cx - r * 0.85,        cy + nubH / 2);
+    g.closePath();
+    g.strokePath();
+    if (!muted) {
+      drawArc(g, cx + r * 0.35, cy, r * 0.35, -Math.PI / 3, Math.PI / 3);
+      drawArc(g, cx + r * 0.55, cy, r * 0.6,  -Math.PI / 3, Math.PI / 3);
+    }
+  } else if (kind === 'music') {
+    const r = size / 2;
+    const stemX = cx + r * 0.1;
+    const stemTop = cy - r * 0.85;
+    const stemBot = cy + r * 0.45;
+    g.beginPath();
+    g.moveTo(stemX, stemTop);
+    g.lineTo(stemX, stemBot);
+    g.strokePath();
+    g.beginPath();
+    g.moveTo(stemX, stemTop);
+    g.lineTo(stemX + r * 0.55, stemTop + r * 0.25);
+    g.lineTo(stemX + r * 0.25, stemTop + r * 0.55);
+    g.strokePath();
+    // Head — outline only (no fill).
+    g.strokeEllipse(stemX - r * 0.3, stemBot, r * 0.55, r * 0.4);
+  } else if (kind === 'gear') {
+    const r = size * 0.4;
+    const teeth = 8;
+    const innerR = r * 0.65;
+    const toothR = r;
+    g.beginPath();
+    for (let i = 0; i < teeth * 2; i++) {
+      const a = (i / (teeth * 2)) * Math.PI * 2 - Math.PI / 2;
+      const rr = (i % 2 === 0) ? toothR : innerR;
+      const x = cx + Math.cos(a) * rr;
+      const y = cy + Math.sin(a) * rr;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.closePath();
+    g.strokePath();
+    g.strokeCircle(cx, cy, r * 0.32);
+  }
+
+  // Muted slash — red diagonal over speaker / note.
+  if (muted && (kind === 'sfx' || kind === 'music')) {
+    const r = size / 2;
+    g.lineStyle(strokeW + 1, 0xd94c4c, 1);
+    g.beginPath();
+    g.moveTo(cx - r * 0.9, cy - r * 0.9);
+    g.lineTo(cx + r * 0.9, cy + r * 0.9);
+    g.strokePath();
+  }
+}
+
+function drawArc(g, cx, cy, r, start, end) {
+  const STEPS = 12;
+  g.beginPath();
+  for (let i = 0; i <= STEPS; i++) {
+    const t = i / STEPS;
+    const a = start + (end - start) * t;
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  }
+  g.strokePath();
 }
 
 function factoryCenter(cells, pxCell, pxGap) {

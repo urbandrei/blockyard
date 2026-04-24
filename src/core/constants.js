@@ -1,6 +1,14 @@
 // Shared constants (ported from v1 common.css CSS vars + shape.js).
 
-export const CYCLE_MS = 1100;           // one animation / simulation cycle
+// Master tempo. Everything animated in the game (shape motion plateaus,
+// factory+border squash pulse, laser charge, blueprint button breathe)
+// is quantized against this — when we layer music on top, the visuals
+// land on beat by construction. One sim cycle = 2 beats; the cycle has
+// two slow plateaus (see phaseDistance), one per beat.
+export const BPM = 110;
+export const BEAT_MS = 60000 / BPM;       // ~545.4545 ms per beat
+export const CYCLE_MS = BEAT_MS * 2;      // ~1090.9091 ms — one sim cycle
+
 export const SHAPE_SCALE = 0.6;         // interior factory body renders at 60% of grid cell
 export const BOARD_GAP = 3;             // px gap between board grid cells
 

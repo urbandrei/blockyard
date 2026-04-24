@@ -12,10 +12,10 @@ import { COLOR_HEX, COLORS, FORMS } from '../model/shape.js';
 const DEFAULT_COUNT = 12;
 const PARTICLE_STROKE = 0x1a2332;
 
-export function spawnFunnelFirework(scene, container, { x, y, radius, count = DEFAULT_COUNT }) {
+export function spawnFunnelFirework(scene, container, { x, y, radius, count = DEFAULT_COUNT, particleR: particleROverride, strokeW: strokeWOverride }) {
   const r = Math.max(10, radius || 24);
-  const particleR = Math.max(3, Math.round(r * 0.28));
-  const strokeW = Math.max(1, Math.round(r * 0.06));
+  const particleR = particleROverride != null ? particleROverride : Math.max(3, Math.round(r * 0.28));
+  const strokeW = strokeWOverride != null ? strokeWOverride : Math.max(1, Math.round(r * 0.06));
   for (let i = 0; i < count; i++) {
     const form  = FORMS[(Math.random() * FORMS.length)  | 0];
     const color = COLORS[(Math.random() * COLORS.length) | 0];

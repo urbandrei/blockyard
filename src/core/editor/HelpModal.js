@@ -12,6 +12,8 @@
 // at depth 9000, panel root at depth 9001, delayed onClose so the
 // dismissing tap doesn't fall through to the editor underneath.
 
+import { addDomDim } from '../ui/DomDim.js';
+
 const PANEL_W = 520;
 const PANEL_H = 360;
 const PAD = 26;
@@ -152,6 +154,7 @@ export class HelpModal {
   close() {
     if (this._closed) return;
     this._closed = true;
+    if (this._domDim) { try { this._domDim(); } catch (e) {} this._domDim = null; }
     this.root && this.root.destroy();
     this.shield && this.shield.destroy();
     if (this._dimGfx)       { this._dimGfx.destroy();       this._dimGfx = null; }
@@ -167,6 +170,10 @@ export class HelpModal {
     const sw = scene.scale.width;
     const sh = scene.scale.height;
 
+    // HTML letterbox strips so the dim reaches the whole viewport.
+    // The canvas part is dimmed by _dimGfx below (which draws the
+    // spotlight strips around the highlighted target).
+    this._domDim = addDomDim({ alpha: 0.55 });
     // Tap-capture surface — fully transparent, full-screen. Captures all
     // clicks while the modal is open so the editor underneath stays inert.
     this.shield = scene.add
