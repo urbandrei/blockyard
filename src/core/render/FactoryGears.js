@@ -129,6 +129,13 @@ function shuffleInPlace(arr, rng) {
 // `wrap.rotation = factory.rotation * Math.PI/2` so the wrap rotates
 // the gears to their visual positions.
 export function renderFactoryGears(scene, wrap, factory, { pxCell, pxGap, seed }) {
+  // Stubbed — gears disabled globally until the outstanding visual
+  // issues (rotation drift on asymmetric factories, squash pivot
+  // mismatch, blueprint/ghost seam jitter) are resolved. All call
+  // sites get a valid empty handle so the rest of the render stack
+  // keeps working unchanged.
+  return { wrap, gears: [], destroy() {} };
+  // eslint-disable-next-line no-unreachable
   const anchors = collectAnchors(factory.cells, factory.funnels, pxCell, pxGap);
   if (anchors.length === 0) return { wrap, gears: [], destroy() {} };
 
