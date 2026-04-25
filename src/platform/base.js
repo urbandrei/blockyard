@@ -91,6 +91,22 @@ export function createBaseAdapter(name = 'base') {
     canOpenExternal: false,
     openExternal(_url) { return false; },
 
+    // Ethereum / level-ownership (Milestone I — web-only). Sandboxed
+    // platforms (YouTube Playables, Steam, mobile, Newgrounds) keep these
+    // no-ops; the publish flow falls back to signature-free behavior.
+    // `ethEnabled` is the single source of truth UI uses to show or hide
+    // the wallet affordances.
+    ethEnabled: false,
+    async getConnectedWallet() { return null; },
+    async connectWallet() { throw new Error('wallet not supported on this platform'); },
+    async disconnectWallet() {},
+    async signLevel(_level) { throw new Error('signLevel not supported on this platform'); },
+    async mintLevel(_args) { throw new Error('mintLevel not supported on this platform'); },
+    // Server-side companion to the on-chain mint. Records tokenId + txHash
+    // back on the level record so the bot embed and the public listing can
+    // show ownership info. No-op on sandboxed adapters.
+    async recordMint(_id, _args) { return false; },
+
     // Phaser wiring. Subclasses call _firePause / _fireResume / _fireAudio
     // from their SDK hooks; bindGame subscribes to forward those to Phaser.
     bindGame(phaserGame) {

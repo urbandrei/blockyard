@@ -65,8 +65,13 @@ export class ExportPanel {
     this.shield = this.scene.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.55)
       .setDepth(SHIELD_DEPTH).setInteractive();
 
+    // The wallet row only appears when the platform supports eth (web with
+    // a deployed contract). Other targets keep the legacy 3-row form.
+    this._walletEnabled = !!(platform && platform.ethEnabled);
+    const extraRows = this._walletEnabled ? 1 : 0;
+
     const panelW = Math.min(560, width - 60);
-    const panelH = 560;
+    const panelH = 560 + extraRows * FIELD_ROW_H;
     const px = width / 2 - panelW / 2;
     const py = height / 2 - panelH / 2;
     this._panel = { px, py, panelW, panelH };
@@ -100,6 +105,23 @@ export class ExportPanel {
       () => this._editAuthor(),
       { valueStyle: { fontSize: '16px' } });
 
+    // Wallet row (web + eth-enabled only). Sits between AUTHOR and HINT
+    // because the wallet IS the on-chain author identity, so it reads
+    // naturally as a sub-field of authorship.
+    let walletRowOffset = 0;
+    if (this._walletEnabled) {
+      walletRowOffset = 1;
+      this._buildFieldRow(contentL, formY + FIELD_ROW_H * 2, contentW, 'WALLET',
+        () => 'not connected',
+        (display) => { this.walletDisplay = display; },
+        () => this._toggleWallet(),
+        {
+          valueStyle: { fontSize: '13px', fontFamily: 'monospace', color: '#6b7a8f' },
+          editLabel: 'CONNECT',
+          editKey: 'wallet',
+        });
+    }
+
     // Hint row — the instructional text that appears in the blueprint's
     // top slot at play time. Blank = no hint (top slot stays open).
     // Disabled whenever an initial factory occupies slot row 0, because
@@ -108,7 +130,7 @@ export class ExportPanel {
     const hintColor = this._topRowBlocked
       ? '#a01010'
       : (this.level.instructionalText ? '#1a2332' : '#6b7a8f');
-    this._buildFieldRow(contentL, formY + FIELD_ROW_H * 2, contentW, 'HINT',
+    this._buildFieldRow(contentL, formY + FIELD_ROW_H * (2 + walletRowOffset), contentW, 'HINT',
       () => this._hintDisplayText(),
       (display) => { this.hintDisplay = display; },
       () => { if (!this._topRowBlocked) this._editHint(); },
@@ -118,7 +140,7 @@ export class ExportPanel {
       });
 
     // --- divider ---
-    const dividerY = formY + FIELD_ROW_H * 3 + 8;
+    const dividerY = formY + FIELD_ROW_H * (3 + walletRowOffset) + 8;
     this._drawDivider(contentL, dividerY, contentW);
 
     // --- share string box with COPY button inline in the header ---
@@ -215,8 +237,14 @@ export class ExportPanel {
     setDisplay(display);
     (this._fieldDisplays || (this._fieldDisplays = [])).push(display);
     const editX = rowX + rowW - EDIT_BTN_W / 2;
-    const btn = this._smallButton(editX, rowY, EDIT_BTN_W, EDIT_BTN_H, 'EDIT', onEdit, { disabled: !!opts.disabled });
+    const btn = this._smallButton(editX, rowY, EDIT_BTN_W, EDIT_BTN_H,
+      opts.editLabel || 'EDIT', onEdit, { disabled: !!opts.disabled });
     (this._fieldEditBtns || (this._fieldEditBtns = [])).push(btn);
+    // Wallet row needs to relabel its button on connect/disconnect; track
+    // it by key so _refreshWallet can flip CONNECT ↔ DISCONNECT.
+    if (opts.editKey) {
+      (this._fieldEditByKey || (this._fieldEditByKey = {}))[opts.editKey] = btn;
+    }
   }
 
   _drawDivider(x, y, w) {
@@ -293,6 +321,52 @@ export class ExportPanel {
     const handle = await getAuthorHandle();
     if (this.authorDisplay) this.authorDisplay.setText(handle || 'anonymous');
     if (handle && !this.level.author) this.level.author = handle;
+    if (this._walletEnabled) await this._refreshWallet();
+  }
+
+  // Reads the connected wallet (if any) from the platform adapter and
+  // updates the WALLET row's text + button label. Idempotent — safe to
+  // call after connect, disconnect, or just on panel open.
+  async _refreshWallet() {
+    if (!this._walletEnabled || !this.walletDisplay) return;
+    let address = null;
+    try { address = await platform.getConnectedWallet(); } catch (e) {}
+    const btn = this._fieldEditByKey && this._fieldEditByKey.wallet;
+    if (address) {
+      this.walletDisplay.setText(truncateAddress(address));
+      this.walletDisplay.setColor('#1a2332');
+      if (btn && btn.text) btn.text.setText('LOGOUT');
+      // Stamp on the level so saveLocal carries it forward; the actual
+      // signature is only attached at publish time after re-confirming.
+      this.level.authorWallet = address;
+    } else {
+      this.walletDisplay.setText('not connected');
+      this.walletDisplay.setColor('#6b7a8f');
+      if (btn && btn.text) btn.text.setText('CONNECT');
+    }
+  }
+
+  async _toggleWallet() {
+    if (!this._walletEnabled) return;
+    const existing = await platform.getConnectedWallet().catch(() => null);
+    if (existing) {
+      this._setStatus('Disconnecting wallet\u2026');
+      await platform.disconnectWallet().catch(() => {});
+      // Wallet identity changes invalidate the existing signature.
+      delete this.level.authorWallet;
+      delete this.level.authorSignature;
+      await this._refreshWallet();
+      this._setStatus('Wallet disconnected.');
+    } else {
+      this._setStatus('Opening wallet\u2026');
+      try {
+        await platform.connectWallet();
+        await this._refreshWallet();
+        this._setStatus('Wallet connected.');
+      } catch (e) {
+        this._setStatus('Wallet connection cancelled.');
+      }
+    }
   }
 
   _editName() {
@@ -477,6 +551,23 @@ export class ExportPanel {
     if (this.opts.onSaved) this.opts.onSaved(stamped);
   }
 
+  // Publish orchestrator. The path branches on `platform.ethEnabled`:
+  //
+  //   eth-disabled (default / non-web platforms):
+  //     saveLocal → platform.publishLevel → flip status to 'pending'.
+  //     Identical to the legacy behavior.
+  //
+  //   eth-enabled (web with VITE_BLOCKYARD_ETH_ENABLED=true and a deployed
+  //   contract): the level is signed before submission and minted to the
+  //   author's wallet after the server accepts it. The mint happens AFTER
+  //   the server-publish call so the server-assigned id is what
+  //   tokenURI points at — keeps off-chain metadata stable across remixes.
+  //
+  //   Step ordering matters: server validates the signature, so we sign
+  //   the level body BEFORE saveLocal stamps id/createdAt/updatedAt onto
+  //   it (the canonical-JSON helper strips those so signatures still
+  //   verify, but doing it in this order also guarantees the local copy
+  //   carries the signature for re-publish).
   async _publish() {
     if (!this._boardSizeOk()) return;
     const handle = await getAuthorHandle();
@@ -484,13 +575,84 @@ export class ExportPanel {
     if (this.level.status === 'unfinished' || !this.level.status) {
       this.level.status = 'private';
     }
+
+    // ---- eth-disabled fast path (legacy behavior) ----
+    if (!this._walletEnabled) {
+      const stamped = await saveLocal(this.level);
+      const accepted = await platform.publishLevel(stamped);
+      let final = stamped;
+      if (accepted) final = (await setStatus(stamped.id, 'pending')) || stamped;
+      Object.assign(this.level, { id: final.id, status: final.status, author: final.author });
+      this._setStatus(accepted ? 'Submitted \u2014 status: pending mod review' : 'Saved (publish stub returned false)');
+      if (this.opts.onSaved) this.opts.onSaved(final);
+      return;
+    }
+
+    // ---- eth-enabled path ----
+    let address = await platform.getConnectedWallet().catch(() => null);
+    if (!address) {
+      this._setStatus('Connecting wallet\u2026');
+      try { address = await platform.connectWallet(); }
+      catch (e) { this._setStatus('Publish requires a connected wallet.'); return; }
+      await this._refreshWallet();
+    }
+
+    this._setStatus('Sign the level in your wallet\u2026');
+    let signed;
+    try {
+      signed = await platform.signLevel(this.level);
+    } catch (e) {
+      this._setStatus('Signature rejected: ' + (e?.shortMessage || e?.message || 'unknown'));
+      return;
+    }
+    this.level.authorWallet    = signed.address;
+    this.level.authorSignature = signed.signature;
+    this.level.chainId         = (await import('../../eth/config.js')).CHAIN_ID;
+
+    this._setStatus('Submitting to server\u2026');
     const stamped = await saveLocal(this.level);
-    const accepted = await platform.publishLevel(stamped);
-    let final = stamped;
-    if (accepted) final = (await setStatus(stamped.id, 'pending')) || stamped;
-    Object.assign(this.level, { id: final.id, status: final.status, author: final.author });
-    this._setStatus(accepted ? 'Submitted \u2014 status: pending mod review' : 'Saved (publish stub returned false)');
-    if (this.opts.onSaved) this.opts.onSaved(final);
+    const published = await platform.publishLevel(stamped);
+    if (!published) {
+      this._setStatus('Server rejected publish. Try again.');
+      return;
+    }
+    const idForUri = (published && published.id) || stamped.id;
+    let mid = stamped;
+    mid = (await setStatus(stamped.id, 'pending')) || stamped;
+    Object.assign(this.level, { id: mid.id, status: mid.status, author: mid.author });
+
+    // Mint AFTER server-publish so tokenURI can point at the server's
+    // stable id. We don't await record-mint as part of mint — failure to
+    // record on the server is recoverable later, but failure to mint is
+    // terminal for ownership.
+    this._setStatus('Confirm mint in your wallet\u2026');
+    let mintResult;
+    try {
+      const apiBase = (typeof import.meta !== 'undefined' && import.meta.env.VITE_BLOCKYARD_API) || '';
+      const tokenURI = apiBase
+        ? `${apiBase}/levels/${encodeURIComponent(idForUri)}/metadata.json`
+        : `blockyard://level/${encodeURIComponent(idForUri)}`;
+      mintResult = await platform.mintLevel({ tokenURI });
+    } catch (e) {
+      this._setStatus('Mint failed: ' + (e?.shortMessage || e?.message || 'unknown') + ' (level still submitted; retry mint from the library)');
+      if (this.opts.onSaved) this.opts.onSaved(this.level);
+      return;
+    }
+    this.level.tokenId = mintResult.tokenId;
+    this.level.txHash  = mintResult.txHash;
+    // Persist the mint state locally so reopening the panel shows
+    // "Already minted — tokenId N" instead of re-prompting.
+    await saveLocal(this.level);
+
+    this._setStatus('Recording mint\u2026');
+    await platform.recordMint(idForUri, {
+      tokenId: mintResult.tokenId,
+      txHash: mintResult.txHash,
+      authorWallet: signed.address,
+    }).catch(() => {});
+
+    this._setStatus(`Submitted \u2014 minted token #${mintResult.tokenId}, pending mod review.`);
+    if (this.opts.onSaved) this.opts.onSaved(this.level);
   }
 
   _setStatus(msg) {
@@ -552,4 +714,12 @@ function chunk(s, size) {
   const out = [];
   for (let i = 0; i < s.length; i += size) out.push(s.slice(i, i + size));
   return out.join('\n');
+}
+
+// Display-only EOA shortener — `0x1234…ab12` keeps both ends so users can
+// eyeball-match against MetaMask without overrunning the field row.
+function truncateAddress(addr) {
+  if (!addr) return '';
+  if (addr.length <= 12) return addr;
+  return addr.slice(0, 6) + '\u2026' + addr.slice(-4);
 }

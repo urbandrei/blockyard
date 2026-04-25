@@ -56,6 +56,11 @@ async function main() {
       try { await bot.postSubmission(rec); }
       catch (e) { console.error('[bot] postSubmission failed', e); }
     },
+    onLevelMinted: async (rec) => {
+      if (!bot) return;
+      try { await bot.refreshMessage(rec); }
+      catch (e) { console.error('[bot] refreshMessage failed', e); }
+    },
   });
 
   Bun.serve({ port, fetch });

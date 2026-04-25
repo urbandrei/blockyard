@@ -96,6 +96,11 @@ export class Store {
     token: string;
     ip: string | null;
     clientId?: string | null;
+    // Optional eth metadata. When present, the http layer has already
+    // verified the signature against authorWallet, so we can trust it here.
+    authorWallet?: string;
+    authorSignature?: string;
+    chainId?: number;
   }): Promise<LevelRecord> {
     const now = Date.now();
     const requested = (args.clientId ?? '').trim();
@@ -117,8 +122,35 @@ export class Store {
       submittedFromIp: args.ip,
       level: { ...args.level, id, status: 'pending' },
     };
+    if (args.authorWallet)    rec.authorWallet    = args.authorWallet;
+    if (args.authorSignature) rec.authorSignature = args.authorSignature;
+    if (args.chainId)         rec.chainId         = args.chainId;
     await this.writeLevel(rec);
     return rec;
+  }
+
+  // Records the on-chain mint for a previously-created level. Gated by
+  // submittedByToken match in http.ts so a different client can't claim
+  // someone else's level. Idempotent: re-recording with the same tokenId
+  // is a no-op; recording a new tokenId overwrites (the contract is
+  // append-only on its end so a second mint yields a different id, and
+  // the latest record reflects the canonical owner per our own server).
+  async recordMint(id: string, args: {
+    tokenId: string;
+    txHash: string;
+    token: string;
+  }): Promise<LevelRecord | null> {
+    return this.withLock(`level:${id}`, async () => {
+      const rec = await this.readJson<LevelRecord | null>(this.levelPath(id), null);
+      if (!rec) return null;
+      if (rec.submittedByToken !== args.token) return null;
+      rec.tokenId = args.tokenId;
+      rec.txHash  = args.txHash;
+      rec.updatedAt = Date.now();
+      await this.writeJson(this.levelPath(id), rec);
+      await this.updateIndexEntry(rec);
+      return rec;
+    });
   }
 
   async setStatus(id: string, status: LevelStatus, meta: {

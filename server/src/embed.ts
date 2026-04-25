@@ -20,6 +20,21 @@ export function buildSubmissionEmbed(rec: LevelRecord): EmbedBuilder {
       { name: 'Token', value: `\`${rec.submittedByToken.slice(0, 6)}…\``, inline: true },
       { name: 'Status', value: statusLabel(rec), inline: true },
     );
+
+  // Ownership block — only present when the level was published with an
+  // Ethereum signature. Lets the moderator verify the on-chain owner
+  // before approving (or refuse if the wallet looks suspicious).
+  if (rec.authorWallet) {
+    const wallet = `\`${rec.authorWallet.slice(0, 6)}…${rec.authorWallet.slice(-4)}\``;
+    const tokenLine = rec.tokenId
+      ? `[#${rec.tokenId}](https://sepolia.basescan.org/tx/${rec.txHash})`
+      : '_(pending mint)_';
+    embed.addFields(
+      { name: 'Wallet', value: wallet, inline: true },
+      { name: 'Token', value: tokenLine, inline: true },
+      { name: 'Chain', value: `Base Sepolia (${rec.chainId ?? '?'})`, inline: true },
+    );
+  }
   return embed;
 }
 

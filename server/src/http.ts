@@ -4,6 +4,7 @@
 import type { Store } from './store.ts';
 import type { RateLimiter } from './rateLimit.ts';
 import { issueToken, assertToken } from './auth.ts';
+import { verifyLevelSignature } from './eth.ts';
 import type { LevelRecord } from './types.ts';
 
 export interface HttpDeps {
@@ -11,6 +12,7 @@ export interface HttpDeps {
   limiter: RateLimiter;
   allowedOrigins: Set<string>;
   onLevelSubmitted(rec: LevelRecord): Promise<void>;
+  onLevelMinted?(rec: LevelRecord): Promise<void>;
 }
 
 export function makeFetch(deps: HttpDeps) {
@@ -65,18 +67,70 @@ export function makeFetch(deps: HttpDeps) {
         const meta = extractMeta(body);
         if (!meta) return json({ error: 'level missing name/author/board' }, 400, cors);
 
+        // Optional Ethereum proof-of-authorship. Signature verification is
+        // all-or-nothing: if any of the three fields is present we require
+        // all three and a valid signature, otherwise we reject. Levels
+        // without any eth fields publish unsigned (legacy path).
+        const ethFields = extractEthFields(body);
+        let verifiedWallet: string | undefined;
+        if (ethFields) {
+          const v = await verifyLevelSignature({
+            level: body as Record<string, unknown>,
+            chainId: ethFields.chainId,
+            authorWallet: ethFields.authorWallet,
+            authorSignature: ethFields.authorSignature,
+          });
+          if (!v.ok) return json({ error: `signature: ${v.error}` }, 400, cors);
+          verifiedWallet = v.address;
+        }
+
         const rec = await store.createLevel({
           level: body as Record<string, unknown>,
           token: auth.token,
           ip,
           clientId: typeof (body as any).id === 'string' ? (body as any).id : null,
           ...meta,
+          ...(ethFields ? {
+            authorWallet: verifiedWallet,
+            authorSignature: ethFields.authorSignature,
+            chainId: ethFields.chainId,
+          } : {}),
         });
         // Fire-and-await: we want the Discord message id back in the record
         // before responding, so a moderator refresh finds the message id.
         try { await deps.onLevelSubmitted(rec); }
         catch (e) { console.error('onLevelSubmitted failed', e); }
         return json({ id: rec.id, status: rec.status }, 201, cors);
+      }
+
+      // Mint receipt — called by the client after the on-chain mint
+      // confirms. Stamps tokenId + txHash onto the record so the bot
+      // embed and public listings can show ownership info. Gated by
+      // submittedByToken match so only the original submitter can record.
+      const mintMatch = url.pathname.match(/^\/levels\/([A-Za-z0-9_-]+)\/mint$/);
+      if (mintMatch && req.method === 'POST') {
+        const auth = await assertToken(store, req.headers.get('x-blockyard-token'));
+        if (!auth.ok) return json({ error: auth.error }, auth.status, cors);
+        const body = await safeJson(req) as { tokenId?: string; txHash?: string } | null;
+        const tokenId = (body?.tokenId ?? '').toString();
+        const txHash  = (body?.txHash ?? '').toString();
+        if (!/^\d+$/.test(tokenId) || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+          return json({ error: 'invalid tokenId/txHash' }, 400, cors);
+        }
+        const rec = await store.recordMint(mintMatch[1]!, { tokenId, txHash, token: auth.token });
+        if (!rec) return json({ error: 'not found or not owner' }, 404, cors);
+        try { if (deps.onLevelMinted) await deps.onLevelMinted(rec); }
+        catch (e) { console.error('onLevelMinted failed', e); }
+        return json({ id: rec.id, tokenId: rec.tokenId, txHash: rec.txHash }, 200, cors);
+      }
+
+      // ERC-721 metadata document. Public; no auth. Returns the OpenSea
+      // metadata schema so wallets and explorers render something useful.
+      const metaMatch = url.pathname.match(/^\/levels\/([A-Za-z0-9_-]+)\/metadata\.json$/);
+      if (metaMatch && req.method === 'GET') {
+        const rec = await store.readLevel(metaMatch[1]!);
+        if (!rec) return json({ error: 'not found' }, 404, cors);
+        return json(buildErc721Metadata(rec, req), 200, cors);
       }
 
       const levelMatch = url.pathname.match(/^\/levels\/([A-Za-z0-9_-]+)$/);
@@ -143,6 +197,38 @@ function clientIp(req: Request): string | null {
   const fwd = req.headers.get('cf-connecting-ip') ?? req.headers.get('x-forwarded-for');
   if (!fwd) return null;
   return fwd.split(',')[0]!.trim() || null;
+}
+
+function extractEthFields(body: any): {
+  authorWallet: string;
+  authorSignature: string;
+  chainId: number;
+} | null {
+  const wallet = typeof body?.authorWallet === 'string' ? body.authorWallet.trim() : '';
+  const sig    = typeof body?.authorSignature === 'string' ? body.authorSignature.trim() : '';
+  const chain  = Number(body?.chainId);
+  // Treat "any one present" as "all three required" — refuse to silently
+  // drop a signature the client thought it was sending.
+  const anyPresent = !!(wallet || sig || Number.isFinite(chain));
+  if (!anyPresent) return null;
+  if (!wallet || !sig || !Number.isFinite(chain)) return null;
+  return { authorWallet: wallet, authorSignature: sig, chainId: chain };
+}
+
+function buildErc721Metadata(rec: LevelRecord, req: Request) {
+  const url = new URL(req.url);
+  const externalUrl = `${url.origin}/levels/${encodeURIComponent(rec.id)}`;
+  return {
+    name: rec.name,
+    description: rec.hint || `A Blockyard level by ${rec.author || 'an anonymous author'}.`,
+    image: '',
+    external_url: externalUrl,
+    attributes: [
+      { trait_type: 'Author', value: rec.author || 'anonymous' },
+      { trait_type: 'Board', value: `${rec.cols} x ${rec.rows}` },
+      { trait_type: 'Status', value: rec.status },
+    ],
+  };
 }
 
 function extractMeta(body: any): { name: string; author: string; hint: string | null; cols: number; rows: number } | null {

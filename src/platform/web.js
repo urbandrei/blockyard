@@ -222,5 +222,72 @@ export default (function createWebAdapter() {
       try { window.open(url, '_blank', 'noopener,noreferrer'); return true; }
       catch (e) { console.warn('[web] openExternal failed', e); return false; }
     },
+
+    // ---- Milestone I: Ethereum / level-ownership ----
+    //
+    // The whole stack (wagmi + viem + RainbowKit + React) lives behind
+    // dynamic imports so non-web platforms never pull these megabytes in,
+    // and even the web bundle only loads them when the user actually
+    // interacts with the wallet UX.
+    //
+    // `ethEnabled` is derived once from VITE_BLOCKYARD_ETH_ENABLED +
+    // VITE_BLOCKYARD_CONTRACT_ADDRESS. Vite env values are static at
+    // build/dev-load time, so a boolean is sufficient — no need for an
+    // accessor.
+    // eslint-disable-next-line no-undef
+    ethEnabled: import.meta.env.VITE_BLOCKYARD_ETH_ENABLED === 'true'
+      // eslint-disable-next-line no-undef
+      && !!import.meta.env.VITE_BLOCKYARD_CONTRACT_ADDRESS,
+
+    async getConnectedWallet() {
+      if (!this.ethEnabled) return null;
+      try {
+        const m = await import('../eth/walletGate.js');
+        return m.getConnectedAddress();
+      } catch (e) {
+        console.warn('[web] getConnectedWallet failed', e);
+        return null;
+      }
+    },
+
+    async connectWallet() {
+      if (!this.ethEnabled) throw new Error('eth disabled');
+      const m = await import('../eth/walletGate.js');
+      return m.ensureWallet();
+    },
+
+    async disconnectWallet() {
+      if (!this.ethEnabled) return;
+      try {
+        const m = await import('../eth/walletGate.js');
+        await m.disconnect();
+      } catch (e) {}
+    },
+
+    async signLevel(level) {
+      if (!this.ethEnabled) throw new Error('eth disabled');
+      const m = await import('../eth/signLevel.js');
+      return m.signLevel(level);
+    },
+
+    async mintLevel(args) {
+      if (!this.ethEnabled) throw new Error('eth disabled');
+      const m = await import('../eth/mintLevel.js');
+      return m.mintLevel(args);
+    },
+
+    async recordMint(id, args) {
+      if (!API || !id) return false;
+      try {
+        return await api(`/levels/${encodeURIComponent(id)}/mint`, {
+          method: 'POST',
+          auth: true,
+          body: JSON.stringify(args),
+        });
+      } catch (e) {
+        console.warn('[web] recordMint failed', e);
+        return false;
+      }
+    },
   });
 })();
