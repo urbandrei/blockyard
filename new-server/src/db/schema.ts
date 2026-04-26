@@ -9,6 +9,7 @@ import {
 import { sql } from 'drizzle-orm';
 
 export const levelStatus = pgEnum('level_status', ['pending', 'public', 'rejected']);
+export const playKind   = pgEnum('play_kind',    ['campaign', 'community']);
 
 export const tokens = pgTable('tokens', {
   token:     text('token').primaryKey(),
@@ -29,6 +30,10 @@ export const levels = pgTable('levels', {
   likes:             integer('likes').notNull().default(0),
   ratingSum:         integer('rating_sum').notNull().default(0),
   ratingCount:       integer('rating_count').notNull().default(0),
+  // Denormalized completion count — bumped in the same tx as the play
+  // session's first transition to completed=true. Listing queries serve
+  // this directly instead of count(*)'ing the plays table.
+  completions:       integer('completions').notNull().default(0),
   createdAt:         bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt:         bigint('updated_at', { mode: 'number' }).notNull(),
   submittedByToken:  text('submitted_by_token').notNull(),
@@ -64,13 +69,44 @@ export const ratings = pgTable('ratings', {
   starsRange: check('stars_1_to_5', sql`${t.stars} BETWEEN 1 AND 5`),
 }));
 
+// Anonymous play telemetry. One row per session — created on level open,
+// patched on exit with the final hint count, completion flag, and total
+// time spent (ms). Multiple sessions per token are intentional: a player
+// who replays a level should produce multiple rows. `kind` distinguishes
+// authored campaign levels (level_id = 'level-7' / 'boss-2') from
+// community levels (level_id = the levels.id uuid serialized as text).
+// No FK to `levels` because level_id covers both kinds.
+export const plays = pgTable('plays', {
+  id:           uuid('id').primaryKey().defaultRandom(),
+  kind:         playKind('kind').notNull(),
+  levelId:      text('level_id').notNull(),
+  anonToken:    text('anon_token').notNull().references(() => tokens.token, { onDelete: 'cascade' }),
+  openedAt:     bigint('opened_at',     { mode: 'number' }).notNull(),
+  completedAt:  bigint('completed_at',  { mode: 'number' }),
+  hintCount:    integer('hint_count').notNull().default(0),
+  timeSpentMs:  integer('time_spent_ms').notNull().default(0),
+  createdAt:    bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt:    bigint('updated_at', { mode: 'number' }).notNull(),
+}, (t) => ({
+  byKindLevel:     index('plays_kind_level_id').on(t.kind, t.levelId),
+  byKindCompleted: index('plays_kind_completed_at').on(t.kind, t.completedAt),
+  byToken:         index('plays_anon_token').on(t.anonToken),
+}));
+
 // URL shortener. Maps an 8-char base64url id (first 8 chars of sha256 of
 // the share code) to the full share_code. Deterministic, so re-shortening
 // the same level is a no-op insert. Not tied to `levels` — arbitrary
 // share-strings (including unpublished / local-only levels) can be
 // shortened.
+//
+// share_code intentionally has NO unique constraint. Postgres' btree caps
+// per-tuple index entries at 2704 bytes (v4), and large levels can serialize
+// to >3KB share strings — a unique index on share_code blew up at insert
+// time. The `id` PK is itself a deterministic sha256 prefix of share_code,
+// so duplicate share_codes always collide on the PK; getOrCreateShortCode
+// dedupes by id instead.
 export const shortLinks = pgTable('short_links', {
   id:        text('id').primaryKey(),
-  shareCode: text('share_code').notNull().unique(),
+  shareCode: text('share_code').notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });

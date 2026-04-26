@@ -27,6 +27,9 @@ const Schema = z.object({
   RATE_PUBLISH_PER_DAY:   z.coerce.number().int().positive().default(10),
   RATE_LIKE_PER_MINUTE:   z.coerce.number().int().positive().default(60),
   RATE_RATING_PER_MINUTE: z.coerce.number().int().positive().default(30),
+  // 1 POST + 1 PATCH per play, but a single fast-replaying user can churn
+  // through many sessions in a minute, so leave headroom.
+  RATE_PLAY_PER_MINUTE:   z.coerce.number().int().positive().default(120),
 });
 
 const parsed = Schema.safeParse(process.env);

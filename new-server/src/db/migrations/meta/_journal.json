@@ -15,6 +15,20 @@
       "when": 1777030542153,
       "tag": "0001_brown_living_lightning",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777060000000,
+      "tag": "0002_drop_short_links_share_code_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777070000000,
+      "tag": "0003_plays_telemetry",
+      "breakpoints": true
     }
   ]
 }

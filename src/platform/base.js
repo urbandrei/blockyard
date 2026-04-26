@@ -86,6 +86,14 @@ export function createBaseAdapter(name = 'base') {
     async fetchTodaysFeatured() { return null; },
     async fetchFeaturedHistory(_limit) { return { entries: [] }; },
     async fetchFeaturedByDate(_utcDate) { return null; },
+
+    // Anonymous play telemetry. Web posts these to the community API; every
+    // other adapter no-ops so PlayerScene can call uniformly without
+    // platform-checking. `startPlay` returns a session id (or null when
+    // disabled / failed) and `endPlay` is best-effort: a missing id or
+    // network failure must NEVER throw into the scene shutdown path.
+    async startPlay(_kind, _levelId) { return null; },
+    async endPlay(_args) { return; },
     // URL shortener: takes a base64 share-string and returns `{code}` or
     // null if the backend is unreachable. Callers fall back to a direct
     // `?play=<base64>` URL when null.

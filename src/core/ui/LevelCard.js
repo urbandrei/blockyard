@@ -76,8 +76,14 @@ export class LevelCard {
       color: '#e6edf5',
     }).setOrigin(0, 0);
 
-    const authorStr = level.author ? `by ${level.author}` : 'anonymous';
-    this.meta = this.scene.add.text(sx + EDGE_PAD, sy + 38, authorStr, {
+    // Author + completion count. Remote-only: campaign / private / unfinished
+    // levels have no completion telemetry attached. Hide the badge for 0 so
+    // a brand-new public level doesn't look ignored.
+    const authorBase = level.author ? `by ${level.author}` : 'anonymous';
+    const completions = Number(level.completions) || 0;
+    const showCompletions = level.origin === 'remote' && level.status === 'public' && completions > 0;
+    const metaStr = showCompletions ? `${authorBase}  \u2713 ${completions}` : authorBase;
+    this.meta = this.scene.add.text(sx + EDGE_PAD, sy + 38, metaStr, {
       fontFamily: 'system-ui, sans-serif', fontSize: '12px', color: '#9aa6b2',
     }).setOrigin(0, 0);
 
@@ -131,13 +137,26 @@ export class LevelCard {
       cursor -= CIRCLE_R * 2 + 6;
     }
 
-    // Rating stars (display-only) — sit just left of LIKE.
+    // Rating stars (display-only) — sit just left of LIKE. The optional
+    // "(N)" count tail is placed FIRST (rightmost of this block) so we can
+    // measure its actual width and include it in the cursor budget; without
+    // that, the tail clobbered the LIKE heart on cards with any rating count.
     if (isRemote) {
       const widthStars = STAR_SIZE * 5 + STAR_GAP * 4;
       const cursorRightEdge = cursor;
-      const startX = cursorRightEdge - widthStars + STAR_SIZE / 2;
+      const count = Number(level.ratingCount) || 0;
+      let tailW = 0;
+      if (count > 0) {
+        const tail = this.scene.add.text(cursorRightEdge, rowY, `(${count})`, {
+          fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#9aa6b2',
+        }).setOrigin(1, 0.5);
+        tailW = tail.width;
+        this._stars.push(tail);
+      }
+      const tailGap = tailW > 0 ? 4 : 0;
+      const startX = cursorRightEdge - tailW - tailGap - widthStars + STAR_SIZE / 2;
       this._addRatingStars(startX, rowY, level);
-      cursor = cursorRightEdge - widthStars - 8;
+      cursor = cursorRightEdge - widthStars - tailW - tailGap - 8;
     }
   }
 
@@ -215,7 +234,9 @@ export class LevelCard {
     const avg   = Number(level.ratingAvg)   || 0;
     // Rounded half-up to integer — the scene's filter bucketing (r1..r5)
     // already rounds up, so using the rounded value here keeps the visual
-    // consistent with what the filter labels promise.
+    // consistent with what the filter labels promise. The "(N)" count tail
+    // is placed by _build so its width can be measured and reserved in the
+    // cursor budget before LIKE / stars are positioned.
     const lit = count > 0 ? Math.round(avg) : 0;
     for (let i = 0; i < 5; i++) {
       const filled = i < lit;
@@ -225,13 +246,6 @@ export class LevelCard {
         color: filled ? STAR_ACTIVE : STAR_IDLE,
       }).setOrigin(0.5);
       this._stars.push(s);
-    }
-    if (count > 0) {
-      const tail = this.scene.add.text(startX + 5 * (STAR_SIZE + STAR_GAP) + 2,
-        cy, `(${count})`, {
-        fontFamily: 'system-ui, sans-serif', fontSize: '11px', color: '#9aa6b2',
-      }).setOrigin(0, 0.5);
-      this._stars.push(tail);
     }
   }
 

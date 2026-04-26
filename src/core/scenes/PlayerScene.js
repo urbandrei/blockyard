@@ -211,6 +211,33 @@ export default class PlayerScene extends Phaser.Scene {
       this._bossHintAutoShow = false;
       this.sourceLevel = source;
     }
+
+    // Anonymous play telemetry. Identified levels (campaign + community)
+    // get a session id; editor-sandbox / unfinished imports skip — there's
+    // no canonical id to bucket them under. Failures from the API are
+    // swallowed in the platform adapter, so a network outage just leaves
+    // _playSessionId null and the shutdown PATCH no-ops.
+    this._playSessionId = null;
+    this._playOpenedAt  = Date.now();
+    this._playHintCount = 0;
+    this._playCompleted = false;
+    this._playKind      = null;
+    this._playLevelId   = null;
+    if (this._communityId) {
+      this._playKind = 'community';
+      this._playLevelId = this._communityId;
+    } else if (this._isCampaign && this._sourceLevelOriginal && this._sourceLevelOriginal.id) {
+      this._playKind = 'campaign';
+      this._playLevelId = this._sourceLevelOriginal.id;
+    }
+    if (this._playKind && this._playLevelId) {
+      const platform = this.game.registry.get('platform');
+      if (platform && typeof platform.startPlay === 'function') {
+        platform.startPlay(this._playKind, this._playLevelId)
+          .then((sid) => { this._playSessionId = sid; })
+          .catch(() => {});
+      }
+    }
     // Section theme drives interior/exterior/letterbox palettes for this
     // level. Inline (community) levels and unknown ids fall back to Block
     // Yard inside themeForLevelId.
@@ -319,6 +346,21 @@ export default class PlayerScene extends Phaser.Scene {
     this._startStuckPopupTimer();
 
     this.events.on('shutdown', () => {
+      // Telemetry: end the play session. Best-effort — platform adapter
+      // swallows network errors; a missing _playSessionId (telemetry
+      // disabled / startPlay failed / scene-swap before the POST resolved)
+      // makes this a no-op.
+      try {
+        const platform = this.game.registry.get('platform');
+        if (platform && typeof platform.endPlay === 'function' && this._playSessionId) {
+          platform.endPlay({
+            sessionId:   this._playSessionId,
+            completed:   !!this._playCompleted,
+            hintCount:   this._playHintCount | 0,
+            timeSpentMs: Math.max(0, Date.now() - (this._playOpenedAt || Date.now())),
+          });
+        }
+      } catch (e) {}
       this.sim && this.sim.stop();
       if (this._settingsModal) { try { this._settingsModal.destroy(); } catch (e) {} this._settingsModal = null; }
       // Stop the laser-beam loop so it doesn't continue into the next
@@ -1541,6 +1583,10 @@ export default class PlayerScene extends Phaser.Scene {
   _applyHint() {
     const plan = this._hintTargetPlan();
     if (!plan) return;
+    // Telemetry: count only confirmed hint applications (not modal opens
+    // that the player cancels). Bumped before the tween fires so a mid-
+    // tween shutdown still records the hint.
+    this._playHintCount = (this._playHintCount | 0) + 1;
     this._hintTweenBusy = true;
     // Rotation-then-move for the target. Blocker returns are NOT queued
     // up-front — they fire in parallel with the target's slide phase (see
@@ -2976,6 +3022,10 @@ export default class PlayerScene extends Phaser.Scene {
       return;
     }
     this.victory = true;
+    // Telemetry: mark the play complete only on the FINAL boss round (or
+    // any non-boss victory). Intermediate boss rounds short-circuited
+    // above with their own `victory = true`, so they don't reach here.
+    this._playCompleted = true;
     if (this._sourceLevelOriginal && this._sourceLevelOriginal.id) {
       markBeaten(this._sourceLevelOriginal.id);
     } else if (this.sourceLevel.id) {

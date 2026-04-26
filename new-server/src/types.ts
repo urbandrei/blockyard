@@ -15,6 +15,7 @@ export interface IndexEntry {
   likes: number;
   ratingAvg: number | null;
   ratingCount: number;
+  completions: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -36,6 +37,7 @@ export interface LevelDetail {
   likes: number;
   ratingAvg: number | null;
   ratingCount: number;
+  completions: number;
   createdAt: number;
   updatedAt: number;
   level: Record<string, unknown>;   // decoded share-string

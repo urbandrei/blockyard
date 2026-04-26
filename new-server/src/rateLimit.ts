@@ -24,6 +24,13 @@ class RateLimiter {
     return this.hit(`rate:tok:${token}`, env.RATE_RATING_PER_MINUTE, 60 * 1000);
   }
 
+  // Plays telemetry — POST /plays (start) + PATCH /plays/:id (end). Generous
+  // limit because each level run produces 1 POST + 1 PATCH; bots that try
+  // to spam fake completions get throttled at this layer first.
+  checkPlay(token: string): { ok: boolean; retryAfterMs?: number } {
+    return this.hit(`play:tok:${token}`, env.RATE_PLAY_PER_MINUTE, 60 * 1000);
+  }
+
   private hit(key: string, limit: number, windowMs: number): { ok: boolean; retryAfterMs?: number } {
     const now = Date.now();
     const cutoff = now - windowMs;

@@ -35,14 +35,25 @@ function shortCodeFor(shareCode: string, extraChars = 0): string {
 // Shared helper — HTTP POST /shorts and the Discord "Social Link" button
 // both call this. Returns the short code; inserts on first call, returns
 // the existing row on subsequent calls with the same share code.
+//
+// Dedupe is keyed on `id`, not `share_code`: id = sha256(shareCode)[:8+extra]
+// is itself a deterministic hash of the input, so any two requests with the
+// same share_code compute the same id and hit the PK on insert. Looking up
+// by id (PK index) also avoids ever needing a btree on share_code, which
+// can exceed Postgres' 2704-byte per-tuple index cap on large levels.
 export async function getOrCreateShortCode(shareCode: string): Promise<string> {
-  const [existing] = await db.select().from(schema.shortLinks)
-    .where(eq(schema.shortLinks.shareCode, shareCode)).limit(1);
-  if (existing) return existing.id;
-
   let extra = 0;
   while (extra < 8) {
     const id = shortCodeFor(shareCode, extra);
+    const [existing] = await db.select().from(schema.shortLinks)
+      .where(eq(schema.shortLinks.id, id)).limit(1);
+    if (existing) {
+      if (existing.shareCode === shareCode) return id;
+      // Same id, different share_code — first-N-chars hash collision.
+      // Bump prefix length and try again.
+      extra += 2;
+      continue;
+    }
     try {
       await db.insert(schema.shortLinks).values({
         id, shareCode, createdAt: Date.now(),
@@ -51,8 +62,8 @@ export async function getOrCreateShortCode(shareCode: string): Promise<string> {
     } catch (err: any) {
       if (err?.code !== '23505') throw err;
       const [raced] = await db.select().from(schema.shortLinks)
-        .where(eq(schema.shortLinks.shareCode, shareCode)).limit(1);
-      if (raced) return raced.id;
+        .where(eq(schema.shortLinks.id, id)).limit(1);
+      if (raced?.shareCode === shareCode) return id;
       extra += 2;
     }
   }

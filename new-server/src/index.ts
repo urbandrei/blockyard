@@ -15,6 +15,7 @@ import { levelRoutes } from './routes/levels.js';
 import { likeRoutes } from './routes/likes.js';
 import { ratingRoutes } from './routes/ratings.js';
 import { shortsRoutes } from './routes/shorts.js';
+import { playRoutes } from './routes/plays.js';
 import { discordRoutes } from './moderation/interactions.js';
 
 const app = new Hono();
@@ -26,7 +27,7 @@ app.use('*', async (c, next) => {
   return cors({
     origin: (origin) => allowedOrigins.has(origin) ? origin : '',
     allowHeaders: ['content-type', 'x-blockyard-token'],
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     maxAge: 600,
   })(c, next);
 });
@@ -37,6 +38,7 @@ app.route('/', levelRoutes);
 app.route('/', likeRoutes);
 app.route('/', ratingRoutes);
 app.route('/', shortsRoutes);
+app.route('/', playRoutes);
 app.route('/', discordRoutes);
 
 app.onError((err, c) => {

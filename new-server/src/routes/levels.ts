@@ -83,6 +83,7 @@ levelRoutes.get('/levels/:id', async (c) => {
     likes: row.likes,
     ratingAvg: row.ratingCount > 0 ? row.ratingSum / row.ratingCount : null,
     ratingCount: row.ratingCount,
+    completions: row.completions,
     createdAt: Number(row.createdAt),
     updatedAt: Number(row.updatedAt),
     level: decoded,
@@ -184,6 +185,7 @@ function rowToEntry(r: typeof schema.levels.$inferSelect): IndexEntry {
     likes: r.likes,
     ratingAvg: r.ratingCount > 0 ? r.ratingSum / r.ratingCount : null,
     ratingCount: r.ratingCount,
+    completions: r.completions,
     createdAt: Number(r.createdAt),
     updatedAt: Number(r.updatedAt),
   };

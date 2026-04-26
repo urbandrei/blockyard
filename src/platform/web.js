@@ -211,6 +211,44 @@ export default (function createWebAdapter() {
       }
     },
 
+    // Anonymous play telemetry. Both calls are best-effort — telemetry must
+    // never break the gameplay flow. `startPlay` returns a session id; the
+    // scene stashes it and patches via `endPlay` on shutdown. Either call
+    // failing leaves the scene unaffected (sessionId stays null on error,
+    // the PATCH is a no-op when the id is missing).
+    async startPlay(kind, levelId) {
+      if (!API || !levelId) return null;
+      if (kind !== 'campaign' && kind !== 'community') return null;
+      try {
+        const res = await api('/plays', {
+          method: 'POST',
+          auth: true,
+          body: JSON.stringify({ kind, levelId }),
+        });
+        return (res && res.id) || null;
+      } catch (e) {
+        console.warn('[web] startPlay failed', e);
+        return null;
+      }
+    },
+
+    async endPlay({ sessionId, completed, hintCount, timeSpentMs }) {
+      if (!API || !sessionId) return;
+      try {
+        await api(`/plays/${encodeURIComponent(sessionId)}`, {
+          method: 'PATCH',
+          auth: true,
+          body: JSON.stringify({
+            completed: !!completed,
+            hintCount: typeof hintCount === 'number' ? hintCount : 0,
+            timeSpentMs: typeof timeSpentMs === 'number' ? timeSpentMs : 0,
+          }),
+        });
+      } catch (e) {
+        console.warn('[web] endPlay failed', e);
+      }
+    },
+
     async fetchFeaturedByDate(utcDate) {
       if (!API || !utcDate) return null;
       try {

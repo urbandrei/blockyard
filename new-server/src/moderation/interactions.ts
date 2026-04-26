@@ -19,6 +19,7 @@ import { env } from '../env.js';
 import { db, schema } from '../db/client.js';
 import { buildSubmissionEmbed, buildCopyOnlyRow } from './embed.js';
 import { getOrCreateShortCode } from '../routes/shorts.js';
+import { handleStatsCommand } from './stats.js';
 
 export const discordRoutes = new Hono();
 
@@ -46,6 +47,12 @@ discordRoutes.post('/discord/interactions', async (c) => {
 
   if (interaction.type === InteractionType.MODAL_SUBMIT) {
     return handleModalSubmit(c, interaction);
+  }
+
+  if (interaction.type === InteractionType.APPLICATION_COMMAND) {
+    const name = interaction.data?.name;
+    if (name === 'stats') return handleStatsCommand(c, interaction);
+    return c.json(ephemeralText(`unknown command: ${name ?? '(none)'}`));
   }
 
   return c.json({ error: 'unsupported interaction type' }, 400);
@@ -190,6 +197,9 @@ interface DiscordInteraction {
   data?: {
     custom_id?: string;
     components?: DiscordComponent[];
+    // Application command fields — populated when type=APPLICATION_COMMAND.
+    name?: string;
+    options?: DiscordCommandOption[];
   };
   member?: { user?: { username?: string } };
   user?: { username?: string };
@@ -201,3 +211,12 @@ interface DiscordComponent {
   value?: string;
   components?: DiscordComponent[];
 }
+
+export interface DiscordCommandOption {
+  name: string;
+  type: number;                          // 1=SUB_COMMAND, 3=STRING, ...
+  value?: string | number | boolean;
+  options?: DiscordCommandOption[];      // populated on subcommand options
+}
+
+export type DiscordInteractionLite = DiscordInteraction;
