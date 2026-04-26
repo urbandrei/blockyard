@@ -104,13 +104,7 @@ export const SOCIAL_CARDS = [
     id: 'wavedash',
     title: 'Play it on Wavedash',
     subtitle: 'browser game platform',
-    action: {
-      type: 'modal',
-      title: 'Available on Wavedash',
-      body:
-        'Blockyard is on Wavedash, a home for casual browser games. No ' +
-        'download and no install. Open the page, hit play, and it just runs.',
-    },
+    action: { type: 'link', url: 'https://wavedash.com/games/block-yard' },
     iconKind: 'wavedash',
   },
   {
