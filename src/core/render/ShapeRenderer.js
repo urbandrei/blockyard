@@ -231,7 +231,7 @@ function lerpHex(a, b, t) {
   return (r << 16) | (g << 8) | bl;
 }
 
-function drawShapeForm(gfx, r, form) {
+export function drawShapeForm(gfx, r, form) {
   switch (form) {
     case 'square': {
       const s = r * 1.7;

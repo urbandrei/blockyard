@@ -16,10 +16,14 @@ export function enableMenuBg() {
   if (typeof document === 'undefined') return;
   // Clear any inline background-* leftover from a prior editor/player
   // scene — LetterboxChecker sets these and they outlive scene shutdown.
+  // Also clear inline `animation` so a prior scene that froze the
+  // diagonal scroll (e.g. PreloadScene's static loader bg) doesn't
+  // poison the .bg-scroll keyframe animation when this scene re-enables it.
   const s = document.body.style;
   s.backgroundImage = '';
   s.backgroundSize = '';
   s.backgroundPosition = '';
+  s.animation = '';
   document.body.classList.add(CLASS);
 }
 

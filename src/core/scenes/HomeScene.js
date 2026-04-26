@@ -77,13 +77,32 @@ const COMPLETE_STROKE = 0x8c6d15;
 export default class HomeScene extends Phaser.Scene {
   constructor() { super({ key: 'Home' }); }
 
-  async create() {
+  async create(data) {
     wireUiClicks(this);
     // wireEmptyClicks is intentionally NOT called here — the scene's
     // own pointerdown handler (installed below) routes empty taps
     // through _tapAcidPit / _tapBorderItem / rustle so each cell
     // kind gets the right sound + juice without two handlers racing.
     disableMenuBg();
+
+    // Initial-boot fade-in: PreloadScene hands off via the LoadingOverlay
+    // exit phase (shapes still falling), and tells us to fade the main
+    // camera up from the menu-bg color so the home menu arrives smoothly
+    // behind the falling shapes instead of snapping into place. Only
+    // honored on the very first transition from Preload — re-entries
+    // from gameplay scenes use SceneFader's brown overlay instead.
+    if (data && data.initialFadeIn) {
+      // True opacity fade — Home's content blends with whatever's behind
+      // it (the body bg pattern + the LoadingOverlay's still-falling
+      // shapes) instead of being painted over with a brown wash.
+      this.cameras.main.setAlpha(0);
+      this.tweens.add({
+        targets: this.cameras.main,
+        alpha: 1,
+        duration: 700,
+        ease: 'Sine.Out',
+      });
+    }
 
     // Shareable deep-link: `?level=<id>` on any origin (our Render static
     // site, itch's forwarded query, localhost) jumps straight into the

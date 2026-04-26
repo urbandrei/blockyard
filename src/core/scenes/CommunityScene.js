@@ -21,6 +21,7 @@ import { BOARD_GAP, BLUEPRINT_BG, BLUEPRINT_STROKE, BLUEPRINT_DOT } from '../con
 import { drawHome, drawGear } from '../ui/Icons.js';
 import { SettingsModal } from '../ui/SettingsModal.js';
 import { TitleBar } from '../ui/TitleBar.js';
+import { LoadingShape } from '../ui/LoadingShape.js';
 
 // Community hub — styled to match LevelSelect / Home: a content-box-anchored
 // column with a rounded header pill, a primary "LEVEL DESIGNER" button,
@@ -672,6 +673,7 @@ export default class CommunityScene extends Phaser.Scene {
   // ---------- level list ----------
 
   async _refreshLevels() {
+    this._showListLoader();
     const local = await listAll();
     this._likes    = await getLikes();
     this._hidden   = await getHidden();
@@ -703,7 +705,29 @@ export default class CommunityScene extends Phaser.Scene {
     this._renderList();
   }
 
+  // While the remote fetch is in flight (or the local list is being read),
+  // a single spinning shape sits centered in the list viewport so the user
+  // sees something happening even on a cold network. The shape alternates
+  // slow + fast spin phases and shuffles its form/color on each fast burst.
+  _showListLoader() {
+    if (this._listLoader) return;
+    const viewportTop    = this._listOriginY || 0;
+    const viewportBottom = this._listBottom  || (viewportTop + 400);
+    const cx = this._centerX || Math.round(this.scale.width / 2);
+    const cy = Math.round((viewportTop + viewportBottom) / 2);
+    this._listLoader = new LoadingShape(this, null, { x: cx, y: cy, size: 56 });
+  }
+
+  _hideListLoader() {
+    if (this._listLoader) {
+      try { this._listLoader.destroy(); } catch (e) {}
+      this._listLoader = null;
+    }
+  }
+
   _renderList() {
+    // The list is being (re)built — the loading spinner has done its job.
+    this._hideListLoader();
     // Any per-card dropdown anchored at world coordinates becomes stale
     // the moment we rebuild — close it first.
     this._closeMoreMenu();
