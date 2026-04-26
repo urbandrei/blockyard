@@ -146,6 +146,14 @@ export async function getAllHistoryAsc(): Promise<FeaturedRow[]> {
   return r.rows.map(rowToFeatured);
 }
 
+// Next UTC-midnight as ms-since-epoch. Drives the client's countdown
+// timer beside the featured panel.
+export function nextRotateUtcMs(now: number = Date.now()): number {
+  const d = new Date(now);
+  d.setUTCHours(24, 0, 0, 0);
+  return d.getTime();
+}
+
 function rowToFeatured(row: any): FeaturedRow {
   return {
     utcDate: row.utc_date,
