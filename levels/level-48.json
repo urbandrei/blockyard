@@ -1,6 +1,6 @@
 {
-  "id": "level-17",
-  "name": "Greener",
+  "id": "level-48",
+  "name": "L bracket",
   "number": 0,
   "board": {
     "cols": 6,
@@ -9,22 +9,99 @@
   "factories": [],
   "initialFactories": [
     {
-      "id": "f4tkmpru",
+      "id": "fidqqary",
       "slot": {
-        "row": 3,
-        "col": 1
+        "row": 0,
+        "col": 0
       },
       "cells": [
         {
           "r": 0,
           "c": 0,
           "label": {
+            "color": "green",
+            "form": "square"
+          }
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "label": {
+            "color": "blue",
+            "form": "circle"
+          }
+        },
+        {
+          "r": 1,
+          "c": 0,
+          "label": {
+            "color": "red",
+            "form": "triangle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 1,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 3
+    },
+    {
+      "id": "f95ynkli",
+      "slot": {
+        "row": 2,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "blue",
+            "form": "triangle"
+          }
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "label": {
+            "color": "green",
+            "form": "circle"
+          }
+        },
+        {
+          "r": 1,
+          "c": 1,
+          "label": {
+            "color": "red",
             "form": "square"
           }
         }
       ],
       "funnels": [
         {
+          "r": 1,
+          "c": 1,
+          "side": "bottom",
+          "role": "output"
+        },
+        {
           "r": 0,
           "c": 0,
           "side": "top",
@@ -32,137 +109,54 @@
         },
         {
           "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "output"
-        }
-      ],
-      "rotation": 2
-    },
-    {
-      "id": "f5oo4k5c",
-      "slot": {
-        "row": 2,
-        "col": 2
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "color": "green"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "right",
+          "c": 1,
+          "side": "top",
           "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
         }
       ],
       "rotation": 0
     },
     {
-      "id": "f5v295or",
+      "id": "f1qzwzjh",
       "slot": {
-        "row": 1,
-        "col": 0
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 1,
-          "label": {
-            "form": "triangle",
-            "color": "green"
-          }
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "form": "circle",
-            "color": "green"
-          }
-        },
-        {
-          "r": 0,
-          "c": 2,
-          "label": {
-            "form": "square",
-            "color": "green"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 1,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 2,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "output"
-        }
-      ],
-      "rotation": 1
-    },
-    {
-      "id": "fqhme2b9",
-      "slot": {
-        "row": 1,
+        "row": 0,
         "col": 1
       },
       "cells": [
         {
           "r": 0,
-          "c": 0,
+          "c": 1,
           "label": {
-            "form": "square",
-            "color": "red"
+            "color": "red",
+            "form": "square"
           }
         },
         {
           "r": 0,
-          "c": 1,
+          "c": 2,
           "label": {
-            "form": "circle",
-            "color": "blue"
+            "color": "red",
+            "form": "triangle"
           }
+        },
+        {
+          "r": 0,
+          "c": 3,
+          "label": {
+            "color": "red",
+            "form": "circle"
+          }
+        },
+        {
+          "r": 0,
+          "c": 0
         },
         {
           "r": 1,
-          "c": 1,
-          "label": {
-            "form": "triangle",
-            "color": "green"
-          }
+          "c": 0
         }
       ],
       "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "input"
-        },
         {
           "r": 0,
           "c": 1,
@@ -170,13 +164,19 @@
           "role": "input"
         },
         {
-          "r": 1,
-          "c": 1,
+          "r": 0,
+          "c": 2,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 3,
           "side": "bottom",
           "role": "output"
         }
       ],
-      "rotation": 3
+      "rotation": 1
     }
   ],
   "lockedFactories": [],
@@ -184,7 +184,7 @@
     "funnels": [
       {
         "r": 0,
-        "c": 2,
+        "c": 3,
         "side": "bottom",
         "role": "input"
       },
@@ -195,23 +195,38 @@
         "role": "input"
       },
       {
-        "r": 4,
-        "c": 0,
-        "side": "right",
-        "role": "output"
+        "r": 0,
+        "c": 2,
+        "side": "bottom",
+        "role": "input"
       },
       {
-        "r": 2,
-        "c": 0,
-        "side": "right",
+        "r": 0,
+        "c": 1,
+        "side": "bottom",
         "role": "input"
+      },
+      {
+        "r": 5,
+        "c": 4,
+        "side": "top",
+        "role": "output"
       }
     ]
   },
   "inputs": [
     {
       "r": 0,
-      "c": 2,
+      "c": 3,
+      "side": "bottom",
+      "type": {
+        "form": "square",
+        "color": "green"
+      }
+    },
+    {
+      "r": 0,
+      "c": 4,
       "side": "bottom",
       "type": {
         "form": "circle",
@@ -220,73 +235,43 @@
     },
     {
       "r": 0,
-      "c": 4,
+      "c": 2,
       "side": "bottom",
       "type": {
-        "form": "triangle",
-        "color": "red"
+        "form": "circle",
+        "color": "green"
       }
     },
     {
-      "r": 2,
-      "c": 0,
-      "side": "right",
+      "r": 0,
+      "c": 1,
+      "side": "bottom",
       "type": {
-        "form": "square",
-        "color": "red"
+        "form": "triangle",
+        "color": "blue"
       }
     }
   ],
   "outputs": [
     {
-      "r": 4,
-      "c": 0,
-      "side": "right",
+      "r": 5,
+      "c": 4,
+      "side": "top",
       "type": {
         "form": "circle",
-        "color": "green"
+        "color": "red"
       }
     }
   ],
-  "instructionalText": "Sometimes, it helps to work backwards",
+  "instructionalText": null,
   "boss": null,
-  "author": "urbandrei",
+  "author": null,
   "solution": {
     "factories": [
       {
-        "id": "f4tkmpru",
+        "id": "fidqqary",
         "anchor": {
-          "row": 2,
-          "col": 4
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0,
-            "label": {
-              "form": "square"
-            }
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "input"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "left",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "f5oo4k5c",
-        "anchor": {
-          "row": 2,
+          "row": 1,
           "col": 3
         },
         "cells": [
@@ -294,7 +279,24 @@
             "r": 0,
             "c": 0,
             "label": {
-              "color": "green"
+              "color": "green",
+              "form": "square"
+            }
+          },
+          {
+            "r": 0,
+            "c": 1,
+            "label": {
+              "color": "blue",
+              "form": "circle"
+            }
+          },
+          {
+            "r": 1,
+            "c": 0,
+            "label": {
+              "color": "red",
+              "form": "triangle"
             }
           }
         ],
@@ -302,11 +304,17 @@
           {
             "r": 0,
             "c": 0,
-            "side": "right",
+            "side": "top",
             "role": "input"
           },
           {
             "r": 0,
+            "c": 1,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 1,
             "c": 0,
             "side": "bottom",
             "role": "output"
@@ -314,97 +322,99 @@
         ]
       },
       {
-        "id": "f5v295or",
+        "id": "f95ynkli",
         "anchor": {
-          "row": 4,
+          "row": 1,
           "col": 1
         },
         "cells": [
           {
             "r": 0,
-            "c": 1,
-            "label": {
-              "form": "triangle",
-              "color": "green"
-            }
-          },
-          {
-            "r": 0,
             "c": 0,
             "label": {
-              "form": "circle",
-              "color": "green"
+              "color": "blue",
+              "form": "triangle"
             }
           },
           {
             "r": 0,
-            "c": 2,
+            "c": 1,
             "label": {
-              "form": "square",
-              "color": "green"
+              "color": "green",
+              "form": "circle"
+            }
+          },
+          {
+            "r": 1,
+            "c": 1,
+            "label": {
+              "color": "red",
+              "form": "square"
             }
           }
         ],
         "funnels": [
           {
-            "r": 0,
+            "r": 1,
             "c": 1,
-            "side": "top",
-            "role": "input"
-          },
-          {
-            "r": 0,
-            "c": 2,
-            "side": "top",
-            "role": "input"
+            "side": "bottom",
+            "role": "output"
           },
           {
             "r": 0,
             "c": 0,
-            "side": "left",
-            "role": "output"
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 1,
+            "side": "top",
+            "role": "input"
           }
         ]
       },
       {
-        "id": "fqhme2b9",
+        "id": "f1qzwzjh",
         "anchor": {
-          "row": 2,
+          "row": 3,
           "col": 1
         },
         "cells": [
           {
             "r": 0,
-            "c": 0,
+            "c": 1,
             "label": {
-              "form": "square",
-              "color": "red"
+              "color": "red",
+              "form": "square"
             }
           },
           {
             "r": 0,
-            "c": 1,
+            "c": 2,
             "label": {
-              "form": "circle",
-              "color": "blue"
+              "color": "red",
+              "form": "triangle"
             }
+          },
+          {
+            "r": 0,
+            "c": 3,
+            "label": {
+              "color": "red",
+              "form": "circle"
+            }
+          },
+          {
+            "r": 0,
+            "c": 0
           },
           {
             "r": 1,
-            "c": 1,
-            "label": {
-              "form": "triangle",
-              "color": "green"
-            }
+            "c": 0
           }
         ],
         "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "left",
-            "role": "input"
-          },
           {
             "r": 0,
             "c": 1,
@@ -412,8 +422,14 @@
             "role": "input"
           },
           {
-            "r": 1,
-            "c": 1,
+            "r": 0,
+            "c": 2,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 3,
             "side": "bottom",
             "role": "output"
           }
@@ -421,6 +437,5 @@
       }
     ]
   },
-  "likes": 0,
-  "acidPits": []
+  "likes": 0
 }

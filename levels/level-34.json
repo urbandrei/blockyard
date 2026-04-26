@@ -1,616 +1,105 @@
 {
   "id": "level-34",
-  "name": "Shift painter",
+  "name": "Power",
   "number": 0,
   "board": {
-    "cols": 7,
-    "rows": 7
+    "cols": 5,
+    "rows": 5
   },
-  "factories": [
-    {
-      "id": "fisf2hoy",
-      "anchor": {
-        "row": 2,
-        "col": 4
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "color": "red",
-            "form": "triangle"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "right",
-          "role": "output"
-        }
-      ]
-    },
-    {
-      "id": "fr0vew7o",
-      "anchor": {
-        "row": 3,
-        "col": 3
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "color": "green"
-          }
-        },
-        {
-          "r": 0,
-          "c": 1
-        },
-        {
-          "r": 1,
-          "c": 1
-        },
-        {
-          "r": 2,
-          "c": 1
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "label": {
-            "color": "blue",
-            "form": "circle"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "side": "left",
-          "role": "input"
-        }
-      ]
-    }
-  ],
+  "factories": [],
   "initialFactories": [
     {
-      "id": "fbt8a8q1",
-      "slot": {
-        "row": 2,
-        "col": 2
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "form": "circle",
-            "color": "green"
-          }
-        },
-        {
-          "r": 1,
-          "c": 0
-        },
-        {
-          "r": 2,
-          "c": 0,
-          "label": {
-            "form": "square",
-            "color": "green"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "right",
-          "role": "output"
-        },
-        {
-          "r": 2,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "side": "right",
-          "role": "input"
-        }
-      ],
-      "rotation": 1
-    },
-    {
-      "id": "fe5gwwhy",
-      "slot": {
-        "row": 3,
-        "col": 1
-      },
-      "cells": [
-        {
-          "r": 1,
-          "c": 0,
-          "label": {
-            "color": "red",
-            "form": "triangle"
-          }
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "color": "green"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "output"
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "side": "left",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "input"
-        }
-      ],
-      "rotation": 3
-    },
-    {
-      "id": "f4whgkye",
+      "id": "fql5cl1d",
       "slot": {
         "row": 1,
-        "col": 3
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "color": "blue"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "right",
-          "role": "output"
-        }
-      ],
-      "rotation": 0
-    },
-    {
-      "id": "fe5sisxg",
-      "slot": {
-        "row": 1,
-        "col": 1
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0
-        },
-        {
-          "r": 0,
-          "c": 1
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "side": "bottom",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "side": "right",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        }
-      ],
-      "rotation": 0
-    },
-    {
-      "id": "ffptu5gq",
-      "slot": {
-        "row": 2,
         "col": 0
       },
       "cells": [
         {
           "r": 0,
           "c": 0,
-          "label": {
-            "form": "square",
-            "color": "green"
-          }
+          "bolt": true
         },
         {
           "r": 1,
-          "c": 0,
-          "label": {
-            "color": "green",
-            "form": "square"
-          }
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "label": {
-            "color": "blue",
-            "form": "circle"
-          }
+          "c": 0
         }
       ],
       "funnels": [
         {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "emitter"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
+          "role": "output"
+        },
+        {
           "r": 1,
           "c": 0,
           "side": "bottom",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
           "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "side": "right",
-          "role": "output"
         }
       ],
       "rotation": 0
     }
   ],
-  "lockedFactories": [
-    {
-      "id": "fisf2hoy",
-      "anchor": {
-        "row": 2,
-        "col": 4
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "color": "red",
-            "form": "triangle"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "right",
-          "role": "output"
-        }
-      ]
-    },
-    {
-      "id": "fr0vew7o",
-      "anchor": {
-        "row": 3,
-        "col": 3
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "color": "green"
-          }
-        },
-        {
-          "r": 0,
-          "c": 1
-        },
-        {
-          "r": 1,
-          "c": 1
-        },
-        {
-          "r": 2,
-          "c": 1
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "label": {
-            "color": "blue",
-            "form": "circle"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "side": "left",
-          "role": "input"
-        }
-      ]
-    }
-  ],
+  "lockedFactories": [],
   "border": {
     "funnels": [
       {
-        "r": 6,
-        "c": 3,
-        "side": "top",
-        "role": "output"
+        "r": 2,
+        "c": 0,
+        "side": "right",
+        "role": "emitter"
       },
       {
-        "r": 6,
-        "c": 1,
-        "side": "top",
-        "role": "output"
-      },
-      {
-        "r": 6,
-        "c": 5,
-        "side": "top",
-        "role": "output"
-      },
-      {
-        "r": 0,
-        "c": 4,
-        "side": "bottom",
-        "role": "input"
-      },
-      {
-        "r": 0,
+        "r": 4,
         "c": 2,
-        "side": "bottom",
+        "side": "top",
         "role": "input"
+      },
+      {
+        "r": 2,
+        "c": 4,
+        "side": "left",
+        "role": "output"
       }
     ]
   },
   "inputs": [
     {
-      "r": 0,
-      "c": 4,
-      "side": "bottom",
-      "type": {
-        "form": "square",
-        "color": "green"
-      }
-    },
-    {
-      "r": 0,
+      "r": 4,
       "c": 2,
-      "side": "bottom",
+      "side": "top",
       "type": {
-        "form": "triangle",
+        "form": "circle",
         "color": "blue"
       }
     }
   ],
   "outputs": [
     {
-      "r": 6,
-      "c": 3,
-      "side": "top",
+      "r": 2,
+      "c": 4,
+      "side": "left",
       "type": {
         "form": "circle",
         "color": "blue"
       }
-    },
-    {
-      "r": 6,
-      "c": 1,
-      "side": "top",
-      "type": {
-        "form": "square",
-        "color": "green"
-      }
-    },
-    {
-      "r": 6,
-      "c": 5,
-      "side": "top",
-      "type": {
-        "form": "triangle",
-        "color": "red"
-      }
     }
   ],
-  "instructionalText": "Green herring.",
+  "instructionalText": "Laser funnels next to a lightning bolt must be lasered for the factory to work",
   "boss": null,
-  "author": "p4songer",
+  "author": "urbandrei",
   "solution": {
     "factories": [
       {
-        "id": "fbt8a8q1",
-        "anchor": {
-          "row": 1,
-          "col": 1
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0,
-            "label": {
-              "form": "circle",
-              "color": "green"
-            }
-          },
-          {
-            "r": 1,
-            "c": 0
-          },
-          {
-            "r": 2,
-            "c": 0,
-            "label": {
-              "form": "square",
-              "color": "green"
-            }
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "right",
-            "role": "output"
-          },
-          {
-            "r": 2,
-            "c": 0,
-            "side": "bottom",
-            "role": "output"
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "side": "right",
-            "role": "input"
-          }
-        ]
-      },
-      {
-        "id": "fe5gwwhy",
-        "anchor": {
-          "row": 1,
-          "col": 5
-        },
-        "cells": [
-          {
-            "r": 1,
-            "c": 0,
-            "label": {
-              "color": "red",
-              "form": "triangle"
-            }
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "label": {
-              "color": "green"
-            }
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "output"
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "side": "bottom",
-            "role": "output"
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "side": "left",
-            "role": "input"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "left",
-            "role": "input"
-          }
-        ]
-      },
-      {
-        "id": "f4whgkye",
+        "id": "fql5cl1d",
         "anchor": {
           "row": 2,
           "col": 2
@@ -619,77 +108,11 @@
           {
             "r": 0,
             "c": 0,
-            "label": {
-              "color": "blue"
-            }
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "input"
+            "bolt": true
           },
           {
-            "r": 0,
-            "c": 0,
-            "side": "left",
-            "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "right",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "fisf2hoy",
-        "anchor": {
-          "row": 2,
-          "col": 4
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0,
-            "label": {
-              "color": "red",
-              "form": "triangle"
-            }
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "input"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "right",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "fe5sisxg",
-        "anchor": {
-          "row": 1,
-          "col": 3
-        },
-        "cells": [
-          {
-            "r": 0,
+            "r": 1,
             "c": 0
-          },
-          {
-            "r": 0,
-            "c": 1
           }
         ],
         "funnels": [
@@ -697,138 +120,24 @@
             "r": 0,
             "c": 0,
             "side": "left",
-            "role": "input"
+            "role": "emitter"
           },
           {
             "r": 0,
-            "c": 1,
-            "side": "bottom",
-            "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 1,
+            "c": 0,
             "side": "right",
             "role": "output"
           },
           {
-            "r": 0,
-            "c": 0,
-            "side": "bottom",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "ffptu5gq",
-        "anchor": {
-          "row": 4,
-          "col": 1
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0,
-            "label": {
-              "form": "square",
-              "color": "green"
-            }
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "label": {
-              "color": "green",
-              "form": "square"
-            }
-          },
-          {
-            "r": 0,
-            "c": 1,
-            "label": {
-              "color": "blue",
-              "form": "circle"
-            }
-          }
-        ],
-        "funnels": [
-          {
             "r": 1,
             "c": 0,
             "side": "bottom",
-            "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "input"
-          },
-          {
-            "r": 0,
-            "c": 1,
-            "side": "right",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "fr0vew7o",
-        "anchor": {
-          "row": 3,
-          "col": 3
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0,
-            "label": {
-              "color": "green"
-            }
-          },
-          {
-            "r": 0,
-            "c": 1
-          },
-          {
-            "r": 1,
-            "c": 1
-          },
-          {
-            "r": 2,
-            "c": 1
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "label": {
-              "color": "blue",
-              "form": "circle"
-            }
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "input"
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "side": "bottom",
-            "role": "output"
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "side": "left",
             "role": "input"
           }
         ]
       }
     ]
   },
-  "likes": 0
+  "likes": 0,
+  "acidPits": []
 }

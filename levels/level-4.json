@@ -1,69 +1,15 @@
 {
   "id": "level-4",
-  "name": "Safe passage",
+  "name": "Rotate",
   "number": 0,
   "board": {
-    "cols": 6,
-    "rows": 6
+    "cols": 4,
+    "rows": 4
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "fxcc3a7l",
-      "slot": {
-        "row": 2,
-        "col": 3
-      },
-      "cells": [
-        {
-          "r": 1,
-          "c": 0
-        },
-        {
-          "r": 0,
-          "c": 0
-        },
-        {
-          "r": 0,
-          "c": 1
-        }
-      ],
-      "funnels": [],
-      "rotation": 2
-    },
-    {
-      "id": "faflksr3",
-      "slot": {
-        "row": 3,
-        "col": 0
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 1
-        },
-        {
-          "r": 1,
-          "c": 1
-        },
-        {
-          "r": 2,
-          "c": 1
-        },
-        {
-          "r": 2,
-          "c": 0
-        },
-        {
-          "r": 1,
-          "c": 0
-        }
-      ],
-      "funnels": [],
-      "rotation": 1
-    },
-    {
-      "id": "f7pu0qnh",
+      "id": "fmzmihyy",
       "slot": {
         "row": 1,
         "col": 0
@@ -72,46 +18,47 @@
         {
           "r": 0,
           "c": 0
-        },
-        {
-          "r": 1,
-          "c": 0
-        },
-        {
-          "r": 2,
-          "c": 0
-        },
-        {
-          "r": 3,
-          "c": 0
         }
       ],
-      "funnels": [],
-      "rotation": 1
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 2
     }
   ],
   "lockedFactories": [],
   "border": {
     "funnels": [
       {
-        "r": 0,
-        "c": 3,
-        "side": "bottom",
-        "role": "input"
-      },
-      {
-        "r": 5,
-        "c": 3,
+        "r": 3,
+        "c": 2,
         "side": "top",
         "role": "output"
+      },
+      {
+        "r": 1,
+        "c": 0,
+        "side": "right",
+        "role": "input"
       }
     ]
   },
   "inputs": [
     {
-      "r": 0,
-      "c": 3,
-      "side": "bottom",
+      "r": 1,
+      "c": 0,
+      "side": "right",
       "type": {
         "form": "circle",
         "color": "blue"
@@ -120,8 +67,8 @@
   ],
   "outputs": [
     {
-      "r": 5,
-      "c": 3,
+      "r": 3,
+      "c": 2,
       "side": "top",
       "type": {
         "form": "circle",
@@ -129,87 +76,37 @@
       }
     }
   ],
-  "instructionalText": "All factories must be placed",
+  "instructionalText": "Click on a factory to rotate it.",
   "boss": null,
+  "author": "p4songer",
   "solution": {
     "factories": [
       {
-        "id": "fxcc3a7l",
+        "id": "fmzmihyy",
         "anchor": {
           "row": 1,
-          "col": 1
-        },
-        "cells": [
-          {
-            "r": 1,
-            "c": 0
-          },
-          {
-            "r": 0,
-            "c": 0
-          },
-          {
-            "r": 0,
-            "c": 1
-          }
-        ],
-        "funnels": []
-      },
-      {
-        "id": "faflksr3",
-        "anchor": {
-          "row": 2,
-          "col": 1
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 1
-          },
-          {
-            "r": 1,
-            "c": 1
-          },
-          {
-            "r": 2,
-            "c": 1
-          },
-          {
-            "r": 2,
-            "c": 0
-          },
-          {
-            "r": 1,
-            "c": 0
-          }
-        ],
-        "funnels": []
-      },
-      {
-        "id": "f7pu0qnh",
-        "anchor": {
-          "row": 1,
-          "col": 4
+          "col": 2
         },
         "cells": [
           {
             "r": 0,
             "c": 0
-          },
-          {
-            "r": 1,
-            "c": 0
-          },
-          {
-            "r": 2,
-            "c": 0
-          },
-          {
-            "r": 3,
-            "c": 0
           }
         ],
-        "funnels": []
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "left",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
       }
     ]
   },

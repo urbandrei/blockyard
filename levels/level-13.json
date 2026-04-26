@@ -1,15 +1,15 @@
 {
   "id": "level-13",
-  "name": "Valid input",
+  "name": "Requirement",
   "number": 0,
   "board": {
-    "cols": 6,
-    "rows": 6
+    "cols": 5,
+    "rows": 5
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "f74mwviq",
+      "id": "fpnz5ys4",
       "slot": {
         "row": 1,
         "col": 0
@@ -17,18 +17,18 @@
       "cells": [
         {
           "r": 0,
-          "c": 1,
+          "c": 0,
           "label": {
-            "form": "triangle",
+            "form": "circle",
             "color": "blue"
           }
         },
         {
           "r": 0,
-          "c": 0,
+          "c": 1,
           "label": {
             "form": "square",
-            "color": "red"
+            "color": "green"
           }
         }
       ],
@@ -42,7 +42,7 @@
         {
           "r": 0,
           "c": 1,
-          "side": "bottom",
+          "side": "right",
           "role": "output"
         }
       ],
@@ -53,9 +53,15 @@
   "border": {
     "funnels": [
       {
-        "r": 5,
-        "c": 3,
-        "side": "top",
+        "r": 0,
+        "c": 1,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 2,
+        "c": 4,
+        "side": "left",
         "role": "output"
       },
       {
@@ -69,51 +75,60 @@
   "inputs": [
     {
       "r": 0,
+      "c": 1,
+      "side": "bottom",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    },
+    {
+      "r": 0,
       "c": 2,
       "side": "bottom",
       "type": {
-        "form": "square",
+        "form": "triangle",
         "color": "red"
       }
     }
   ],
   "outputs": [
     {
-      "r": 5,
-      "c": 3,
-      "side": "top",
+      "r": 2,
+      "c": 4,
+      "side": "left",
       "type": {
-        "form": "triangle",
-        "color": "blue"
+        "form": "square",
+        "color": "green"
       }
     }
   ],
-  "instructionalText": "Inputs can have requirement labels",
+  "instructionalText": "On bigger factories, labels on input funnels must be followed",
   "boss": null,
-  "author": null,
+  "author": "urbandrei",
   "solution": {
     "factories": [
       {
-        "id": "f74mwviq",
+        "id": "fpnz5ys4",
         "anchor": {
           "row": 2,
-          "col": 2
+          "col": 1
         },
         "cells": [
           {
             "r": 0,
-            "c": 1,
+            "c": 0,
             "label": {
-              "form": "triangle",
+              "form": "circle",
               "color": "blue"
             }
           },
           {
             "r": 0,
-            "c": 0,
+            "c": 1,
             "label": {
               "form": "square",
-              "color": "red"
+              "color": "green"
             }
           }
         ],
@@ -127,12 +142,13 @@
           {
             "r": 0,
             "c": 1,
-            "side": "bottom",
+            "side": "right",
             "role": "output"
           }
         ]
       }
     ]
   },
-  "likes": 0
+  "likes": 0,
+  "acidPits": []
 }

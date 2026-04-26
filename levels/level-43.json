@@ -1,46 +1,54 @@
 {
-  "id": "level-25",
-  "name": "Inconvenient",
+  "id": "level-43",
+  "name": "Red herring",
   "number": 0,
   "board": {
-    "cols": 5,
-    "rows": 5
+    "cols": 6,
+    "rows": 6
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "fkxc59e1",
+      "id": "ffv562f7",
       "slot": {
         "row": 2,
-        "col": 2
+        "col": 1
       },
       "cells": [
         {
           "r": 0,
+          "c": 1
+        },
+        {
+          "r": 1,
+          "c": 1
+        },
+        {
+          "r": 1,
           "c": 0
         }
       ],
       "funnels": [
         {
-          "r": 0,
+          "r": 1,
           "c": 0,
-          "side": "right",
+          "side": "left",
           "role": "output"
         },
         {
           "r": 0,
-          "c": 0,
+          "c": 1,
           "side": "top",
           "role": "input"
         }
       ],
-      "rotation": 0
+      "rotation": 1
     },
     {
-      "id": "fqagt0hw",
+      "id": "f3351ijl",
       "slot": {
         "row": 1,
-        "col": 1
+        "col": 3
       },
       "cells": [
         {
@@ -50,6 +58,43 @@
         {
           "r": 1,
           "c": 0
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 1,
+          "c": 0,
+          "side": "left",
+          "role": "output"
+        },
+        {
+          "r": 1,
+          "c": 0,
+          "side": "right",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "fcn4i522",
+      "slot": {
+        "row": 3,
+        "col": 3
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "square"
+          }
         }
       ],
       "funnels": [
@@ -60,49 +105,36 @@
           "role": "input"
         },
         {
-          "r": 1,
-          "c": 0,
-          "side": "right",
-          "role": "output"
-        }
-      ],
-      "rotation": 0
-    },
-    {
-      "id": "fcr0u99j",
-      "slot": {
-        "row": 1,
-        "col": 2
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0
-        }
-      ],
-      "funnels": [
-        {
           "r": 0,
           "c": 0,
           "side": "bottom",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "right",
           "role": "output"
         }
       ],
-      "rotation": 0
+      "rotation": 2
     },
     {
-      "id": "fpnqql0e",
+      "id": "ff7x3wsm",
       "slot": {
         "row": 1,
         "col": 0
       },
       "cells": [
+        {
+          "r": 1,
+          "c": 0
+        },
+        {
+          "r": 2,
+          "c": 0
+        },
+        {
+          "r": 2,
+          "c": 1,
+          "label": {
+            "form": "square"
+          }
+        },
         {
           "r": 0,
           "c": 0
@@ -115,14 +147,14 @@
       "funnels": [
         {
           "r": 0,
-          "c": 1,
+          "c": 0,
           "side": "top",
           "role": "input"
         },
         {
-          "r": 0,
-          "c": 0,
-          "side": "top",
+          "r": 2,
+          "c": 1,
+          "side": "bottom",
           "role": "output"
         }
       ],
@@ -134,14 +166,14 @@
     "funnels": [
       {
         "r": 0,
-        "c": 2,
+        "c": 3,
         "side": "bottom",
         "role": "input"
       },
       {
-        "r": 2,
-        "c": 4,
-        "side": "left",
+        "r": 4,
+        "c": 0,
+        "side": "right",
         "role": "output"
       }
     ]
@@ -149,32 +181,32 @@
   "inputs": [
     {
       "r": 0,
-      "c": 2,
+      "c": 3,
       "side": "bottom",
       "type": {
         "form": "circle",
-        "color": "red"
+        "color": "blue"
       }
     }
   ],
   "outputs": [
     {
-      "r": 2,
-      "c": 4,
-      "side": "left",
+      "r": 4,
+      "c": 0,
+      "side": "right",
       "type": {
-        "form": "circle",
-        "color": "green"
+        "form": "square",
+        "color": "blue"
       }
     }
   ],
-  "instructionalText": "Puddles are rarely where you want them",
+  "instructionalText": "Not all blocks are useful...",
   "boss": null,
-  "author": "urbandrei",
+  "author": "JayTeaGibs",
   "solution": {
     "factories": [
       {
-        "id": "fkxc59e1",
+        "id": "ffv562f7",
         "anchor": {
           "row": 3,
           "col": 3
@@ -182,26 +214,34 @@
         "cells": [
           {
             "r": 0,
+            "c": 1
+          },
+          {
+            "r": 1,
+            "c": 1
+          },
+          {
+            "r": 1,
             "c": 0
           }
         ],
         "funnels": [
           {
-            "r": 0,
+            "r": 1,
             "c": 0,
-            "side": "right",
+            "side": "left",
             "role": "output"
           },
           {
             "r": 0,
-            "c": 0,
+            "c": 1,
             "side": "top",
             "role": "input"
           }
         ]
       },
       {
-        "id": "fqagt0hw",
+        "id": "f3351ijl",
         "anchor": {
           "row": 1,
           "col": 3
@@ -214,6 +254,42 @@
           {
             "r": 1,
             "c": 0
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 1,
+            "c": 0,
+            "side": "left",
+            "role": "output"
+          },
+          {
+            "r": 1,
+            "c": 0,
+            "side": "right",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "fcn4i522",
+        "anchor": {
+          "row": 2,
+          "col": 4
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "form": "square"
+            }
           }
         ],
         "funnels": [
@@ -224,47 +300,35 @@
             "role": "input"
           },
           {
-            "r": 1,
+            "r": 0,
             "c": 0,
-            "side": "right",
+            "side": "bottom",
             "role": "output"
           }
         ]
       },
       {
-        "id": "fcr0u99j",
+        "id": "ff7x3wsm",
         "anchor": {
           "row": 1,
           "col": 1
         },
         "cells": [
           {
-            "r": 0,
+            "r": 1,
             "c": 0
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "bottom",
-            "role": "input"
           },
           {
-            "r": 0,
-            "c": 0,
-            "side": "right",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "fpnqql0e",
-        "anchor": {
-          "row": 3,
-          "col": 1
-        },
-        "cells": [
+            "r": 2,
+            "c": 0
+          },
+          {
+            "r": 2,
+            "c": 1,
+            "label": {
+              "form": "square"
+            }
+          },
           {
             "r": 0,
             "c": 0
@@ -277,28 +341,19 @@
         "funnels": [
           {
             "r": 0,
-            "c": 1,
+            "c": 0,
             "side": "top",
             "role": "input"
           },
           {
-            "r": 0,
-            "c": 0,
-            "side": "top",
+            "r": 2,
+            "c": 1,
+            "side": "bottom",
             "role": "output"
           }
         ]
       }
     ]
   },
-  "likes": 0,
-  "acidPits": [
-    {
-      "r": 2,
-      "c": 1,
-      "label": {
-        "color": "green"
-      }
-    }
-  ]
+  "likes": 0
 }

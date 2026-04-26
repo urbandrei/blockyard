@@ -1,25 +1,79 @@
 {
-  "id": "level-17",
-  "name": "Greener",
+  "id": "level-46",
+  "name": "Combo breaker",
   "number": 0,
   "board": {
-    "cols": 6,
-    "rows": 6
+    "cols": 5,
+    "rows": 5
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "f4tkmpru",
+      "id": "fz5m7ut8",
       "slot": {
-        "row": 3,
-        "col": 1
+        "row": 1,
+        "col": 0
       },
       "cells": [
         {
           "r": 0,
           "c": 0,
           "label": {
+            "color": "red",
             "form": "square"
+          }
+        },
+        {
+          "r": 1,
+          "c": 0,
+          "label": {
+            "color": "blue",
+            "form": "circle"
+          }
+        },
+        {
+          "r": 2,
+          "c": 0,
+          "label": {
+            "color": "green",
+            "form": "triangle"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "input"
+        },
+        {
+          "r": 1,
+          "c": 0,
+          "side": "left",
+          "role": "input"
+        },
+        {
+          "r": 2,
+          "c": 0,
+          "side": "left",
+          "role": "output"
+        }
+      ],
+      "rotation": 3
+    },
+    {
+      "id": "flnqg4ye",
+      "slot": {
+        "row": 3,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "circle"
           }
         }
       ],
@@ -29,6 +83,12 @@
           "c": 0,
           "side": "top",
           "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
+          "role": "output"
         },
         {
           "r": 0,
@@ -40,162 +100,93 @@
       "rotation": 2
     },
     {
-      "id": "f5oo4k5c",
+      "id": "fdebhhcv",
+      "slot": {
+        "row": 2,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "blue"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 2
+    },
+    {
+      "id": "fctlrdak",
       "slot": {
         "row": 2,
         "col": 2
       },
       "cells": [
         {
-          "r": 0,
+          "r": 1,
           "c": 0,
           "label": {
-            "color": "green"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "right",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        }
-      ],
-      "rotation": 0
-    },
-    {
-      "id": "f5v295or",
-      "slot": {
-        "row": 1,
-        "col": 0
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 1,
-          "label": {
-            "form": "triangle",
-            "color": "green"
-          }
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "form": "circle",
-            "color": "green"
-          }
-        },
-        {
-          "r": 0,
-          "c": 2,
-          "label": {
-            "form": "square",
-            "color": "green"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 1,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 2,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "output"
-        }
-      ],
-      "rotation": 1
-    },
-    {
-      "id": "fqhme2b9",
-      "slot": {
-        "row": 1,
-        "col": 1
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "form": "square",
-            "color": "red"
-          }
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "label": {
-            "form": "circle",
             "color": "blue"
           }
         },
         {
-          "r": 1,
-          "c": 1,
+          "r": 0,
+          "c": 0,
           "label": {
-            "form": "triangle",
-            "color": "green"
+            "color": "red",
+            "form": "square"
           }
         }
       ],
       "funnels": [
         {
-          "r": 0,
+          "r": 1,
           "c": 0,
           "side": "left",
           "role": "input"
         },
         {
           "r": 0,
-          "c": 1,
-          "side": "top",
-          "role": "input"
+          "c": 0,
+          "side": "right",
+          "role": "output"
         },
         {
           "r": 1,
-          "c": 1,
-          "side": "bottom",
+          "c": 0,
+          "side": "right",
           "role": "output"
         }
       ],
-      "rotation": 3
+      "rotation": 2
     }
   ],
   "lockedFactories": [],
   "border": {
     "funnels": [
       {
-        "r": 0,
-        "c": 2,
-        "side": "bottom",
+        "r": 1,
+        "c": 0,
+        "side": "right",
         "role": "input"
       },
       {
-        "r": 0,
-        "c": 4,
-        "side": "bottom",
-        "role": "input"
-      },
-      {
-        "r": 4,
+        "r": 3,
         "c": 0,
         "side": "right",
         "role": "output"
@@ -204,31 +195,13 @@
         "r": 2,
         "c": 0,
         "side": "right",
-        "role": "input"
+        "role": "output"
       }
     ]
   },
   "inputs": [
     {
-      "r": 0,
-      "c": 2,
-      "side": "bottom",
-      "type": {
-        "form": "circle",
-        "color": "blue"
-      }
-    },
-    {
-      "r": 0,
-      "c": 4,
-      "side": "bottom",
-      "type": {
-        "form": "triangle",
-        "color": "red"
-      }
-    },
-    {
-      "r": 2,
+      "r": 1,
       "c": 0,
       "side": "right",
       "type": {
@@ -239,54 +212,33 @@
   ],
   "outputs": [
     {
-      "r": 4,
+      "r": 3,
+      "c": 0,
+      "side": "right",
+      "type": {
+        "form": "triangle",
+        "color": "green"
+      }
+    },
+    {
+      "r": 2,
       "c": 0,
       "side": "right",
       "type": {
         "form": "circle",
-        "color": "green"
+        "color": "blue"
       }
     }
   ],
-  "instructionalText": "Sometimes, it helps to work backwards",
+  "instructionalText": "Sometimes working backwards helps.",
   "boss": null,
-  "author": "urbandrei",
+  "author": "p4songer",
   "solution": {
     "factories": [
       {
-        "id": "f4tkmpru",
+        "id": "fz5m7ut8",
         "anchor": {
-          "row": 2,
-          "col": 4
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0,
-            "label": {
-              "form": "square"
-            }
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "input"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "left",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "f5oo4k5c",
-        "anchor": {
-          "row": 2,
+          "row": 1,
           "col": 3
         },
         "cells": [
@@ -294,7 +246,24 @@
             "r": 0,
             "c": 0,
             "label": {
-              "color": "green"
+              "color": "red",
+              "form": "square"
+            }
+          },
+          {
+            "r": 1,
+            "c": 0,
+            "label": {
+              "color": "blue",
+              "form": "circle"
+            }
+          },
+          {
+            "r": 2,
+            "c": 0,
+            "label": {
+              "color": "green",
+              "form": "triangle"
             }
           }
         ],
@@ -302,64 +271,17 @@
           {
             "r": 0,
             "c": 0,
-            "side": "right",
+            "side": "left",
             "role": "input"
           },
           {
-            "r": 0,
+            "r": 1,
             "c": 0,
-            "side": "bottom",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "f5v295or",
-        "anchor": {
-          "row": 4,
-          "col": 1
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 1,
-            "label": {
-              "form": "triangle",
-              "color": "green"
-            }
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "label": {
-              "form": "circle",
-              "color": "green"
-            }
-          },
-          {
-            "r": 0,
-            "c": 2,
-            "label": {
-              "form": "square",
-              "color": "green"
-            }
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 1,
-            "side": "top",
+            "side": "left",
             "role": "input"
           },
           {
-            "r": 0,
-            "c": 2,
-            "side": "top",
-            "role": "input"
-          },
-          {
-            "r": 0,
+            "r": 2,
             "c": 0,
             "side": "left",
             "role": "output"
@@ -367,7 +289,7 @@
         ]
       },
       {
-        "id": "fqhme2b9",
+        "id": "flnqg4ye",
         "anchor": {
           "row": 2,
           "col": 1
@@ -377,24 +299,43 @@
             "r": 0,
             "c": 0,
             "label": {
-              "form": "square",
-              "color": "red"
+              "form": "circle"
             }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
           },
           {
             "r": 0,
-            "c": 1,
-            "label": {
-              "form": "circle",
-              "color": "blue"
-            }
+            "c": 0,
+            "side": "right",
+            "role": "output"
           },
           {
-            "r": 1,
-            "c": 1,
+            "r": 0,
+            "c": 0,
+            "side": "left",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "fdebhhcv",
+        "anchor": {
+          "row": 1,
+          "col": 1
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
             "label": {
-              "form": "triangle",
-              "color": "green"
+              "color": "blue"
             }
           }
         ],
@@ -407,20 +348,57 @@
           },
           {
             "r": 0,
-            "c": 1,
-            "side": "top",
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "fctlrdak",
+        "anchor": {
+          "row": 1,
+          "col": 2
+        },
+        "cells": [
+          {
+            "r": 1,
+            "c": 0,
+            "label": {
+              "color": "blue"
+            }
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "red",
+              "form": "square"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 1,
+            "c": 0,
+            "side": "left",
             "role": "input"
           },
           {
+            "r": 0,
+            "c": 0,
+            "side": "right",
+            "role": "output"
+          },
+          {
             "r": 1,
-            "c": 1,
-            "side": "bottom",
+            "c": 0,
+            "side": "right",
             "role": "output"
           }
         ]
       }
     ]
   },
-  "likes": 0,
-  "acidPits": []
+  "likes": 0
 }

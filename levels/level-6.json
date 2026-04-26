@@ -1,15 +1,15 @@
 {
   "id": "level-6",
-  "name": "Reshape",
+  "name": "Square hole",
   "number": 0,
   "board": {
-    "cols": 5,
-    "rows": 5
+    "cols": 4,
+    "rows": 4
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "fenodepp",
+      "id": "flu1osqq",
       "slot": {
         "row": 1,
         "col": 0
@@ -17,24 +17,49 @@
       "cells": [
         {
           "r": 0,
-          "c": 0,
-          "label": {
-            "form": "square"
-          }
+          "c": 0
         }
       ],
       "funnels": [
         {
           "r": 0,
           "c": 0,
-          "side": "top",
-          "role": "input"
+          "side": "right",
+          "role": "output"
         },
         {
           "r": 0,
           "c": 0,
           "side": "bottom",
+          "role": "input"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "ffft21k6",
+      "slot": {
+        "row": 1,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
           "role": "output"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "input"
         }
       ],
       "rotation": 0
@@ -44,76 +69,132 @@
   "border": {
     "funnels": [
       {
-        "r": 0,
-        "c": 2,
-        "side": "bottom",
+        "r": 3,
+        "c": 1,
+        "side": "top",
         "role": "input"
       },
       {
-        "r": 4,
+        "r": 1,
+        "c": 3,
+        "side": "left",
+        "role": "output"
+      },
+      {
+        "r": 3,
         "c": 2,
         "side": "top",
+        "role": "input"
+      },
+      {
+        "r": 2,
+        "c": 3,
+        "side": "left",
         "role": "output"
       }
     ]
   },
   "inputs": [
     {
-      "r": 0,
+      "r": 3,
+      "c": 1,
+      "side": "top",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    },
+    {
+      "r": 3,
       "c": 2,
-      "side": "bottom",
+      "side": "top",
+      "type": {
+        "form": "square",
+        "color": "red"
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "r": 1,
+      "c": 3,
+      "side": "left",
+      "type": {
+        "form": "square",
+        "color": "red"
+      }
+    },
+    {
+      "r": 2,
+      "c": 3,
+      "side": "left",
       "type": {
         "form": "circle",
         "color": "blue"
       }
     }
   ],
-  "outputs": [
-    {
-      "r": 4,
-      "c": 2,
-      "side": "top",
-      "type": {
-        "form": "square",
-        "color": "blue"
-      }
-    }
-  ],
-  "instructionalText": "White labels on factory convert the shape",
+  "instructionalText": "You must match the correct color and shape of the output",
   "boss": null,
+  "author": "urbandrei",
   "solution": {
     "factories": [
       {
-        "id": "fenodepp",
+        "id": "flu1osqq",
         "anchor": {
           "row": 2,
-          "col": 2
+          "col": 1
         },
         "cells": [
           {
             "r": 0,
-            "c": 0,
-            "label": {
-              "form": "square"
-            }
+            "c": 0
           }
         ],
         "funnels": [
           {
             "r": 0,
             "c": 0,
-            "side": "top",
-            "role": "input"
+            "side": "right",
+            "role": "output"
           },
           {
             "r": 0,
             "c": 0,
             "side": "bottom",
+            "role": "input"
+          }
+        ]
+      },
+      {
+        "id": "ffft21k6",
+        "anchor": {
+          "row": 1,
+          "col": 2
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "right",
             "role": "output"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "input"
           }
         ]
       }
     ]
   },
-  "likes": 0
+  "likes": 0,
+  "acidPits": []
 }

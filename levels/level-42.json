@@ -1,54 +1,35 @@
 {
-  "id": "level-30",
-  "name": "Central",
+  "id": "level-42",
+  "name": "To the left",
   "number": 0,
   "board": {
-    "cols": 6,
-    "rows": 6
+    "cols": 7,
+    "rows": 7
   },
   "factories": [],
   "initialFactories": [
     {
-      "id": "fsmw2gjg",
+      "id": "fvs18seb",
       "slot": {
-        "row": 3,
+        "row": 1,
         "col": 1
       },
       "cells": [
         {
           "r": 0,
-          "c": 0
+          "c": 0,
+          "label": {
+            "form": "square"
+          }
         }
       ],
       "funnels": [
         {
           "r": 0,
           "c": 0,
-          "side": "bottom",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "left",
+          "side": "top",
           "role": "input"
-        }
-      ],
-      "rotation": 2
-    },
-    {
-      "id": "frglptvp",
-      "slot": {
-        "row": 3,
-        "col": 0
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0
-        }
-      ],
-      "funnels": [
+        },
         {
           "r": 0,
           "c": 0,
@@ -60,50 +41,12 @@
           "c": 0,
           "side": "left",
           "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "input"
         }
       ],
-      "rotation": 3
+      "rotation": 2
     },
     {
-      "id": "fge3b7lb",
-      "slot": {
-        "row": 2,
-        "col": 2
-      },
-      "cells": [
-        {
-          "r": 1,
-          "c": 0
-        },
-        {
-          "r": 1,
-          "c": 1
-        }
-      ],
-      "funnels": [
-        {
-          "r": 1,
-          "c": 0,
-          "side": "left",
-          "role": "input"
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "side": "top",
-          "role": "output"
-        }
-      ],
-      "rotation": 0
-    },
-    {
-      "id": "fbx7c5qp",
+      "id": "flmc56eb",
       "slot": {
         "row": 1,
         "col": 0
@@ -112,42 +55,6 @@
         {
           "r": 0,
           "c": 0
-        },
-        {
-          "r": 0,
-          "c": 1
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 0,
-          "side": "bottom",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "side": "bottom",
-          "role": "output"
-        }
-      ],
-      "rotation": 2
-    },
-    {
-      "id": "f83ta950",
-      "slot": {
-        "row": 1,
-        "col": 2
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0
-        },
-        {
-          "r": 1,
-          "c": 0
         }
       ],
       "funnels": [
@@ -158,27 +65,11 @@
           "role": "output"
         },
         {
-          "r": 1,
-          "c": 0,
-          "side": "right",
-          "role": "input"
-        }
-      ],
-      "rotation": 1
-    },
-    {
-      "id": "fpqn0x0d",
-      "slot": {
-        "row": 3,
-        "col": 2
-      },
-      "cells": [
-        {
           "r": 0,
-          "c": 0
-        }
-      ],
-      "funnels": [
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        },
         {
           "r": 0,
           "c": 0,
@@ -195,18 +86,42 @@
       "rotation": 1
     },
     {
-      "id": "fyajs6f4",
+      "id": "fean5fg7",
       "slot": {
-        "row": 2,
-        "col": 0
+        "row": 1,
+        "col": 3
       },
       "cells": [
         {
           "r": 0,
           "c": 0
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "left",
+          "role": "output"
         },
         {
-          "r": 1,
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "input"
+        }
+      ],
+      "rotation": 2
+    },
+    {
+      "id": "f8aw7zz6",
+      "slot": {
+        "row": 1,
+        "col": 2
+      },
+      "cells": [
+        {
+          "r": 0,
           "c": 0
         }
       ],
@@ -222,12 +137,76 @@
           "c": 0,
           "side": "left",
           "role": "output"
+        }
+      ],
+      "rotation": 2
+    },
+    {
+      "id": "f9ftqzc1",
+      "slot": {
+        "row": 2,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        },
+        {
+          "r": 0,
+          "c": 1
         },
         {
           "r": 1,
+          "c": 1
+        },
+        {
+          "r": 1,
+          "c": 0
+        },
+        {
+          "r": 2,
+          "c": 0
+        },
+        {
+          "r": 2,
+          "c": 1
+        },
+        {
+          "r": 3,
+          "c": 1
+        },
+        {
+          "r": 3,
+          "c": 0
+        },
+        {
+          "r": 4,
+          "c": 0
+        },
+        {
+          "r": 4,
+          "c": 1
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
           "c": 0,
-          "side": "right",
+          "side": "left",
           "role": "output"
+        },
+        {
+          "r": 4,
+          "c": 0,
+          "side": "left",
+          "role": "output"
+        },
+        {
+          "r": 2,
+          "c": 0,
+          "side": "left",
+          "role": "input"
         }
       ],
       "rotation": 1
@@ -237,36 +216,48 @@
   "border": {
     "funnels": [
       {
-        "r": 1,
-        "c": 0,
-        "side": "right",
+        "r": 0,
+        "c": 3,
+        "side": "bottom",
         "role": "input"
       },
       {
-        "r": 3,
+        "r": 4,
+        "c": 0,
+        "side": "right",
+        "role": "output"
+      },
+      {
+        "r": 2,
+        "c": 0,
+        "side": "right",
+        "role": "output"
+      },
+      {
+        "r": 5,
+        "c": 0,
+        "side": "right",
+        "role": "output"
+      },
+      {
+        "r": 1,
         "c": 0,
         "side": "right",
         "role": "output"
       },
       {
         "r": 3,
-        "c": 5,
-        "side": "left",
-        "role": "output"
-      },
-      {
-        "r": 0,
-        "c": 1,
-        "side": "bottom",
+        "c": 0,
+        "side": "right",
         "role": "output"
       }
     ]
   },
   "inputs": [
     {
-      "r": 1,
-      "c": 0,
-      "side": "right",
+      "r": 0,
+      "c": 3,
+      "side": "bottom",
       "type": {
         "form": "circle",
         "color": "blue"
@@ -275,42 +266,96 @@
   ],
   "outputs": [
     {
-      "r": 3,
+      "r": 4,
       "c": 0,
       "side": "right",
       "type": {
-        "form": "circle",
-        "color": "red"
-      }
-    },
-    {
-      "r": 3,
-      "c": 5,
-      "side": "left",
-      "type": {
-        "form": "circle",
+        "form": "square",
         "color": "blue"
       }
     },
     {
-      "r": 0,
-      "c": 1,
-      "side": "bottom",
+      "r": 2,
+      "c": 0,
+      "side": "right",
       "type": {
-        "form": "circle",
-        "color": "green"
+        "form": "square",
+        "color": "blue"
+      }
+    },
+    {
+      "r": 5,
+      "c": 0,
+      "side": "right",
+      "type": {
+        "form": "square",
+        "color": "blue"
+      }
+    },
+    {
+      "r": 1,
+      "c": 0,
+      "side": "right",
+      "type": {
+        "form": "square",
+        "color": "blue"
+      }
+    },
+    {
+      "r": 3,
+      "c": 0,
+      "side": "right",
+      "type": {
+        "form": "square",
+        "color": "blue"
       }
     }
   ],
-  "instructionalText": "Master the colors",
+  "instructionalText": "Not to the right",
   "boss": null,
-  "author": "urbandrei",
+  "author": "JayTeaGibs",
   "solution": {
     "factories": [
       {
-        "id": "fsmw2gjg",
+        "id": "fvs18seb",
         "anchor": {
-          "row": 1,
+          "row": 3,
+          "col": 3
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "form": "square"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "right",
+            "role": "output"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "left",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "flmc56eb",
+        "anchor": {
+          "row": 3,
           "col": 2
         },
         "cells": [
@@ -323,19 +368,58 @@
           {
             "r": 0,
             "c": 0,
+            "side": "left",
+            "role": "output"
+          },
+          {
+            "r": 0,
+            "c": 0,
             "side": "bottom",
             "role": "output"
           },
           {
             "r": 0,
             "c": 0,
-            "side": "left",
+            "side": "top",
+            "role": "output"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "right",
             "role": "input"
           }
         ]
       },
       {
-        "id": "frglptvp",
+        "id": "fean5fg7",
+        "anchor": {
+          "row": 2,
+          "col": 2
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "left",
+            "role": "output"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "input"
+          }
+        ]
+      },
+      {
+        "id": "f8aw7zz6",
         "anchor": {
           "row": 4,
           "col": 2
@@ -350,147 +434,21 @@
           {
             "r": 0,
             "c": 0,
-            "side": "right",
-            "role": "output"
+            "side": "top",
+            "role": "input"
           },
           {
             "r": 0,
             "c": 0,
             "side": "left",
             "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "input"
           }
         ]
       },
       {
-        "id": "fge3b7lb",
-        "anchor": {
-          "row": 3,
-          "col": 3
-        },
-        "cells": [
-          {
-            "r": 1,
-            "c": 0
-          },
-          {
-            "r": 1,
-            "c": 1
-          }
-        ],
-        "funnels": [
-          {
-            "r": 1,
-            "c": 0,
-            "side": "left",
-            "role": "input"
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "side": "top",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "fbx7c5qp",
+        "id": "f9ftqzc1",
         "anchor": {
           "row": 1,
-          "col": 3
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0
-          },
-          {
-            "r": 0,
-            "c": 1
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "bottom",
-            "role": "input"
-          },
-          {
-            "r": 0,
-            "c": 1,
-            "side": "bottom",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "f83ta950",
-        "anchor": {
-          "row": 3,
-          "col": 1
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0
-          },
-          {
-            "r": 1,
-            "c": 0
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "left",
-            "role": "output"
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "side": "right",
-            "role": "input"
-          }
-        ]
-      },
-      {
-        "id": "fpqn0x0d",
-        "anchor": {
-          "row": 2,
-          "col": 1
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "right",
-            "role": "input"
-          }
-        ]
-      },
-      {
-        "id": "fyajs6f4",
-        "anchor": {
-          "row": 2,
           "col": 4
         },
         "cells": [
@@ -499,17 +457,43 @@
             "c": 0
           },
           {
+            "r": 0,
+            "c": 1
+          },
+          {
+            "r": 1,
+            "c": 1
+          },
+          {
             "r": 1,
             "c": 0
+          },
+          {
+            "r": 2,
+            "c": 0
+          },
+          {
+            "r": 2,
+            "c": 1
+          },
+          {
+            "r": 3,
+            "c": 1
+          },
+          {
+            "r": 3,
+            "c": 0
+          },
+          {
+            "r": 4,
+            "c": 0
+          },
+          {
+            "r": 4,
+            "c": 1
           }
         ],
         "funnels": [
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "input"
-          },
           {
             "r": 0,
             "c": 0,
@@ -517,41 +501,21 @@
             "role": "output"
           },
           {
-            "r": 1,
+            "r": 4,
             "c": 0,
-            "side": "right",
+            "side": "left",
             "role": "output"
+          },
+          {
+            "r": 2,
+            "c": 0,
+            "side": "left",
+            "role": "input"
           }
         ]
       }
     ]
   },
   "likes": 0,
-  "acidPits": [
-    {
-      "r": 2,
-      "c": 2,
-      "label": {
-        "color": "green"
-      }
-    },
-    {
-      "r": 2,
-      "c": 3,
-      "label": {
-        "color": "blue"
-      }
-    },
-    {
-      "r": 3,
-      "c": 2,
-      "label": {
-        "color": "red"
-      }
-    },
-    {
-      "r": 3,
-      "c": 3
-    }
-  ]
+  "importedAt": 1776660561171
 }

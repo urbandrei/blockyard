@@ -1,6 +1,6 @@
 {
   "id": "level-18",
-  "name": "Full house",
+  "name": "Permanent",
   "number": 0,
   "board": {
     "cols": 6,
@@ -8,19 +8,19 @@
   },
   "factories": [
     {
-      "id": "frh2r2z1",
+      "id": "fzc0iwfy",
       "anchor": {
-        "row": 4,
-        "col": 1
+        "row": 2,
+        "col": 2
       },
       "cells": [
         {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "color": "green",
-            "form": "square"
-          }
+          "r": 1,
+          "c": 1
+        },
+        {
+          "r": 1,
+          "c": 0
         },
         {
           "r": 0,
@@ -28,96 +28,15 @@
         },
         {
           "r": 0,
-          "c": 2,
-          "label": {
-            "color": "blue",
-            "form": "circle"
-          }
+          "c": 0
         }
       ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 2,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "output"
-        }
-      ]
+      "funnels": []
     }
   ],
   "initialFactories": [
     {
-      "id": "fhe82mke",
-      "slot": {
-        "row": 0,
-        "col": 0
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 1,
-          "label": {
-            "color": "red",
-            "form": "triangle"
-          }
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "label": {
-            "form": "square",
-            "color": "green"
-          }
-        },
-        {
-          "r": 1,
-          "c": 1
-        },
-        {
-          "r": 1,
-          "c": 2,
-          "label": {
-            "color": "blue",
-            "form": "circle"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 1,
-          "side": "right",
-          "role": "input"
-        },
-        {
-          "r": 1,
-          "c": 2,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "side": "top",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "side": "top",
-          "role": "output"
-        }
-      ],
-      "rotation": 2
-    },
-    {
-      "id": "f6hiyqc7",
+      "id": "flup4j1n",
       "slot": {
         "row": 1,
         "col": 0
@@ -127,16 +46,16 @@
           "r": 0,
           "c": 0,
           "label": {
-            "color": "green",
-            "form": "square"
+            "form": "circle",
+            "color": "blue"
           }
         },
         {
           "r": 0,
           "c": 1,
           "label": {
-            "color": "red",
-            "form": "triangle"
+            "form": "triangle",
+            "color": "blue"
           }
         }
       ],
@@ -144,32 +63,20 @@
         {
           "r": 0,
           "c": 0,
-          "side": "bottom",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
           "side": "top",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "side": "right",
-          "role": "output"
+          "role": "input"
         },
         {
           "r": 0,
           "c": 1,
           "side": "bottom",
-          "role": "input"
+          "role": "output"
         }
       ],
-      "rotation": 3
+      "rotation": 0
     },
     {
-      "id": "fukudi9c",
+      "id": "fr77py9f",
       "slot": {
         "row": 2,
         "col": 1
@@ -179,7 +86,7 @@
           "r": 0,
           "c": 0,
           "label": {
-            "color": "green"
+            "form": "square"
           }
         }
       ],
@@ -187,7 +94,38 @@
         {
           "r": 0,
           "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
           "side": "left",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
+    {
+      "id": "f4usl4wm",
+      "slot": {
+        "row": 2,
+        "col": 0
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "color": "red"
+          }
+        }
+      ],
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "right",
           "role": "input"
         },
         {
@@ -197,24 +135,24 @@
           "role": "output"
         }
       ],
-      "rotation": 2
+      "rotation": 0
     }
   ],
   "lockedFactories": [
     {
-      "id": "frh2r2z1",
+      "id": "fzc0iwfy",
       "anchor": {
-        "row": 4,
-        "col": 1
+        "row": 2,
+        "col": 2
       },
       "cells": [
         {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "color": "green",
-            "form": "square"
-          }
+          "r": 1,
+          "c": 1
+        },
+        {
+          "r": 1,
+          "c": 0
         },
         {
           "r": 0,
@@ -222,27 +160,10 @@
         },
         {
           "r": 0,
-          "c": 2,
-          "label": {
-            "color": "blue",
-            "form": "circle"
-          }
+          "c": 0
         }
       ],
-      "funnels": [
-        {
-          "r": 0,
-          "c": 2,
-          "side": "top",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "top",
-          "role": "output"
-        }
-      ]
+      "funnels": []
     }
   ],
   "border": {
@@ -254,20 +175,8 @@
         "role": "input"
       },
       {
-        "r": 0,
-        "c": 1,
-        "side": "bottom",
-        "role": "output"
-      },
-      {
-        "r": 2,
-        "c": 5,
-        "side": "left",
-        "role": "input"
-      },
-      {
         "r": 5,
-        "c": 4,
+        "c": 3,
         "side": "top",
         "role": "output"
       }
@@ -282,126 +191,71 @@
         "form": "circle",
         "color": "blue"
       }
-    },
-    {
-      "r": 2,
-      "c": 5,
-      "side": "left",
-      "type": {
-        "form": "triangle",
-        "color": "red"
-      }
     }
   ],
   "outputs": [
     {
-      "r": 0,
-      "c": 1,
-      "side": "bottom",
-      "type": {
-        "form": "square",
-        "color": "green"
-      }
-    },
-    {
       "r": 5,
-      "c": 4,
+      "c": 3,
       "side": "top",
       "type": {
-        "form": "triangle",
-        "color": "green"
+        "form": "square",
+        "color": "red"
       }
     }
   ],
-  "instructionalText": null,
+  "instructionalText": "Greyed out blocks are locked in place, work around them",
   "boss": null,
-  "author": null,
+  "author": "urbandrei",
   "solution": {
     "factories": [
       {
-        "id": "fhe82mke",
+        "id": "fzc0iwfy",
         "anchor": {
           "row": 2,
-          "col": 1
+          "col": 2
         },
         "cells": [
-          {
-            "r": 0,
-            "c": 1,
-            "label": {
-              "color": "red",
-              "form": "triangle"
-            }
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "label": {
-              "form": "square",
-              "color": "green"
-            }
-          },
           {
             "r": 1,
             "c": 1
           },
           {
             "r": 1,
-            "c": 2,
-            "label": {
-              "color": "blue",
-              "form": "circle"
-            }
+            "c": 0
+          },
+          {
+            "r": 0,
+            "c": 1
+          },
+          {
+            "r": 0,
+            "c": 0
           }
         ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 1,
-            "side": "right",
-            "role": "input"
-          },
-          {
-            "r": 1,
-            "c": 2,
-            "side": "top",
-            "role": "input"
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "side": "top",
-            "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 1,
-            "side": "top",
-            "role": "output"
-          }
-        ]
+        "funnels": []
       },
       {
-        "id": "f6hiyqc7",
+        "id": "flup4j1n",
         "anchor": {
           "row": 1,
-          "col": 1
+          "col": 3
         },
         "cells": [
           {
             "r": 0,
             "c": 0,
             "label": {
-              "color": "green",
-              "form": "square"
+              "form": "circle",
+              "color": "blue"
             }
           },
           {
             "r": 0,
             "c": 1,
             "label": {
-              "color": "red",
-              "form": "triangle"
+              "form": "triangle",
+              "color": "blue"
             }
           }
         ],
@@ -409,33 +263,21 @@
           {
             "r": 0,
             "c": 0,
-            "side": "bottom",
-            "role": "input"
-          },
-          {
-            "r": 0,
-            "c": 0,
             "side": "top",
-            "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 1,
-            "side": "right",
-            "role": "output"
+            "role": "input"
           },
           {
             "r": 0,
             "c": 1,
             "side": "bottom",
-            "role": "input"
+            "role": "output"
           }
         ]
       },
       {
-        "id": "fukudi9c",
+        "id": "fr77py9f",
         "anchor": {
-          "row": 1,
+          "row": 4,
           "col": 4
         },
         "cells": [
@@ -443,7 +285,7 @@
             "r": 0,
             "c": 0,
             "label": {
-              "color": "green"
+              "form": "square"
             }
           }
         ],
@@ -451,7 +293,37 @@
           {
             "r": 0,
             "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
             "side": "left",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "f4usl4wm",
+        "anchor": {
+          "row": 4,
+          "col": 3
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "color": "red"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "right",
             "role": "input"
           },
           {
@@ -461,51 +333,9 @@
             "role": "output"
           }
         ]
-      },
-      {
-        "id": "frh2r2z1",
-        "anchor": {
-          "row": 4,
-          "col": 1
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0,
-            "label": {
-              "color": "green",
-              "form": "square"
-            }
-          },
-          {
-            "r": 0,
-            "c": 1
-          },
-          {
-            "r": 0,
-            "c": 2,
-            "label": {
-              "color": "blue",
-              "form": "circle"
-            }
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
-            "c": 2,
-            "side": "top",
-            "role": "input"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "top",
-            "role": "output"
-          }
-        ]
       }
     ]
   },
-  "likes": 0
+  "likes": 0,
+  "acidPits": []
 }

@@ -2616,6 +2616,15 @@ export default class PlayerScene extends Phaser.Scene {
     if (this.blueprintFactories.size > 0) return true;
     if ((this.sourceLevel.lockedFactories || []).length > 0) return true;
     if (this.startingState && this.startingState.placed.length > 0) return true;
+    // Intro/educational levels can be intentionally factory-less (e.g. level
+    // 1 just demonstrates the input→output flow). If no factories are declared
+    // anywhere, allow play so the user can run the sim and watch the funnels.
+    const lvl = this.sourceLevel;
+    const noFactoriesDeclared =
+      (lvl.initialFactories || []).length === 0 &&
+      (lvl.lockedFactories  || []).length === 0 &&
+      (lvl.factories        || []).length === 0;
+    if (noFactoriesDeclared) return true;
     return false;
   }
 

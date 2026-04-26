@@ -1,112 +1,83 @@
 {
   "id": "level-19",
-  "name": "4 squares",
+  "name": "Maze",
   "number": 0,
   "board": {
     "cols": 6,
     "rows": 6
   },
-  "factories": [],
-  "initialFactories": [
+  "factories": [
     {
-      "id": "fgfhvum3",
-      "slot": {
-        "row": 2,
-        "col": 0
+      "id": "fwokd7pg",
+      "anchor": {
+        "row": 1,
+        "col": 1
       },
       "cells": [
         {
           "r": 0,
-          "c": 0,
-          "label": {
-            "color": "green",
-            "form": "square"
-          }
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "label": {
-            "form": "circle",
-            "color": "green"
-          }
-        },
-        {
-          "r": 1,
-          "c": 1,
-          "label": {
-            "form": "triangle",
-            "color": "blue"
-          }
+          "c": 0
         },
         {
           "r": 0,
-          "c": 1,
-          "label": {
-            "color": "red",
-            "form": "triangle"
-          }
+          "c": 1
+        },
+        {
+          "r": 1,
+          "c": 0
         }
       ],
-      "funnels": [
-        {
-          "r": 1,
-          "c": 0,
-          "side": "left",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "side": "top",
-          "role": "output"
-        },
-        {
-          "r": 1,
-          "c": 1,
-          "side": "bottom",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "output"
-        }
-      ],
-      "rotation": 2
+      "funnels": []
     },
     {
-      "id": "fme2dibg",
-      "slot": {
-        "row": 0,
-        "col": 0
+      "id": "f0e4poej",
+      "anchor": {
+        "row": 2,
+        "col": 3
       },
       "cells": [
         {
           "r": 0,
-          "c": 0,
-          "label": {
-            "color": "blue",
-            "form": "circle"
-          }
+          "c": 1
         },
         {
           "r": 1,
-          "c": 0,
-          "label": {
-            "color": "blue",
-            "form": "triangle"
-          }
+          "c": 1
+        },
+        {
+          "r": 2,
+          "c": 1
         },
         {
           "r": 1,
-          "c": 1,
-          "label": {
-            "form": "square",
-            "color": "green"
-          }
-        },
+          "c": 0
+        }
+      ],
+      "funnels": []
+    },
+    {
+      "id": "fu001q8a",
+      "anchor": {
+        "row": 4,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        }
+      ],
+      "funnels": []
+    }
+  ],
+  "initialFactories": [
+    {
+      "id": "fh5uiiyt",
+      "slot": {
+        "row": 1,
+        "col": 0
+      },
+      "cells": [
         {
           "r": 0,
           "c": 1,
@@ -114,9 +85,31 @@
             "form": "square",
             "color": "red"
           }
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "label": {
+            "form": "circle",
+            "color": "blue"
+          }
+        },
+        {
+          "r": 1,
+          "c": 0,
+          "label": {
+            "form": "triangle",
+            "color": "green"
+          }
         }
       ],
       "funnels": [
+        {
+          "r": 1,
+          "c": 0,
+          "side": "left",
+          "role": "output"
+        },
         {
           "r": 0,
           "c": 0,
@@ -127,8 +120,44 @@
           "r": 0,
           "c": 1,
           "side": "right",
-          "role": "output"
+          "role": "input"
+        }
+      ],
+      "rotation": 3
+    },
+    {
+      "id": "fj7mxyio",
+      "slot": {
+        "row": 1,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 1,
+          "label": {
+            "form": "triangle",
+            "color": "green"
+          }
         },
+        {
+          "r": 1,
+          "c": 1,
+          "label": {
+            "form": "square",
+            "color": "red"
+          }
+        },
+        {
+          "r": 1,
+          "c": 0,
+          "label": {
+            "form": "triangle",
+            "color": "green"
+          }
+        }
+      ],
+      "funnels": [
         {
           "r": 1,
           "c": 1,
@@ -139,155 +168,122 @@
           "r": 1,
           "c": 0,
           "side": "left",
-          "role": "output"
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 1,
+          "side": "right",
+          "role": "input"
         }
       ],
-      "rotation": 0
+      "rotation": 3
     },
     {
-      "id": "f0v7s12s",
+      "id": "f833wv2d",
       "slot": {
-        "row": 0,
-        "col": 2
+        "row": 1,
+        "col": 3
       },
       "cells": [
         {
           "r": 0,
           "c": 0,
           "label": {
-            "color": "green",
-            "form": "circle"
-          }
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "label": {
-            "color": "green",
-            "form": "square"
-          }
-        },
-        {
-          "r": 1,
-          "c": 1,
-          "label": {
-            "color": "red",
-            "form": "circle"
+            "form": "square",
+            "color": "red"
           }
         },
         {
           "r": 0,
           "c": 1,
           "label": {
-            "color": "blue",
-            "form": "triangle"
-          }
-        }
-      ],
-      "funnels": [
-        {
-          "r": 1,
-          "c": 0,
-          "side": "left",
-          "role": "input"
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "side": "top",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "side": "right",
-          "role": "output"
-        },
-        {
-          "r": 1,
-          "c": 1,
-          "side": "bottom",
-          "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "output"
-        }
-      ],
-      "rotation": 2
-    },
-    {
-      "id": "fuhtmmb5",
-      "slot": {
-        "row": 2,
-        "col": 2
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0,
-          "label": {
-            "color": "blue",
-            "form": "triangle"
-          }
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "label": {
-            "color": "green",
-            "form": "square"
-          }
-        },
-        {
-          "r": 1,
-          "c": 1,
-          "label": {
-            "color": "green",
-            "form": "triangle"
-          }
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "label": {
-            "color": "green",
-            "form": "square"
+            "form": "circle",
+            "color": "blue"
           }
         }
       ],
       "funnels": [
         {
           "r": 0,
-          "c": 1,
+          "c": 0,
           "side": "top",
           "role": "input"
         },
         {
           "r": 0,
-          "c": 0,
-          "side": "left",
-          "role": "input"
-        },
-        {
-          "r": 1,
-          "c": 0,
-          "side": "bottom",
-          "role": "output"
-        },
-        {
-          "r": 1,
           "c": 1,
-          "side": "right",
+          "side": "bottom",
           "role": "output"
         }
       ],
       "rotation": 1
     }
   ],
-  "lockedFactories": [],
+  "lockedFactories": [
+    {
+      "id": "fwokd7pg",
+      "anchor": {
+        "row": 1,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        },
+        {
+          "r": 0,
+          "c": 1
+        },
+        {
+          "r": 1,
+          "c": 0
+        }
+      ],
+      "funnels": []
+    },
+    {
+      "id": "f0e4poej",
+      "anchor": {
+        "row": 2,
+        "col": 3
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 1
+        },
+        {
+          "r": 1,
+          "c": 1
+        },
+        {
+          "r": 2,
+          "c": 1
+        },
+        {
+          "r": 1,
+          "c": 0
+        }
+      ],
+      "funnels": []
+    },
+    {
+      "id": "fu001q8a",
+      "anchor": {
+        "row": 4,
+        "col": 1
+      },
+      "cells": [
+        {
+          "r": 0,
+          "c": 0
+        }
+      ],
+      "funnels": []
+    }
+  ],
   "border": {
     "funnels": [
       {
@@ -303,28 +299,16 @@
         "role": "output"
       },
       {
-        "r": 2,
-        "c": 0,
-        "side": "right",
-        "role": "output"
-      },
-      {
-        "r": 0,
-        "c": 2,
-        "side": "bottom",
-        "role": "output"
-      },
-      {
-        "r": 4,
-        "c": 0,
-        "side": "right",
-        "role": "input"
-      },
-      {
         "r": 1,
         "c": 5,
         "side": "left",
-        "role": "output"
+        "role": "input"
+      },
+      {
+        "r": 3,
+        "c": 0,
+        "side": "right",
+        "role": "input"
       }
     ]
   },
@@ -339,11 +323,20 @@
       }
     },
     {
-      "r": 4,
+      "r": 1,
+      "c": 5,
+      "side": "left",
+      "type": {
+        "form": "square",
+        "color": "red"
+      }
+    },
+    {
+      "r": 3,
       "c": 0,
       "side": "right",
       "type": {
-        "form": "square",
+        "form": "triangle",
         "color": "green"
       }
     }
@@ -354,45 +347,18 @@
       "c": 3,
       "side": "top",
       "type": {
-        "form": "square",
-        "color": "green"
-      }
-    },
-    {
-      "r": 1,
-      "c": 5,
-      "side": "left",
-      "type": {
-        "form": "square",
-        "color": "red"
-      }
-    },
-    {
-      "r": 0,
-      "c": 2,
-      "side": "bottom",
-      "type": {
-        "form": "triangle",
-        "color": "red"
-      }
-    },
-    {
-      "r": 2,
-      "c": 0,
-      "side": "right",
-      "type": {
         "form": "circle",
-        "color": "green"
+        "color": "blue"
       }
     }
   ],
-  "instructionalText": null,
+  "instructionalText": "Several locked blocks here",
   "boss": null,
-  "author": null,
+  "author": "urbandrei",
   "solution": {
     "factories": [
       {
-        "id": "fgfhvum3",
+        "id": "fwokd7pg",
         "anchor": {
           "row": 1,
           "col": 1
@@ -400,95 +366,66 @@
         "cells": [
           {
             "r": 0,
-            "c": 0,
-            "label": {
-              "color": "green",
-              "form": "square"
-            }
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "label": {
-              "form": "circle",
-              "color": "green"
-            }
-          },
-          {
-            "r": 1,
-            "c": 1,
-            "label": {
-              "form": "triangle",
-              "color": "blue"
-            }
+            "c": 0
           },
           {
             "r": 0,
-            "c": 1,
-            "label": {
-              "color": "red",
-              "form": "triangle"
-            }
+            "c": 1
+          },
+          {
+            "r": 1,
+            "c": 0
           }
         ],
-        "funnels": [
-          {
-            "r": 1,
-            "c": 0,
-            "side": "left",
-            "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 1,
-            "side": "top",
-            "role": "output"
-          },
-          {
-            "r": 1,
-            "c": 1,
-            "side": "bottom",
-            "role": "input"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "left",
-            "role": "output"
-          }
-        ]
+        "funnels": []
       },
       {
-        "id": "fme2dibg",
+        "id": "f0e4poej",
         "anchor": {
-          "row": 1,
+          "row": 2,
           "col": 3
         },
         "cells": [
           {
             "r": 0,
-            "c": 0,
-            "label": {
-              "color": "blue",
-              "form": "circle"
-            }
+            "c": 1
           },
           {
             "r": 1,
-            "c": 0,
-            "label": {
-              "color": "blue",
-              "form": "triangle"
-            }
+            "c": 1
+          },
+          {
+            "r": 2,
+            "c": 1
           },
           {
             "r": 1,
-            "c": 1,
-            "label": {
-              "form": "square",
-              "color": "green"
-            }
-          },
+            "c": 0
+          }
+        ],
+        "funnels": []
+      },
+      {
+        "id": "fu001q8a",
+        "anchor": {
+          "row": 4,
+          "col": 1
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0
+          }
+        ],
+        "funnels": []
+      },
+      {
+        "id": "fh5uiiyt",
+        "anchor": {
+          "row": 1,
+          "col": 3
+        },
+        "cells": [
           {
             "r": 0,
             "c": 1,
@@ -496,9 +433,31 @@
               "form": "square",
               "color": "red"
             }
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "form": "circle",
+              "color": "blue"
+            }
+          },
+          {
+            "r": 1,
+            "c": 0,
+            "label": {
+              "form": "triangle",
+              "color": "green"
+            }
           }
         ],
         "funnels": [
+          {
+            "r": 1,
+            "c": 0,
+            "side": "left",
+            "role": "output"
+          },
           {
             "r": 0,
             "c": 0,
@@ -509,63 +468,49 @@
             "r": 0,
             "c": 1,
             "side": "right",
-            "role": "output"
-          },
-          {
-            "r": 1,
-            "c": 1,
-            "side": "bottom",
-            "role": "output"
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "side": "left",
-            "role": "output"
+            "role": "input"
           }
         ]
       },
       {
-        "id": "f0v7s12s",
+        "id": "fj7mxyio",
         "anchor": {
-          "row": 3,
+          "row": 2,
           "col": 1
         },
         "cells": [
           {
             "r": 0,
-            "c": 0,
+            "c": 1,
             "label": {
-              "color": "green",
-              "form": "circle"
-            }
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "label": {
-              "color": "green",
-              "form": "square"
+              "form": "triangle",
+              "color": "green"
             }
           },
           {
             "r": 1,
             "c": 1,
             "label": {
-              "color": "red",
-              "form": "circle"
+              "form": "square",
+              "color": "red"
             }
           },
           {
-            "r": 0,
-            "c": 1,
+            "r": 1,
+            "c": 0,
             "label": {
-              "color": "blue",
-              "form": "triangle"
+              "form": "triangle",
+              "color": "green"
             }
           }
         ],
         "funnels": [
+          {
+            "r": 1,
+            "c": 1,
+            "side": "bottom",
+            "role": "output"
+          },
           {
             "r": 1,
             "c": 0,
@@ -575,97 +520,52 @@
           {
             "r": 0,
             "c": 1,
-            "side": "top",
-            "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 1,
             "side": "right",
-            "role": "output"
-          },
-          {
-            "r": 1,
-            "c": 1,
-            "side": "bottom",
-            "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 0,
-            "side": "left",
-            "role": "output"
+            "role": "input"
           }
         ]
       },
       {
-        "id": "fuhtmmb5",
+        "id": "f833wv2d",
         "anchor": {
-          "row": 3,
-          "col": 3
+          "row": 4,
+          "col": 2
         },
         "cells": [
           {
             "r": 0,
             "c": 0,
             "label": {
-              "color": "blue",
-              "form": "triangle"
-            }
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "label": {
-              "color": "green",
-              "form": "square"
-            }
-          },
-          {
-            "r": 1,
-            "c": 1,
-            "label": {
-              "color": "green",
-              "form": "triangle"
+              "form": "square",
+              "color": "red"
             }
           },
           {
             "r": 0,
             "c": 1,
             "label": {
-              "color": "green",
-              "form": "square"
+              "form": "circle",
+              "color": "blue"
             }
           }
         ],
         "funnels": [
           {
             "r": 0,
-            "c": 1,
+            "c": 0,
             "side": "top",
             "role": "input"
           },
           {
             "r": 0,
-            "c": 0,
-            "side": "left",
-            "role": "input"
-          },
-          {
-            "r": 1,
-            "c": 0,
-            "side": "bottom",
-            "role": "output"
-          },
-          {
-            "r": 1,
             "c": 1,
-            "side": "right",
+            "side": "bottom",
             "role": "output"
           }
         ]
       }
     ]
   },
-  "likes": 0
+  "likes": 0,
+  "acidPits": []
 }

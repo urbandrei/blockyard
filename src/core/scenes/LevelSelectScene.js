@@ -4,8 +4,8 @@ import { loadProgress } from '../progress.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
 import { enableMenuBg } from '../ui/MenuBackground.js';
 import { compute920Box } from '../ui/ContentBox.js';
-import { BOARD_GAP, BLUEPRINT_BG, BLUEPRINT_STROKE, BLUEPRINT_DOT } from '../constants.js';
-import { drawHome, drawGear } from '../ui/Icons.js';
+import { BOARD_GAP, BLUEPRINT_BG, BLUEPRINT_STROKE, BLUEPRINT_DOT, BEAT_MS } from '../constants.js';
+import { drawHome, drawGear, drawPlayTriangle } from '../ui/Icons.js';
 import { SettingsModal } from '../ui/SettingsModal.js';
 import { TitleBar } from '../ui/TitleBar.js';
 import { wireUiClicks, wireEmptyClicks } from '../audio/sfx.js';
@@ -24,7 +24,7 @@ const BLUEPRINT_PAD       = 10;
 const BLUEPRINT_RADIUS    = 12;
 const ISLAND_TO_GRID_GAP  = 14;
 
-const HEADER_H          = 72;          // matches TitleBar TITLE_H
+const HEADER_H          = 60;
 const HEADER_CORNER_R   = 14;
 const HEADER_FRAME_FILL   = 0xffffff;
 const HEADER_FRAME_STROKE = 0x1a2332;
@@ -38,11 +38,11 @@ const SECTION_TITLES = ['BLOCK YARD', 'PAINT SPILL', 'ACID SWAMP', 'LASER FIELD'
 // Unified inter-block margin. Used between every stacked element — header
 // to row, row to boss, boss to next section, and between level tiles
 // within a row — so the layout reads as an evenly spaced column.
-const BLOCK_GAP         = 22;
+const BLOCK_GAP         = 12;
 const BUTTON_CORNER_R   = 12;
 const BOSS_H            = 96;
-const TOP_MARGIN        = 16;
-const BOTTOM_MARGIN     = 16;
+const TOP_MARGIN        = 6;
+const BOTTOM_MARGIN     = 12;
 
 const COLOR_GREEN        = 0x4caf50;
 const COLOR_GREEN_STROKE = 0x2e7a36;
@@ -51,15 +51,21 @@ const COLOR_BLUE_STROKE  = 0x1f3a74;
 const COLOR_GREY         = 0x9aa6b2;
 const COLOR_GREY_STROKE  = 0x5a6674;
 
+// Number of regular levels gated behind the Wild West unlock. Sections 1..4
+// (40 levels) make up the main campaign; everything from level 41 onward is
+// reachable only through the Wild West sub-page.
+const MAIN_SECTION_COUNT = 4;
+
 export default class LevelSelectScene extends Phaser.Scene {
   constructor() { super({ key: 'LevelSelect' }); }
 
-  async create() {
+  async create(data) {
     wireUiClicks(this);
     wireEmptyClicks(this);
     enableMenuBg();
     fadeIn(this);
 
+    this._mode = (data && data.mode === 'wildwest') ? 'wildwest' : 'main';
     const progress = await loadProgress();
     this._beaten = new Set(progress.beaten);
     this._nextLevelId = this._findNextLevelId();
@@ -149,11 +155,27 @@ export default class LevelSelectScene extends Phaser.Scene {
     // ---- Top-justified stack: themed header per section, then tiles ----
     let y = boxY + TOP_MARGIN;
 
-    for (let si = 0; si < SECTIONS.length; si++) {
-      const section = SECTIONS[si];
-      const title = SECTION_TITLES[si] || section.name.toUpperCase();
-      this._drawHeaderBox(centerX, y + HEADER_H / 2, bpW, HEADER_H, title);
+    // Mode controls which slice of SECTIONS we render and whether each
+    // section gets its own header. Main mode shows sections 1..4 with their
+    // themed headers and a WILD WEST gate at the bottom; wildwest mode shows
+    // sections 5+ under one shared "WILD WEST" header (no per-section titles).
+    const isWildWest = this._mode === 'wildwest';
+    const sectionsToRender = isWildWest
+      ? SECTIONS.slice(MAIN_SECTION_COUNT)
+      : SECTIONS.slice(0, MAIN_SECTION_COUNT);
+
+    if (isWildWest) {
+      this._drawHeaderBox(centerX, y + HEADER_H / 2, bpW, HEADER_H, 'WILD WEST');
       y += HEADER_H + BLOCK_GAP;
+    }
+
+    for (let si = 0; si < sectionsToRender.length; si++) {
+      const section = sectionsToRender[si];
+      if (!isWildWest) {
+        const title = SECTION_TITLES[si] || section.name.toUpperCase();
+        this._drawHeaderBox(centerX, y + HEADER_H / 2, bpW, HEADER_H, title);
+        y += HEADER_H + BLOCK_GAP;
+      }
 
       const startX = centerX - bpW / 2;
       // Lay out the regular levels in a 5-column grid that wraps over as
@@ -174,7 +196,20 @@ export default class LevelSelectScene extends Phaser.Scene {
         this._drawBossTile(centerX, y + BOSS_H / 2, bpW, BOSS_H, section);
         y += BOSS_H;
       }
-      if (si < SECTIONS.length - 1) y += BLOCK_GAP;
+      if (si < sectionsToRender.length - 1) y += BLOCK_GAP;
+    }
+
+    if (!isWildWest && SECTIONS.length > MAIN_SECTION_COUNT) {
+      const unlocked = this._isWildWestUnlocked();
+      y += BLOCK_GAP;
+      this._drawWildWestButton(centerX, y + HEADER_H / 2, bpW, HEADER_H, unlocked);
+      y += HEADER_H;
+    }
+
+    if (isWildWest) {
+      y += BLOCK_GAP;
+      this._drawBackToMainButton(centerX, y + HEADER_H / 2, Math.floor(bpW / 2), HEADER_H);
+      y += HEADER_H;
     }
 
     // ---- Bottom-justified icon island ----
@@ -297,6 +332,123 @@ export default class LevelSelectScene extends Phaser.Scene {
       hit.on('pointerup', () => fadeTo(this, 'Player', { levelId: boss.id }));
       this._hits.push(hit);
     }
+  }
+
+  // Wild West unlocks once every level (and any authored boss) inside the
+  // first MAIN_SECTION_COUNT sections is in the beaten set.
+  _isWildWestUnlocked() {
+    const main = SECTIONS.slice(0, MAIN_SECTION_COUNT);
+    for (const s of main) {
+      for (const l of s.levels) if (!this._beaten.has(l.id)) return false;
+      if (s.boss && !this._beaten.has(s.boss.id)) return false;
+    }
+    return true;
+  }
+
+  _drawWildWestButton(cx, cy, w, h, unlocked) {
+    // Visually mirrors the themed section headers (white panel, dark border,
+    // dark label) so it reads as the next section in the column. Locked
+    // state swaps to the standard grey/grey-stroke combo. When unlocked the
+    // panel takes on a warm cream tint and the whole tile breathes on the
+    // 2-beat grid so the player's eye catches the new gate.
+    const UNLOCKED_FILL   = 0xffe9b8;       // warm cream — distinct from white headers
+    const UNLOCKED_STROKE = 0x8a5a1a;       // amber border to match
+    const fill   = unlocked ? UNLOCKED_FILL   : COLOR_GREY;
+    const stroke = unlocked ? UNLOCKED_STROKE : COLOR_GREY_STROKE;
+    const labelColor = unlocked ? HEADER_TEXT_COLOR : '#ffffff';
+    const arrowColor = unlocked ? 0x1a2332 : 0xffffff;
+
+    // Container so a single scale tween pulses the panel + label + arrow as
+    // one unit, scaling around the bar's center.
+    const tile = this.add.container(cx, cy).setDepth(10);
+    const gfx = this.add.graphics();
+    gfx.fillStyle(fill, 1);
+    gfx.lineStyle(2, stroke, 1);
+    gfx.fillRoundedRect(-w / 2, -h / 2, w, h, HEADER_CORNER_R);
+    gfx.strokeRoundedRect(-w / 2, -h / 2, w, h, HEADER_CORNER_R);
+    tile.add(gfx);
+
+    const text = this.add.text(0, 0, 'WILD WEST', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '24px', fontStyle: 'bold',
+      color: labelColor, align: 'center',
+    }).setOrigin(0.5);
+    tile.add(text);
+
+    // Right-pointing arrow tucked against the right edge.
+    const arrowSize = Math.floor(h * 0.55);
+    const arrowCX = w / 2 - arrowSize * 0.6 - 8;
+    const arrow = this.add.graphics();
+    drawPlayTriangle(arrow, arrowCX, 0, arrowSize, arrowColor);
+    tile.add(arrow);
+
+    this._gfx.push(tile);
+
+    if (unlocked) {
+      this.tweens.add({
+        targets: tile,
+        scale: { from: 1.0, to: 1.035 },
+        duration: BEAT_MS, yoyo: true, repeat: -1, ease: 'Sine.InOut',
+      });
+      const hit = this.add.rectangle(cx, cy, w, h, 0xffffff, 0)
+        .setInteractive({ useHandCursor: true }).setDepth(12);
+      hit.on('pointerup', () => fadeTo(this, 'LevelSelect', { mode: 'wildwest' }));
+      this._hits.push(hit);
+    }
+  }
+
+  // Mirror of the WILD WEST gate: a section-header-styled bar that takes the
+  // user back to the main level select. Always interactive on the wildwest
+  // page since reaching it implies the main campaign is already cleared.
+  // Shares the cream/amber palette + 2-beat breath pulse with the unlocked
+  // WILD WEST bar so both gates read as the same kind of affordance.
+  _drawBackToMainButton(cx, cy, w, h) {
+    const UNLOCKED_FILL   = 0xffe9b8;
+    const UNLOCKED_STROKE = 0x8a5a1a;
+    const arrowColor = 0x1a2332;
+
+    const tile = this.add.container(cx, cy).setDepth(10);
+    const gfx = this.add.graphics();
+    gfx.fillStyle(UNLOCKED_FILL, 1);
+    gfx.lineStyle(2, UNLOCKED_STROKE, 1);
+    gfx.fillRoundedRect(-w / 2, -h / 2, w, h, HEADER_CORNER_R);
+    gfx.strokeRoundedRect(-w / 2, -h / 2, w, h, HEADER_CORNER_R);
+    tile.add(gfx);
+
+    const text = this.add.text(0, 0, 'GO BACK', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '24px', fontStyle: 'bold',
+      color: HEADER_TEXT_COLOR, align: 'center',
+    }).setOrigin(0.5);
+    tile.add(text);
+
+    // Left-pointing arrow tucked against the left edge — the visual mirror
+    // of the WILD WEST bar's right-arrow.
+    const arrowSize = Math.floor(h * 0.55);
+    const arrowCX = -w / 2 + arrowSize * 0.6 + 8;
+    const arrow = this.add.graphics();
+    const aH = arrowSize * 0.82;
+    const halfH = aH / 2;
+    const halfW = halfH * 0.78;
+    arrow.fillStyle(arrowColor, 1);
+    arrow.beginPath();
+    arrow.moveTo(arrowCX + halfW, -halfH);
+    arrow.lineTo(arrowCX + halfW,  halfH);
+    arrow.lineTo(arrowCX - halfW, 0);
+    arrow.closePath();
+    arrow.fillPath();
+    tile.add(arrow);
+
+    this._gfx.push(tile);
+
+    this.tweens.add({
+      targets: tile,
+      scale: { from: 1.0, to: 1.035 },
+      duration: BEAT_MS, yoyo: true, repeat: -1, ease: 'Sine.InOut',
+    });
+
+    const hit = this.add.rectangle(cx, cy, w, h, 0xffffff, 0)
+      .setInteractive({ useHandCursor: true }).setDepth(12);
+    hit.on('pointerup', () => fadeTo(this, 'LevelSelect', { mode: 'main' }));
+    this._hits.push(hit);
   }
 
   _drawIconIsland(originX, originY, islandW, islandH) {

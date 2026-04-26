@@ -1,6 +1,6 @@
 {
   "id": "level-3",
-  "name": "Sharp turns",
+  "name": "Funnels",
   "number": 0,
   "board": {
     "cols": 4,
@@ -9,7 +9,7 @@
   "factories": [],
   "initialFactories": [
     {
-      "id": "fmzmihyy",
+      "id": "f5j9e679",
       "slot": {
         "row": 1,
         "col": 0
@@ -34,7 +34,7 @@
           "role": "output"
         }
       ],
-      "rotation": 2
+      "rotation": 0
     }
   ],
   "lockedFactories": [],
@@ -76,13 +76,13 @@
       }
     }
   ],
-  "instructionalText": "Click on a factory to rotate it.",
+  "instructionalText": "Redirect the shapes using the funnels",
   "boss": null,
-  "author": "p4songer",
+  "author": "urbandrei",
   "solution": {
     "factories": [
       {
-        "id": "fmzmihyy",
+        "id": "f5j9e679",
         "anchor": {
           "row": 1,
           "col": 2
@@ -110,5 +110,6 @@
       }
     ]
   },
-  "likes": 0
+  "likes": 0,
+  "acidPits": []
 }

@@ -1,42 +1,46 @@
 {
   "id": "level-9",
-  "name": "Locked blocks",
+  "name": "Reshape",
   "number": 0,
   "board": {
-    "cols": 6,
-    "rows": 6
+    "cols": 4,
+    "rows": 4
   },
-  "factories": [
+  "factories": [],
+  "initialFactories": [
     {
-      "id": "f6lctnic",
-      "anchor": {
-        "row": 2,
-        "col": 2
+      "id": "fk90czs3",
+      "slot": {
+        "row": 1,
+        "col": 1
       },
       "cells": [
         {
-          "r": 1,
-          "c": 1
-        },
-        {
-          "r": 1,
-          "c": 0
-        },
-        {
           "r": 0,
-          "c": 1
-        },
-        {
-          "r": 0,
-          "c": 0
+          "c": 0,
+          "label": {
+            "form": "square"
+          }
         }
       ],
-      "funnels": []
-    }
-  ],
-  "initialFactories": [
+      "funnels": [
+        {
+          "r": 0,
+          "c": 0,
+          "side": "top",
+          "role": "input"
+        },
+        {
+          "r": 0,
+          "c": 0,
+          "side": "bottom",
+          "role": "output"
+        }
+      ],
+      "rotation": 0
+    },
     {
-      "id": "f7d8ycil",
+      "id": "fq8hkads",
       "slot": {
         "row": 1,
         "col": 0
@@ -44,11 +48,10 @@
       "cells": [
         {
           "r": 0,
-          "c": 0
-        },
-        {
-          "r": 0,
-          "c": 1
+          "c": 0,
+          "label": {
+            "form": "triangle"
+          }
         }
       ],
       "funnels": [
@@ -60,85 +63,38 @@
         },
         {
           "r": 0,
-          "c": 1,
-          "side": "bottom",
-          "role": "output"
-        }
-      ],
-      "rotation": 1
-    },
-    {
-      "id": "fxp9pi10",
-      "slot": {
-        "row": 1,
-        "col": 2
-      },
-      "cells": [
-        {
-          "r": 0,
-          "c": 0
-        },
-        {
-          "r": 0,
-          "c": 1
-        }
-      ],
-      "funnels": [
-        {
-          "r": 0,
           "c": 0,
           "side": "bottom",
           "role": "output"
-        },
-        {
-          "r": 0,
-          "c": 1,
-          "side": "top",
-          "role": "input"
         }
       ],
-      "rotation": 1
+      "rotation": 0
     }
   ],
-  "lockedFactories": [
-    {
-      "id": "f6lctnic",
-      "anchor": {
-        "row": 2,
-        "col": 2
-      },
-      "cells": [
-        {
-          "r": 1,
-          "c": 1
-        },
-        {
-          "r": 1,
-          "c": 0
-        },
-        {
-          "r": 0,
-          "c": 1
-        },
-        {
-          "r": 0,
-          "c": 0
-        }
-      ],
-      "funnels": []
-    }
-  ],
+  "lockedFactories": [],
   "border": {
     "funnels": [
       {
         "r": 0,
-        "c": 3,
+        "c": 2,
         "side": "bottom",
         "role": "input"
       },
       {
-        "r": 5,
-        "c": 3,
+        "r": 3,
+        "c": 2,
+        "side": "top",
+        "role": "output"
+      },
+      {
+        "r": 0,
+        "c": 1,
+        "side": "bottom",
+        "role": "input"
+      },
+      {
+        "r": 3,
+        "c": 1,
         "side": "top",
         "role": "output"
       }
@@ -147,7 +103,16 @@
   "inputs": [
     {
       "r": 0,
-      "c": 3,
+      "c": 2,
+      "side": "bottom",
+      "type": {
+        "form": "circle",
+        "color": "blue"
+      }
+    },
+    {
+      "r": 0,
+      "c": 1,
       "side": "bottom",
       "type": {
         "form": "circle",
@@ -157,59 +122,72 @@
   ],
   "outputs": [
     {
-      "r": 5,
-      "c": 3,
+      "r": 3,
+      "c": 2,
       "side": "top",
       "type": {
-        "form": "circle",
+        "form": "triangle",
+        "color": "blue"
+      }
+    },
+    {
+      "r": 3,
+      "c": 1,
+      "side": "top",
+      "type": {
+        "form": "square",
         "color": "blue"
       }
     }
   ],
-  "instructionalText": "Greyed out blocks can't be moved",
+  "instructionalText": "Labels on factories can change shapes",
   "boss": null,
+  "author": "urbandrei",
   "solution": {
     "factories": [
       {
-        "id": "f6lctnic",
+        "id": "fk90czs3",
+        "anchor": {
+          "row": 2,
+          "col": 1
+        },
+        "cells": [
+          {
+            "r": 0,
+            "c": 0,
+            "label": {
+              "form": "square"
+            }
+          }
+        ],
+        "funnels": [
+          {
+            "r": 0,
+            "c": 0,
+            "side": "top",
+            "role": "input"
+          },
+          {
+            "r": 0,
+            "c": 0,
+            "side": "bottom",
+            "role": "output"
+          }
+        ]
+      },
+      {
+        "id": "fq8hkads",
         "anchor": {
           "row": 2,
           "col": 2
         },
         "cells": [
           {
-            "r": 1,
-            "c": 1
-          },
-          {
-            "r": 1,
-            "c": 0
-          },
-          {
             "r": 0,
-            "c": 1
-          },
-          {
-            "r": 0,
-            "c": 0
-          }
-        ],
-        "funnels": []
-      },
-      {
-        "id": "f7d8ycil",
-        "anchor": {
-          "row": 1,
-          "col": 3
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0
-          },
-          {
-            "r": 0,
-            "c": 1
+            "c": 0,
+            "label": {
+              "form": "triangle"
+            }
           }
         ],
         "funnels": [
@@ -221,44 +199,14 @@
           },
           {
             "r": 0,
-            "c": 1,
-            "side": "bottom",
-            "role": "output"
-          }
-        ]
-      },
-      {
-        "id": "fxp9pi10",
-        "anchor": {
-          "row": 4,
-          "col": 3
-        },
-        "cells": [
-          {
-            "r": 0,
-            "c": 0
-          },
-          {
-            "r": 0,
-            "c": 1
-          }
-        ],
-        "funnels": [
-          {
-            "r": 0,
             "c": 0,
             "side": "bottom",
             "role": "output"
-          },
-          {
-            "r": 0,
-            "c": 1,
-            "side": "top",
-            "role": "input"
           }
         ]
       }
     ]
   },
-  "likes": 0
+  "likes": 0,
+  "acidPits": []
 }
