@@ -31,12 +31,13 @@ const CELEBRATION_KEYS = ['layer_5', 'layer_6']; // celebratory cues, phase-lock
 const DEFAULT_VOL   = 0.5;
 const FADE_IN_MS    = 600;          // initial boot + focus regain
 const RESUME_MS     = 200;          // sim-resume ramp
-// Celebration-layer envelopes — slow + gentle by default so the layers
-// well up under the bed instead of slamming in. The shape is smoothstep
-// (see _celebrationVolumeUnmastered) so the volume sits nearly silent for
-// the first ~25% of the fade, builds through the middle, and tapers softly
-// into the target — symmetric on the way in and on the way out.
-const CELEB_FADE_IN_MS  = 4500;
+// Celebration-layer envelopes — smoothstep curve (see
+// _celebrationVolumeUnmastered) so the volume eases gently in/out without
+// slamming. Duration is tuned to land at full volume in "a couple seconds"
+// per the brief — long enough to read as a build-up, short enough that the
+// celebration actually sits at full for the bulk of the cutscene before
+// the dismiss begins the fade-out tail.
+const CELEB_FADE_IN_MS  = 2500;
 const CELEB_FADE_OUT_MS = 3500;
 // Every layer fade-in starts on a 4-beat bar boundary and ramps across
 // 3 beats — slow enough that the victory swell feels like a reveal
@@ -287,17 +288,26 @@ class MusicEngine {
   // Slowly + gently bring layer_5 + layer_6 up to DEFAULT_VOL. Both
   // tracks have been looping silently since boot, so they're already
   // phase-locked with layers 1..3 at fade-in time.
+  //
+  // Order matters: _beginCelebrationFade reads the current playing
+  // volume via _celebrationVolumeUnmastered, which falls back to
+  // (_celebrationActive ? DEFAULT_VOL : 0) when no fade is in progress.
+  // If we flipped the active flag first, the "current" would already
+  // read as DEFAULT_VOL and the fade builder's `current === target`
+  // check would short-circuit the fade — the layer would snap to full
+  // instead of easing in. Build the fade record FIRST, then update the
+  // flag so the fade record stays the source of truth while it runs.
   fadeInCelebrationLayers(durationMs = CELEB_FADE_IN_MS) {
     for (let i = 0; i < CELEBRATION_KEYS.length; i++) {
-      this._celebrationActive[i] = true;
       this._beginCelebrationFade(i, DEFAULT_VOL, durationMs);
+      this._celebrationActive[i] = true;
     }
   }
 
   fadeOutCelebrationLayers(durationMs = CELEB_FADE_OUT_MS) {
     for (let i = 0; i < CELEBRATION_KEYS.length; i++) {
-      this._celebrationActive[i] = false;
       this._beginCelebrationFade(i, 0, durationMs);
+      this._celebrationActive[i] = false;
     }
   }
 

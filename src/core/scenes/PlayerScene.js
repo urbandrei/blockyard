@@ -3289,10 +3289,12 @@ export default class PlayerScene extends Phaser.Scene {
     // Catalog-level routing detours:
     //  - End of section 4 (level 40) → CREDITS, every time it's beaten.
     //  - End of section 1/2/3 (levels 10/20/30) → unlock cinematic for
-    //    the next section (Paint Spill / Acid Swamp / Laser Field), but
-    //    only the first time it's unlocked. Subsequent runs through
-    //    those levels skip the cinematic and fall through to the
-    //    next-level fade.
+    //    the next section (Paint Spill / Acid Swamp / Laser Field).
+    //    Plays EVERY time the final round of a stage is cleared, not
+    //    just the first time, so the celebratory beat is reliable.
+    //    consumeSectionIntro is still called (best-effort) so the
+    //    Wild West first-entry detour at PlayerScene.create stays in
+    //    sync — it gates a different sectionId so it isn't impacted.
     if (!isCommunity && this.sourceLevel.id) {
       const num = (typeof this.sourceLevel.number === 'number') ? this.sourceLevel.number : null;
       if (num === 40) {
@@ -3302,22 +3304,15 @@ export default class PlayerScene extends Phaser.Scene {
       if (num === 10 || num === 20 || num === 30) {
         const newSectionIdx = num / 10; // 10→1 (paint), 20→2 (acid), 30→3 (laser)
         const sectionId = (SECTION_THEMES[newSectionIdx] || {}).id;
-        // consumeSectionIntro: returns true if already seen → falls
-        // through to the standard next-level path below; false if this
-        // is the first unlock → routes through the intro cinematic.
-        consumeSectionIntro(sectionId).then((alreadySeen) => {
-          if (alreadySeen || !next) {
-            // Already seen OR no next level for some reason — fall back
-            // to the normal advance path.
-            if (next) fadeTo(this, 'Player', { levelId: next.id });
-            else      fadeTo(this, isCommunity ? 'Community' : 'LevelSelect');
-            return;
-          }
+        // Mark as seen but don't gate on the result — the cutscene
+        // always plays after a stage's final round. If `next` is
+        // missing for any reason, fall back to the standard advance.
+        consumeSectionIntro(sectionId).catch(() => {});
+        if (next) {
           fadeTo(this, 'SectionIntro', { sectionIdx: newSectionIdx, nextLevelId: next.id });
-        }).catch(() => {
-          if (next) fadeTo(this, 'Player', { levelId: next.id });
-          else      fadeTo(this, isCommunity ? 'Community' : 'LevelSelect');
-        });
+        } else {
+          fadeTo(this, isCommunity ? 'Community' : 'LevelSelect');
+        }
         return;
       }
     }

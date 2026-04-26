@@ -1141,6 +1141,11 @@ export default class HomeScene extends Phaser.Scene {
     const subFontSize   = Math.max(12, Math.floor(pxCell * 0.36));
     const labelLeftX    = -panelW / 2 + pxCell * 0.55;
     const stackGap      = Math.floor(pxCell * 0.32);
+    // Width budget for the title — capped at 2/3 of the panel so a long
+    // level name never reaches the FEATURED! sticker on the upper-right.
+    // Measured from labelLeftX (the title's left edge) to (1/6 of panelW)
+    // in bodyWrap-local coords (= 2/3 of panelW from the LEFT edge).
+    const titleMaxW = panelW / 6 - labelLeftX;
 
     // Choose label color so it reads against the panel fill — dark text
     // on yellow, white text on green.
@@ -1153,10 +1158,12 @@ export default class HomeScene extends Phaser.Scene {
     // text block aligns with the geometric center of the body. Without
     // it, descender-less labels read as floating slightly above center.
     const verticalBias = Math.floor(pxCell * 0.10);
-    const nameLabel = this.add.text(labelLeftX, -stackGap + verticalBias, nameText, {
+    const nameLabel = this.add.text(labelLeftX, -stackGap + verticalBias, '', {
       fontFamily: 'system-ui, sans-serif', fontSize: `${titleFontSize}px`,
       fontStyle: 'bold', color: labelColor,
+      lineSpacing: 0,
     }).setOrigin(0, 0.5);
+    this._fitFeaturedTitle(nameLabel, nameText, titleMaxW, titleFontSize);
     bodyWrap.add(nameLabel);
     const authorLabel = this.add.text(labelLeftX, stackGap + verticalBias, authorText, {
       fontFamily: 'system-ui, sans-serif', fontSize: `${subFontSize}px`,
@@ -1279,6 +1286,7 @@ export default class HomeScene extends Phaser.Scene {
       stickerWrap, stickerGfx, stickerLabel,
       arrowLeft, arrowRight,
       panelW, panelH, pxCell,
+      titleMaxW, titleBaseFontSize: titleFontSize,
       pulseControls: { startPulse, stopPulse },
     };
 
@@ -1327,11 +1335,12 @@ export default class HomeScene extends Phaser.Scene {
     // Labels + interaction state. When there's no view to show, the
     // panel acts as a passive placeholder — no tap, no pulse.
     if (view) {
-      p.nameLabel.setText(view.name);
+      this._fitFeaturedTitle(p.nameLabel, view.name || '', p.titleMaxW, p.titleBaseFontSize);
       p.authorLabel.setText(`by ${view.author}`);
       try { p.hit.setInteractive({ useHandCursor: true }); } catch (e) {}
     } else {
-      p.nameLabel.setText(this._featuredLoaded ? 'No featured level yet' : 'Loading…');
+      const placeholder = this._featuredLoaded ? 'No featured level yet' : 'Loading…';
+      this._fitFeaturedTitle(p.nameLabel, placeholder, p.titleMaxW, p.titleBaseFontSize);
       p.authorLabel.setText(this._featuredLoaded ? 'check back tomorrow' : '');
       try { p.hit.disableInteractive(); } catch (e) {}
     }
@@ -1366,6 +1375,60 @@ export default class HomeScene extends Phaser.Scene {
     const shouldPulse = !completed && view && view.utcDate === utcToday();
     if (shouldPulse) p.pulseControls.startPulse();
     else p.pulseControls.stopPulse();
+  }
+
+  /** Fit `text` into the featured-panel title label without colliding with
+   *  the FEATURED! sticker on the upper-right. Three-phase strategy:
+   *
+   *    1. Single-line, scan font size from `baseFontSize` down to ~62% of
+   *       it in 2-px steps. Pick the largest size that fits in `maxW`.
+   *    2. If even the smallest size overflows, enable two-line word-wrap
+   *       at that size. Most long titles land here.
+   *    3. If the wrapped text still spills past two lines, binary-search
+   *       for the longest prefix that wraps to ≤2 lines once an ellipsis
+   *       is appended.
+   *
+   *  Mutates `label` in place — caller doesn't need to inspect the result.
+   *  Idempotent: each call resets font size + wrap so a SHORT name after a
+   *  LONG one snaps back to the base font instead of staying shrunken. */
+  _fitFeaturedTitle(label, text, maxW, baseFontSize) {
+    if (!label) return;
+    const safeText = text == null ? '' : String(text);
+    const minFontSize = Math.max(12, Math.floor(baseFontSize * 0.62));
+
+    // Phase 1: single-line at descending sizes. Disable wrap so width
+    // measurements reflect the rendered single-line text.
+    label.setStyle({ wordWrap: { width: 0, useAdvancedWrap: false } });
+    for (let size = baseFontSize; size >= minFontSize; size -= 2) {
+      label.setFontSize(size);
+      label.setText(safeText);
+      if (label.width <= maxW) return;
+    }
+
+    // Phase 2: at the smallest size, enable 2-line wrap.
+    label.setFontSize(minFontSize);
+    label.setStyle({ wordWrap: { width: maxW, useAdvancedWrap: true } });
+    label.setText(safeText);
+    const wrapped = (typeof label.getWrappedText === 'function')
+      ? label.getWrappedText(safeText)
+      : safeText.split('\n');
+    if (wrapped.length <= 2) return;
+
+    // Phase 3: ellipsis truncation. Binary search for the longest prefix
+    // that still wraps to ≤ 2 lines once we append the ellipsis.
+    const ELLIPSIS = '\u2026';
+    let lo = 0, hi = safeText.length;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      const candidate = safeText.slice(0, mid).replace(/\s+$/, '') + ELLIPSIS;
+      label.setText(candidate);
+      const lines = (typeof label.getWrappedText === 'function')
+        ? label.getWrappedText(candidate)
+        : candidate.split('\n');
+      if (lines.length <= 2) lo = mid;
+      else hi = mid - 1;
+    }
+    label.setText(safeText.slice(0, lo).replace(/\s+$/, '') + ELLIPSIS);
   }
 
   /** Builds a single filled-triangle arrow at (cx, cy) pointing OUTWARD
