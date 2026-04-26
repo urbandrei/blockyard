@@ -19,6 +19,7 @@ import { renderBorder } from '../render/BorderRenderer.js';
 import { renderFactoryBody } from '../render/FactoryBodyRenderer.js';
 import { renderFunnels } from '../render/FunnelRenderer.js';
 import { renderAcidPits } from '../render/AcidPitRenderer.js';
+import { disposeBakedGeometryCache } from '../render/textures/atlas.js';
 
 // End-game credits. Plays after the player beats level 40. Black
 // backdrop, white scrolling credit lines, bursts of fireworks at random
@@ -401,6 +402,7 @@ export default class CreditsScene extends Phaser.Scene {
     this.time.delayedCall(SCROLL_MS + PAUSE_AFTER, () => this._dismiss());
 
     this.events.once('shutdown', () => {
+      try { disposeBakedGeometryCache(this); } catch (e) { /* ignore */ }
       if (this.fwTimer) try { this.fwTimer.remove(false); } catch (e) {}
     });
   }

@@ -34,6 +34,7 @@ import {
   stageColor, CURRENT_STAGE_COLOR, FUTURE_STAGE_ALPHA, PAST_STAGE_ALPHA, CELL_TINT_ALPHA,
 } from '../ui/stageColors.js';
 import { renderAcidPits } from '../render/AcidPitRenderer.js';
+import { disposeBakedGeometryCache } from '../render/textures/atlas.js';
 import { ExportPanel } from '../ui/ExportPanel.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
 import { disableMenuBg } from '../ui/MenuBackground.js';
@@ -337,6 +338,7 @@ export default class EditorScene extends Phaser.Scene {
     this.scale.on('resize', this._onScaleResize);
 
     this.events.on('shutdown', () => {
+      try { disposeBakedGeometryCache(this); } catch (e) { /* ignore */ }
       this.sim.stop();
       if (this._settingsModal) { try { this._settingsModal.destroy(); } catch (e) {} this._settingsModal = null; }
       if (this._laserBeamSound) {

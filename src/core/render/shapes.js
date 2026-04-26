@@ -2,6 +2,42 @@
 // labels, buffer labels, future picker UI). Keep this file pure: input is a
 // Phaser Graphics + numeric coords, output is strokes/fills on the gfx.
 
+// Axis-aligned form rendering, sized to fit a circumscribed circle of `r`.
+// Square: side = r * 1.7 (matches BufferLabelRenderer.drawForm). Triangle:
+// equilateral, point-up, height ≈ 2r (visual parity with the label). Caller
+// sets fillStyle and lineStyle before the call.
+//
+// Used by ShapeRenderer's electrocute/acid Graphics overlays and by atlas.js
+// to bake the shape glyph atlas. Keeping this in shapes.js (the primitives
+// hub) avoids a circular import between ShapeRenderer and atlas.
+export function drawShapeForm(gfx, r, form) {
+  switch (form) {
+    case 'square': {
+      const s = r * 1.7;
+      gfx.fillRect(-s / 2, -s / 2, s, s);
+      gfx.strokeRect(-s / 2, -s / 2, s, s);
+      return;
+    }
+    case 'triangle': {
+      const h = r * 2;
+      const halfBase = r * 1.05;
+      gfx.beginPath();
+      gfx.moveTo(0,            -h * 0.6);
+      gfx.lineTo(-halfBase,     h * 0.4);
+      gfx.lineTo( halfBase,     h * 0.4);
+      gfx.closePath();
+      gfx.fillPath();
+      gfx.strokePath();
+      return;
+    }
+    case 'circle':
+    default: {
+      gfx.fillCircle(0, 0, r);
+      gfx.strokeCircle(0, 0, r);
+    }
+  }
+}
+
 // Asymmetric blob used as the glyph for color-only labels — reads as a
 // paint splash rather than a circle, so the player can tell at a glance
 // "this label is a color wildcard". Built from 8 hand-picked vertices

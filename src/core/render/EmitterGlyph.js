@@ -1,4 +1,5 @@
 import { SHAPE_SCALE, EMITTER_FILL, EMITTER_STROKE, COLLECTOR_FILL, COLLECTOR_STROKE, outlineWidth } from '../constants.js';
+import { emitterKey, GLYPH_REF_PXCELL } from './textures/atlas.js';
 
 // Laser emitter / collector glyph. The silhouette is a "flipped funnel with
 // a central gap": two mirrored half-triangles point OUTWARD from the cell,
@@ -100,6 +101,34 @@ export function renderEmitters(scene, container, funnels, { pxCell, pxGap, scale
   drawEmittersInto(gfx, funnels, pxCell, pxGap, scale, isBorder);
   container.add(gfx);
   return gfx;
+}
+
+// Sprite-based emitter render. Adds one Image per funnel to `container`,
+// each pulled from the emitter atlas (atlas.js) and scaled to the current
+// pxCell. Falls back to drawEmittersInto on a scratch Graphics for any
+// emitter whose atlas key didn't bake (defensive).
+export function renderEmittersAsSprites(scene, container, funnels, { pxCell, pxGap, scale = SHAPE_SCALE, isBorder = false } = {}) {
+  if (!funnels || funnels.length === 0) return;
+  const step = pxCell + pxGap;
+  const spriteScale = pxCell / GLYPH_REF_PXCELL;
+  let fallbackGfx = null;
+  for (const f of funnels) {
+    const role = f.role === 'collector' ? 'collector' : 'emitter';
+    const key = emitterKey(role, f.side);
+    if (scene.textures.exists(key)) {
+      const cx = f.c * step + pxCell / 2;
+      const cy = f.r * step + pxCell / 2;
+      const img = scene.add.image(cx, cy, key).setOrigin(0.5);
+      img.setScale(spriteScale);
+      container.add(img);
+    } else {
+      if (!fallbackGfx) {
+        fallbackGfx = scene.make.graphics({ add: false });
+        container.add(fallbackGfx);
+      }
+      drawEmittersInto(fallbackGfx, [f], pxCell, pxGap, scale, isBorder);
+    }
+  }
 }
 
 // Distance (in pixels) from the emitter gap center (= beam origin) OUT along

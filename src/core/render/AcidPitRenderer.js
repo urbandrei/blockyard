@@ -1,5 +1,6 @@
 import { traceFactoryLoops, COLOR_HEX } from '../model/shape.js';
 import { ACID_WHITE, BOARD_GAP } from '../constants.js';
+import { getOrBakeAcidFill, cellsCentroid } from './textures/atlas.js';
 
 // Renders acid-pit terrain as rounded, inset puddles in the playable
 // interior. Shapes fly over them. Single-cell storage (level.acidPits[]);
@@ -54,19 +55,28 @@ export function renderAcidPits(scene, container, level, { pxCell, pxGap = BOARD_
   const pits = (level && level.acidPits) || [];
   container.removeAll(true);
 
-  // Three gfx layers:
-  //   fillGfx    — base blob fill + per-cell color patches + gradient seams (static).
-  //   edgeGfx    — rounded outer outline, redrawn each tick for subtle wobble.
-  //   bubbleGfx  — interior + edge bubbles, redrawn each tick.
-  const fillGfx = scene.add.graphics();
+  // Three layers:
+  //   fillSprites — per-component baked-texture sprites (static fill, the
+  //                 expensive bezier+rounded-rect compose). Each component
+  //                 reuses a cached texture if its shape repeats elsewhere
+  //                 in the level.
+  //   edgeGfx     — rounded outer outline, redrawn each tick for subtle wobble.
+  //   bubbleGfx   — interior + edge bubbles, redrawn each tick.
+  const fillSprites = [];
   const edgeGfx = scene.add.graphics();
   const bubbleGfx = scene.add.graphics();
-  container.add(fillGfx);
   container.add(edgeGfx);
   container.add(bubbleGfx);
 
   if (pits.length === 0) {
-    return { destroy() { fillGfx.destroy(); edgeGfx.destroy(); bubbleGfx.destroy(); }, tick() {} };
+    return {
+      destroy() {
+        for (const s of fillSprites) s.destroy();
+        edgeGfx.destroy();
+        bubbleGfx.destroy();
+      },
+      tick() {},
+    };
   }
 
   const labelByCell = new Map();
@@ -78,9 +88,28 @@ export function renderAcidPits(scene, container, level, { pxCell, pxGap = BOARD_
   const components = sameLabelComponents(pits, labelByCell);
   const step = pxCell + pxGap;
 
-  // Precompute per-component state.
+  // Precompute per-component state. The fill (rounded blob + per-cell
+  // patches + bridges) is baked into a texture cached per cell-config —
+  // pulled into a sprite anchored on the component's centroid (atlas.js
+  // bakes centroid-centered, matching factoryCellsCenter convention).
   const compStates = components.map((comp) => {
-    paintComponent(fillGfx, comp, labelByCell, hexOf, pxCell, pxGap);
+    const fillKey = getOrBakeAcidFill(scene, {
+      cells: comp.cells, label: comp.label, pxCell, pxGap,
+    });
+    if (fillKey && scene.textures.exists(fillKey)) {
+      const [cx, cy] = cellsCentroid(comp.cells, pxCell, pxGap);
+      const sprite = scene.add.image(cx, cy, fillKey).setOrigin(0.5);
+      // Sprite below the wobble + bubble overlays — insert at index 0
+      // so it renders behind edgeGfx + bubbleGfx already in the container.
+      container.addAt(sprite, 0);
+      fillSprites.push(sprite);
+    } else {
+      // Bake miss — fall back to drawing the fill once on a Graphics.
+      const fillGfx = scene.add.graphics();
+      container.addAt(fillGfx, 0);
+      paintComponent(fillGfx, comp, labelByCell, hexOf, pxCell, pxGap);
+      fillSprites.push(fillGfx);
+    }
     const loops = traceFactoryLoops(comp.cells, pxCell, pxGap, ACID_OUTLINE_SCALE);
     const loopSamples = loops.map((loop) => resampleBezierLoop(loop, pxCell, PERIMETER_SAMPLE_PX));
     // Edge bubble slots — fixed positions around the perimeter that live
@@ -256,7 +285,11 @@ export function renderAcidPits(scene, container, level, { pxCell, pxGap = BOARD_
   tick(0);
 
   return {
-    destroy() { fillGfx.destroy(); edgeGfx.destroy(); bubbleGfx.destroy(); },
+    destroy() {
+      for (const s of fillSprites) s.destroy();
+      edgeGfx.destroy();
+      bubbleGfx.destroy();
+    },
     tick,
   };
 }

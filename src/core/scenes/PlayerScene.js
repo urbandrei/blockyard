@@ -7,6 +7,7 @@ import { renderBorder } from '../render/BorderRenderer.js';
 import { renderFactoryBody, renderLockedTint, drawBoltInto } from '../render/FactoryBodyRenderer.js';
 import { renderFactoryGears, spinFactoryGears } from '../render/FactoryGears.js';
 import { renderAcidPits } from '../render/AcidPitRenderer.js';
+import { disposeBakedGeometryCache } from '../render/textures/atlas.js';
 import { renderFunnels } from '../render/FunnelRenderer.js';
 import { renderFlow } from '../render/FlowRenderer.js';
 import { renderBufferLabels } from '../render/BufferLabelRenderer.js';
@@ -346,6 +347,9 @@ export default class PlayerScene extends Phaser.Scene {
     this._startStuckPopupTimer();
 
     this.events.on('shutdown', () => {
+      // Drop level-scoped baked textures (factory body blobs + acid pit
+      // fills cached by atlas.js) so they don't leak into the next scene.
+      try { disposeBakedGeometryCache(this); } catch (e) { /* ignore */ }
       // Telemetry: end the play session. Best-effort — platform adapter
       // swallows network errors; a missing _playSessionId (telemetry
       // disabled / startPlay failed / scene-swap before the POST resolved)

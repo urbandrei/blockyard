@@ -17,6 +17,7 @@ import {
   renderInteriorFloor, renderExteriorCheckers, renderFrameShadow, renderFrameOutline,
 } from '../render/PlayAreaFrame.js';
 import { renderAcidPits } from '../render/AcidPitRenderer.js';
+import { disposeBakedGeometryCache } from '../render/textures/atlas.js';
 import { spawnFunnelFirework } from '../render/FunnelFirework.js';
 import { ShapeRenderer } from '../render/ShapeRenderer.js';
 import { LaserRenderer } from '../render/LaserRenderer.js';
@@ -259,6 +260,7 @@ export default class HomeScene extends Phaser.Scene {
     this.scale.on('resize', this._onResize);
 
     this.events.on('shutdown', () => {
+      try { disposeBakedGeometryCache(this); } catch (e) { /* ignore */ }
       if (this.sim) this.sim.stop();
       if (this._onResize) this.scale.off('resize', this._onResize);
       this._destroyButtons();

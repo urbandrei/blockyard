@@ -8,6 +8,7 @@ import { compute920Box } from '../ui/ContentBox.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
 import { BOARD_GAP } from '../constants.js';
 import { resetCutscenes } from '../progress.js';
+import { ensureStaticAtlases } from '../render/textures/atlas.js';
 
 // Mirror HomeScene's board layout so the bg tiles painted under the
 // loading overlay match the size + alignment HomeScene will paint as
@@ -140,6 +141,11 @@ export default class PreloadScene extends Phaser.Scene {
         return n;
       };
     }
+
+    // Bake every game-lifetime texture atlas (shape glyphs, funnel/emitter
+    // glyphs, buffer label tiles, X/✓ marks) once. Idempotent — guarded by
+    // a registry flag so a hot-reload re-entry no-ops.
+    try { ensureStaticAtlases(this); } catch (e) { console.warn('[atlas] static bake failed', e); }
 
     // Audio is loaded now (we're in create()). Tell the overlay it can
     // wrap up its overfill phase fast — this snaps its slow trickle

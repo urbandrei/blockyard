@@ -1,5 +1,9 @@
 import { COLOR_HEX, DEFAULT_SHAPE_TYPE } from '../model/shape.js';
 import { SHAPE_RADIUS_FRAC, outlineWidth } from '../constants.js';
+import { shapeKey, SHAPE_REF_RADIUS } from './textures/atlas.js';
+import { drawShapeForm } from './shapes.js';
+
+export { drawShapeForm };
 
 // Electrocute-death palette — the shape flashes deep red with a darker
 // outline, overlaid with a flickering electric pattern, then shatters.
@@ -9,11 +13,16 @@ const ELEC_ARC     = 0xfff0a0;   // light yellow electric current
 const DEBRIS_FILL  = 0xd02020;
 const DEBRIS_STROKE = 0x5a0000;
 
-// Manages the visual for a simulation shape. Dispatches on `shape.form`
-// (circle / square / triangle) and fills with `COLOR_HEX[shape.color]`.
-// Each form is sized to roughly the same visual footprint (radius =
-// `pxCell * SHAPE_RADIUS_FRAC`) so the buffer-label icon and the live
-// shape read as the same object.
+// Manages the visual for a simulation shape. The base sprite is a baked
+// texture (`shapeKey(form, color)` — 9 form×color combos pre-rendered at
+// PreloadScene); per-frame work is just position + scale on a sprite.
+//
+// Two animated states fall back to a Graphics override (lazily created):
+//   • acid color-morph — shape lerps between colors during a pit transition
+//   • electrocute      — shape flashes red with random arcs each frame
+//
+// Both wipe the override and return to sprite mode once the state ends, so
+// only shapes currently in those states pay the redraw cost.
 
 export class ShapeRenderer {
   constructor(scene, container, { pxCell }) {
@@ -21,31 +30,47 @@ export class ShapeRenderer {
     this.container = container;
     this.radius = Math.max(8, Math.round(pxCell * SHAPE_RADIUS_FRAC));
     this.strokeW = outlineWidth(pxCell);
-    this.handles = new Map(); // shape.id → Graphics
+    // Sprite scale that produces the same on-screen radius as the legacy
+    // Graphics path. The bake reference radius is 42 — see atlas.js.
+    this.spriteScale = this.radius / SHAPE_REF_RADIUS;
+    this.handles = new Map(); // shape.id → { root, sprite, gfx|null, color }
   }
 
   spawn(shape) {
-    const gfx = this.scene.make.graphics({ add: false });
-    const color = COLOR_HEX[shape.color] || COLOR_HEX[DEFAULT_SHAPE_TYPE.color];
-    const form  = shape.form || DEFAULT_SHAPE_TYPE.form;
-    gfx.fillStyle(color, 1);
-    gfx.lineStyle(this.strokeW, 0x000000, 1);
-    drawShapeForm(gfx, this.radius, form);
-    gfx.x = shape.x;
-    gfx.y = shape.y;
-    gfx.setScale(0);
-    gfx._tintHex = color;
-    this.container.add(gfx);
-    this.handles.set(shape.id, gfx);
+    const color = shape.color || DEFAULT_SHAPE_TYPE.color;
+    const form  = shape.form  || DEFAULT_SHAPE_TYPE.form;
+    const root = this.scene.add.container(shape.x, shape.y);
+    const sprite = this._addSprite(root, form, color);
+    root.setScale(0);
+    this.container.add(root);
+    this.handles.set(shape.id, { root, sprite, gfx: null, color, form });
+  }
+
+  _addSprite(root, form, color) {
+    const key = shapeKey(form, color);
+    if (this.scene.textures.exists(key)) {
+      const img = this.scene.add.image(0, 0, key).setOrigin(0.5);
+      img.setScale(this.spriteScale);
+      root.add(img);
+      return img;
+    }
+    // Fallback: bake missed (e.g. preload race / dev hot-reload). Draw the
+    // shape with Graphics so the visual is correct even without the atlas.
+    const g = this.scene.make.graphics({ add: false });
+    g.fillStyle(COLOR_HEX[color] || COLOR_HEX[DEFAULT_SHAPE_TYPE.color], 1);
+    g.lineStyle(this.strokeW, 0x000000, 1);
+    drawShapeForm(g, this.radius, form);
+    root.add(g);
+    return g;
   }
 
   // scaleX / scaleY can differ so callers can drive the motion-warp
   // (stretch along direction of motion during fast phases).
   update(shape, scaleX, scaleY) {
-    const gfx = this.handles.get(shape.id);
-    if (!gfx) return;
-    gfx.x = shape.x;
-    gfx.y = shape.y;
+    const h = this.handles.get(shape.id);
+    if (!h) return;
+    h.root.x = shape.x;
+    h.root.y = shape.y;
 
     // Electrocuted = mid-death: frozen in place, deep red + electric arcs
     // that flicker each frame. Shape SHRINKS as the death progresses so
@@ -53,38 +78,62 @@ export class ShapeRenderer {
     if (shape.electrocuted) {
       const p = shape.electrocuteProgress || 0;
       const shrink = 1 - p * 0.65;   // 1.0 → 0.35 across the freeze
-      gfx.scaleX = shrink;
-      gfx.scaleY = shrink;
-      this._drawElectrocuted(gfx, shape);
+      h.root.setScale(shrink);
+      this._ensureOverrideGfx(h);
+      this._drawElectrocuted(h.gfx, shape);
       return;
     }
 
     if (scaleY == null) scaleY = scaleX;
-    gfx.scaleX = scaleX;
-    gfx.scaleY = scaleY;
+    h.root.setScale(scaleX, scaleY);
 
     // Acid-pit retint: while a transition is in flight, lerp the fill
-    // color between the from/target hex values and redraw the shape.
+    // color between the from/target hex values and redraw via a Graphics
+    // overlay (sprite tint can't faithfully blend between two arbitrary
+    // colors). Most shapes never enter this state — they keep using the
+    // baked sprite directly.
     const targetName = shape._acidTargetName;
     const progress = shape._acidProgress || 0;
-    let desiredHex;
     if (targetName && progress > 0 && progress < 1) {
       const fromHex = (shape._acidFromHex != null)
         ? shape._acidFromHex
-        : (COLOR_HEX[shape.color] || COLOR_HEX[DEFAULT_SHAPE_TYPE.color]);
+        : (COLOR_HEX[h.color] || COLOR_HEX[DEFAULT_SHAPE_TYPE.color]);
       const toHex   = COLOR_HEX[targetName] || fromHex;
-      desiredHex = lerpHex(fromHex, toHex, progress);
-    } else {
-      desiredHex = COLOR_HEX[shape.color] || COLOR_HEX[DEFAULT_SHAPE_TYPE.color];
+      const lerped  = lerpHex(fromHex, toHex, progress);
+      this._ensureOverrideGfx(h);
+      h.gfx.clear();
+      h.gfx.fillStyle(lerped, 1);
+      h.gfx.lineStyle(this.strokeW, 0x000000, 1);
+      drawShapeForm(h.gfx, this.radius, shape.form || DEFAULT_SHAPE_TYPE.form);
+      return;
     }
-    if (desiredHex !== gfx._tintHex) {
-      const form = shape.form || DEFAULT_SHAPE_TYPE.form;
-      gfx.clear();
-      gfx.fillStyle(desiredHex, 1);
-      gfx.lineStyle(this.strokeW, 0x000000, 1);
-      drawShapeForm(gfx, this.radius, form);
-      gfx._tintHex = desiredHex;
+
+    // No override needed — drop any leftover Graphics and ensure the
+    // base sprite is visible + on the right color texture.
+    this._dropOverrideGfx(h);
+    const desiredColor = shape.color || DEFAULT_SHAPE_TYPE.color;
+    const desiredForm  = shape.form  || DEFAULT_SHAPE_TYPE.form;
+    if (h.color !== desiredColor || h.form !== desiredForm) {
+      const key = shapeKey(desiredForm, desiredColor);
+      if (h.sprite && typeof h.sprite.setTexture === 'function' && this.scene.textures.exists(key)) {
+        h.sprite.setTexture(key);
+      }
+      h.color = desiredColor;
+      h.form  = desiredForm;
     }
+  }
+
+  _ensureOverrideGfx(h) {
+    if (!h.gfx) {
+      h.gfx = this.scene.make.graphics({ add: false });
+      h.root.add(h.gfx);
+    }
+    if (h.sprite && typeof h.sprite.setVisible === 'function') h.sprite.setVisible(false);
+  }
+
+  _dropOverrideGfx(h) {
+    if (h.gfx) { h.gfx.destroy(); h.gfx = null; }
+    if (h.sprite && typeof h.sprite.setVisible === 'function') h.sprite.setVisible(true);
   }
 
   _drawElectrocuted(gfx, shape) {
@@ -144,18 +193,16 @@ export class ShapeRenderer {
       gfx.lineTo(ox, oy);
       gfx.strokePath();
     }
-    // Force redraw next frame regardless of cached hex.
-    gfx._tintHex = null;
   }
 
   remove(shape, pop, cause) {
-    const gfx = this.handles.get(shape.id);
-    if (!gfx) return;
+    const h = this.handles.get(shape.id);
+    if (!h) return;
     this.handles.delete(shape.id);
     if (cause === 'laser') {
       // Shatter: spawn several smaller copies that fly outward + fade.
-      this._spawnDebris(shape, gfx);
-      gfx.destroy();
+      this._spawnDebris(shape, h.root);
+      h.root.destroy();
       return;
     }
     if (pop) {
@@ -163,27 +210,30 @@ export class ShapeRenderer {
       // popped at a sink (typed-mismatch reject) would tween from its
       // already-near-zero "swallow" scale and the pop would be invisible —
       // indistinguishable from a normal accept.
-      const base = Math.max(gfx.scaleX, gfx.scaleY, 1);
-      gfx.setScale(base);
+      const base = Math.max(h.root.scaleX, h.root.scaleY, 1);
+      h.root.setScale(base);
       this.scene.tweens.add({
-        targets: gfx,
+        targets: h.root,
         scale: base * 1.9,
         alpha: 0,
         duration: 220,
         ease: 'Sine.easeOut',
-        onComplete: () => gfx.destroy(),
+        onComplete: () => h.root.destroy(),
       });
     } else {
-      gfx.destroy();
+      h.root.destroy();
     }
   }
 
-  _spawnDebris(shape, origGfx) {
+  _spawnDebris(shape, origRoot) {
+    // Debris keeps using Graphics: it's transient (one-shot fade in ~520ms),
+    // uses a fixed shatter-red palette regardless of shape color, and
+    // doesn't justify a separate texture per form.
     const form = shape.form || DEFAULT_SHAPE_TYPE.form;
     const smallR = Math.max(3, Math.round(this.radius * 0.45));
     const sw     = Math.max(1, Math.round(this.strokeW * 0.7));
     const count  = 5;
-    const cx = origGfx.x, cy = origGfx.y;
+    const cx = origRoot.x, cy = origRoot.y;
     for (let i = 0; i < count; i++) {
       const g = this.scene.make.graphics({ add: false });
       g.fillStyle(DEBRIS_FILL, 1);
@@ -214,14 +264,11 @@ export class ShapeRenderer {
   }
 
   clearAll() {
-    for (const gfx of this.handles.values()) gfx.destroy();
+    for (const h of this.handles.values()) h.root.destroy();
     this.handles.clear();
   }
 }
 
-// Axis-aligned form rendering, sized to fit a circumscribed circle of `r`.
-// Square: side = r * 1.7 (matches BufferLabelRenderer.drawForm).
-// Triangle: equilateral, point-up, height ≈ 2r (visual parity with the label).
 function lerpHex(a, b, t) {
   const ar = (a >> 16) & 0xff, ag = (a >> 8) & 0xff, ab = a & 0xff;
   const br = (b >> 16) & 0xff, bg = (b >> 8) & 0xff, bb = b & 0xff;
@@ -229,32 +276,4 @@ function lerpHex(a, b, t) {
   const g = Math.round(ag + (bg - ag) * t);
   const bl = Math.round(ab + (bb - ab) * t);
   return (r << 16) | (g << 8) | bl;
-}
-
-export function drawShapeForm(gfx, r, form) {
-  switch (form) {
-    case 'square': {
-      const s = r * 1.7;
-      gfx.fillRect(-s / 2, -s / 2, s, s);
-      gfx.strokeRect(-s / 2, -s / 2, s, s);
-      return;
-    }
-    case 'triangle': {
-      const h = r * 2;
-      const halfBase = r * 1.05;
-      gfx.beginPath();
-      gfx.moveTo(0,            -h * 0.6);
-      gfx.lineTo(-halfBase,     h * 0.4);
-      gfx.lineTo( halfBase,     h * 0.4);
-      gfx.closePath();
-      gfx.fillPath();
-      gfx.strokePath();
-      return;
-    }
-    case 'circle':
-    default: {
-      gfx.fillCircle(0, 0, r);
-      gfx.strokeCircle(0, 0, r);
-    }
-  }
 }

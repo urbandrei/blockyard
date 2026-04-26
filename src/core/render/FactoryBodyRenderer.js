@@ -1,6 +1,7 @@
 import { traceFactoryLoops, unitVec, COLOR_HEX, DEFAULT_SHAPE_TYPE } from '../model/shape.js';
 import { SHAPE_SCALE, BLOCK_LIGHT, BLOCK_DARK, BLOCK_STROKE, SINGLE_CELL_FILL, outlineWidth } from '../constants.js';
 import { drawPuddle } from './shapes.js';
+import { getOrBakeFactoryBody } from './textures/atlas.js';
 
 // Renders a factory body (one or more cells, merged) as a Phaser Graphics
 // game object. Uses perimeter-tracing + quadratic-bezier rounded corners.
@@ -27,43 +28,72 @@ function hasAnyBolt(cells) {
 }
 
 export function renderFactoryBody(scene, container, { cells, pxCell, pxGap, scale = SHAPE_SCALE, fill, stroke, invalid, caution, rotation = 0 }) {
-  const gfx = scene.make.graphics({ add: false });
-  // Invalid factories paint their perimeter in red so the author sees at a
-  // glance which block needs fixing; the actual reason floats as text near
-  // the body (see EditorScene._drawFactory).
+  // Returned wrap mimics the legacy Graphics' API surface: callers set
+  // .bolts / .labels / .poweredGlow on it and apply setPosition(-cx, -cy)
+  // to anchor the body's centroid at the parent container's origin. Inside,
+  // the wrap holds a baked sprite (cell-coord-positioned at the centroid so
+  // the parent's setPosition aligns it identically to the legacy Graphics).
+  // Animated overlays (lit-green, bolts, labels) layer above the sprite.
+  const wrap = scene.add.container(0, 0);
+
   const effectiveStroke = invalid ? 0xd02020 : stroke;
-  // Powered (laser-gated) factories render as a circuit board: dark green
-  // substrate + silver traces. Caution + explicit `fill` overrides still
-  // win so obstacles and special tints aren't clobbered.
   const isPowered = hasAnyBolt(cells) && !caution;
   let effectiveFill;
   if (caution)                           effectiveFill = CAUTION_YELLOW;
   else if (fill != null)                 effectiveFill = fill;
   else if (isPowered)                    effectiveFill = CIRCUIT_BG;
   else if (cells && cells.length === 1)  effectiveFill = SINGLE_CELL_FILL;
-  drawFactoryBodyInto(gfx, cells, pxCell, pxGap, scale, { fill: effectiveFill, stroke: effectiveStroke });
-  if (caution) drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale, rotation);
 
-  // Body goes in FIRST so the later-added labels render ON TOP (Phaser
-  // containers draw in insertion order).
-  container.add(gfx);
-
-  // Lit-green overlay for powered factories — identical silhouette painted
-  // in CIRCUIT_BG_LIT. The scene drives its alpha from the factory's max
-  // bolt glow so the body visibly brightens as it powers on.
-  if (isPowered) {
-    const [cx, cy] = factoryCellsCenter(cells, pxCell, pxGap);
-    const litGfx = scene.make.graphics({ add: false });
-    drawFactoryBodyInto(litGfx, cells, pxCell, pxGap, scale, { fill: CIRCUIT_BG_LIT, stroke: effectiveStroke });
-    litGfx.setPosition(-cx, -cy);
-    litGfx.alpha = 0;
-    container.add(litGfx);
-    gfx.poweredGlow = litGfx;
+  const [cx, cy] = factoryCellsCenter(cells, pxCell, pxGap);
+  const bakeKey = invalid ? null : getOrBakeFactoryBody(scene, {
+    cells, pxCell, pxGap, scale,
+    fill: effectiveFill, stroke: effectiveStroke,
+    caution: !!caution, rotation,
+  });
+  if (bakeKey && scene.textures.exists(bakeKey)) {
+    // Texture is centered on the geometry centroid (atlas.js translates the
+    // bake by (tw/2 - cx, th/2 - cy)). Placing the sprite at (cx, cy) here
+    // means a parent setPosition(-cx, -cy) lands the centroid at (0, 0) —
+    // identical visual position to the legacy gfx-at-cell-coords path.
+    const sprite = scene.add.image(cx, cy, bakeKey).setOrigin(0.5);
+    wrap.add(sprite);
+  } else {
+    // Bake bypassed (invalid factories paint their stroke red — outside
+    // the cache key so the bake doesn't accumulate one-off textures) or
+    // missed; fall back to the legacy Graphics draw.
+    const gfx = scene.make.graphics({ add: false });
+    drawFactoryBodyInto(gfx, cells, pxCell, pxGap, scale, { fill: effectiveFill, stroke: effectiveStroke });
+    if (caution) drawCautionStripesInto(gfx, cells, pxCell, pxGap, scale, rotation);
+    wrap.add(gfx);
   }
 
-  gfx.labels = buildCellLabels(scene, cells, pxCell, pxGap, scale, container);
-  gfx.bolts  = buildBoltGlyphs(scene, cells, pxCell, pxGap, scale, container);
-  return gfx;
+  container.add(wrap);
+
+  // Lit-green overlay for powered factories — identical silhouette painted
+  // in CIRCUIT_BG_LIT. Lives inside the body wrap so the caller's
+  // setPosition(-cx, -cy) shifts both layers together. Alpha is driven by
+  // the scene from the factory's max bolt glow.
+  if (isPowered) {
+    const litKey = getOrBakeFactoryBody(scene, {
+      cells, pxCell, pxGap, scale,
+      fill: CIRCUIT_BG_LIT, stroke: effectiveStroke,
+      caution: false, rotation,
+    });
+    let litObj;
+    if (litKey && scene.textures.exists(litKey)) {
+      litObj = scene.add.image(cx, cy, litKey).setOrigin(0.5);
+    } else {
+      litObj = scene.make.graphics({ add: false });
+      drawFactoryBodyInto(litObj, cells, pxCell, pxGap, scale, { fill: CIRCUIT_BG_LIT, stroke: effectiveStroke });
+    }
+    litObj.alpha = 0;
+    wrap.add(litObj);
+    wrap.poweredGlow = litObj;
+  }
+
+  wrap.labels = buildCellLabels(scene, cells, pxCell, pxGap, scale, container);
+  wrap.bolts  = buildBoltGlyphs(scene, cells, pxCell, pxGap, scale, container);
+  return wrap;
 }
 
 function factoryCellsCenter(cells, pxCell, pxGap) {
