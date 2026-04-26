@@ -29,6 +29,13 @@
       "when": 1777070000000,
       "tag": "0003_plays_telemetry",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777080000000,
+      "tag": "0004_featured_levels",
+      "breakpoints": true
     }
   ]
 }

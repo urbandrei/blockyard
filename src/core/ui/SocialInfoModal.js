@@ -22,7 +22,40 @@ export class SocialInfoModal {
 
     const { width, height } = scene.scale;
     const panelW = Math.min(500, width - 60);
-    const panelH = Math.min(440, height - 80);
+
+    // Layout chrome — header (title) and footer (close button + padding)
+    // bracket a variable-height body. The panel sizes to fit the body
+    // exactly so long copy (the Thank you / YouTube Playables blurbs) no
+    // longer overflows. A floor keeps short modals from looking cramped,
+    // and a ceiling keeps the panel inside the viewport on small screens.
+    const TITLE_TOP   = 38;       // title baseline-ish from panel top
+    const BODY_TOP    = 88;       // body top from panel top
+    const BODY_BOTTOM_GAP = 26;   // body bottom → button center
+    const BUTTON_BOTTOM_PAD = 22; // button center → panel bottom
+    const BUTTON_H = 46;
+    const PANEL_H_MIN = 280;
+    const PANEL_H_MAX = height - 60;
+
+    const bodyW = panelW - 56;
+    const bodyStyle = {
+      fontFamily: 'system-ui, sans-serif', fontSize: '19px',
+      color: BODY_COLOR,
+      wordWrap: { width: bodyW, useAdvancedWrap: true },
+      align: 'left',
+      lineSpacing: 6,
+    };
+
+    // Measurement pass — render the body off-screen to learn its wrapped
+    // height, then destroy. Lets us size the panel before adding the real
+    // body so the final scene-order is shield → panel → title → body →
+    // button (no depth tricks). Phaser computes Text.height inside the
+    // constructor, so this single off-screen text is enough.
+    const measure = scene.add.text(-9999, -9999, opts.body || '', bodyStyle);
+    const bodyH = Math.ceil(measure.height) || 0;
+    measure.destroy();
+
+    const desiredH = BODY_TOP + bodyH + BODY_BOTTOM_GAP + BUTTON_H / 2 + BUTTON_BOTTOM_PAD;
+    const panelH = Math.max(PANEL_H_MIN, Math.min(PANEL_H_MAX, desiredH));
     const px = width / 2 - panelW / 2;
     const py = height / 2 - panelH / 2;
 
@@ -37,22 +70,17 @@ export class SocialInfoModal {
     this.panel.fillRoundedRect(px, py, panelW, panelH, 18);
     this.panel.strokeRoundedRect(px, py, panelW, panelH, 18);
 
-    this.title = scene.add.text(width / 2, py + 38, opts.title || '', {
+    this.title = scene.add.text(width / 2, py + TITLE_TOP, opts.title || '', {
       fontFamily: 'system-ui, sans-serif', fontSize: '26px', fontStyle: 'bold',
       color: TITLE_COLOR, align: 'center',
     }).setOrigin(0.5).setDepth(PANEL_DEPTH);
 
-    const bodyW = panelW - 56;
-    this.body = scene.add.text(width / 2, py + 88, opts.body || '', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '19px',
-      color: BODY_COLOR,
-      wordWrap: { width: bodyW, useAdvancedWrap: true },
-      align: 'left',
-      lineSpacing: 6,
-    }).setOrigin(0.5, 0).setDepth(PANEL_DEPTH);
+    this.body = scene.add.text(width / 2, py + BODY_TOP, opts.body || '', bodyStyle)
+      .setOrigin(0.5, 0)
+      .setDepth(PANEL_DEPTH);
 
-    const buttonY = py + panelH - 44;
-    this.closeBtn = this._button(width / 2, buttonY, 150, 46, 'CLOSE', () => this._finish());
+    const buttonY = py + panelH - (BUTTON_H / 2 + BUTTON_BOTTOM_PAD);
+    this.closeBtn = this._button(width / 2, buttonY, 150, BUTTON_H, 'CLOSE', () => this._finish());
   }
 
   _button(cx, cy, w, h, label, onTap) {

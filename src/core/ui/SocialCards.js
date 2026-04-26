@@ -16,10 +16,23 @@ export const SOCIAL_CARDS = [
       type: 'modal',
       title: 'Thank you!',
       body:
-        "Blockyard is out and I'm really happy about it. Big thanks to " +
-        'everyone who playtested early builds and helped me finish.\n\n' +
-        'If you find a bug, drop into the Discord. Have fun out there.\n\n' +
-        'urbandrei',
+        'Hello everyone!\n' +
+        'Thank you so much for checking out my game, Block Yard. I hope you ' +
+        'have as much fun playing it as I had making it.\n\n' +
+        "It's been a wild two weeks, but I'm really proud of what I've been " +
+        "able to put together. When I first started this jam, I wasn't even " +
+        "sure I was going to stick with it, but looking back, I'm glad I did.\n\n" +
+        'Many thanks to my girlfriend, the guest developers, and my Twitch ' +
+        'viewers who helped design levels, brought in audio clips for me to ' +
+        'use, tested the game, and shared great ideas and feedback. I ' +
+        "wouldn't have been able to get through this without your help and " +
+        'support.\n\n' +
+        'I also had a splendid time in the gamedev.js community, watching ' +
+        'the progress everyone made over the course of this jam. I look ' +
+        "forward to playing all your games, as well as seeing the wild " +
+        "levels you'll build in mine.\n\n" +
+        "You're all awesome,\n" +
+        'Urbandrei',
     },
     iconKind: 'shapes',
   },
@@ -68,12 +81,19 @@ export const SOCIAL_CARDS = [
       type: 'modal',
       title: 'YouTube Playables',
       body:
-        'Blockyard was built with YouTube Playables in mind. Quick puzzles, ' +
-        'instant restart, and a learning curve that respects a viewer who ' +
-        'just paused a video to mess with a game for a couple minutes.\n\n' +
-        'Phaser was the right call here. It runs everywhere YouTube does, ' +
-        'starts fast, and lets the game feel native on every screen size ' +
-        'someone might be holding.',
+        'This game is also a submission to the Youtube Playables challenge. ' +
+        'My initial inspiration for Block Yard came from scrolling through ' +
+        'the Youtube Playables category, and seeing games like BlockBuster ' +
+        'Puzzle and Element Blocks. I liked the idea of a game utilizing ' +
+        'Tetris style blocks, and I had the idea of combining it with ' +
+        'automation style games like Factorio.\n\n' +
+        'When designing this game, I wanted a game with a mobile first ' +
+        'focus, that could work on any size screen, and was touch ' +
+        'compatible. Levels were designed to be easily shareable, ' +
+        'designable, and playable, with a focus on quick, easy to ' +
+        'understand puzzles that still allow for difficult challenges.\n\n' +
+        'I truly think my game would be great contender for the playables ' +
+        'catalogue.',
     },
     iconKind: 'playables',
   },
@@ -94,15 +114,7 @@ export const SOCIAL_CARDS = [
     id: 'phaser',
     title: 'Built with Phaser',
     subtitle: 'JS game framework',
-    action: {
-      type: 'modal',
-      title: 'Built with Phaser',
-      body:
-        'Blockyard runs on Phaser, a JavaScript framework for browser ' +
-        'games. It does the rendering, audio, and input plumbing so the ' +
-        'game feels solid on whatever device the player happens to open ' +
-        'it on.',
-    },
+    action: { type: 'link', url: 'https://phaser.io' },
     iconKind: 'phaser',
   },
 ];

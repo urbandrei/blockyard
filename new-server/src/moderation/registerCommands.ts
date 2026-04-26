@@ -64,6 +64,34 @@ const COMMANDS = [
       },
     ],
   },
+  {
+    name: 'feature',
+    description: 'Queue a public level as the next daily featured pick',
+    options: [{
+      type: 3, name: 'share', required: true,
+      description: 'Share URL (any format), short code, or bare level id',
+    }],
+  },
+  {
+    name: 'unpublish',
+    description: 'Remove a level from the public feed (flips status to rejected)',
+    options: [{
+      type: 3, name: 'share', required: true,
+      description: 'Share URL (any format), short code, or bare level id',
+    }],
+  },
+  {
+    name: 'featured-list',
+    description: 'List every featured level (oldest → newest) as short links',
+  },
+  {
+    name: 'feature-remove',
+    description: 'Drop a level from the featured queue and from today if it is the current pick',
+    options: [{
+      type: 3, name: 'share', required: true,
+      description: 'Share URL (any format), short code, or bare level id',
+    }],
+  },
 ];
 
 async function main() {

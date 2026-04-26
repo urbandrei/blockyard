@@ -32,9 +32,12 @@ const DEFAULT_VOL   = 0.5;
 const FADE_IN_MS    = 600;          // initial boot + focus regain
 const RESUME_MS     = 200;          // sim-resume ramp
 // Celebration-layer envelopes — slow + gentle by default so the layers
-// well up under the bed instead of slamming in.
+// well up under the bed instead of slamming in. The shape is smoothstep
+// (see _celebrationVolumeUnmastered) so the volume sits nearly silent for
+// the first ~25% of the fade, builds through the middle, and tapers softly
+// into the target — symmetric on the way in and on the way out.
 const CELEB_FADE_IN_MS  = 4500;
-const CELEB_FADE_OUT_MS = 1800;
+const CELEB_FADE_OUT_MS = 3500;
 // Every layer fade-in starts on a 4-beat bar boundary and ramps across
 // 3 beats — slow enough that the victory swell feels like a reveal
 // rather than a snap. Bar grid is anchored to game.loop.time = 0
@@ -313,7 +316,14 @@ class MusicEngine {
     const elapsed = now - fade.start;
     if (elapsed >= fade.duration) return fade.to;
     const t = elapsed / fade.duration;
-    const eased = 1 - (1 - t) * (1 - t);
+    // Smoothstep — symmetric S-curve with zero derivative at both endpoints.
+    // Fade-in: barely audible for the first ~25% then builds, easing into
+    // full volume rather than slamming in (the ease-out the bed layers use
+    // ramped to ~19% in the first 10%, which read as "starts loud").
+    // Fade-out: holds near full briefly, drops through the middle, and
+    // tapers softly to silence — the gentle tail the user asked for to
+    // match the layer-3 fade at the end of a level.
+    const eased = t * t * (3 - 2 * t);
     return fade.from + (fade.to - fade.from) * eased;
   }
 

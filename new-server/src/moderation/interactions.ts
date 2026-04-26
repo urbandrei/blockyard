@@ -20,6 +20,10 @@ import { db, schema } from '../db/client.js';
 import { buildSubmissionEmbed, buildCopyOnlyRow } from './embed.js';
 import { getOrCreateShortCode } from '../routes/shorts.js';
 import { handleStatsCommand } from './stats.js';
+import {
+  handleFeatureCommand, handleUnpublishCommand,
+  handleFeaturedListCommand, handleFeatureRemoveCommand,
+} from './featured-commands.js';
 
 export const discordRoutes = new Hono();
 
@@ -51,7 +55,11 @@ discordRoutes.post('/discord/interactions', async (c) => {
 
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
     const name = interaction.data?.name;
-    if (name === 'stats') return handleStatsCommand(c, interaction);
+    if (name === 'stats')          return handleStatsCommand(c, interaction);
+    if (name === 'feature')        return handleFeatureCommand(c, interaction);
+    if (name === 'unpublish')      return handleUnpublishCommand(c, interaction);
+    if (name === 'featured-list')  return handleFeaturedListCommand(c, interaction);
+    if (name === 'feature-remove') return handleFeatureRemoveCommand(c, interaction);
     return c.json(ephemeralText(`unknown command: ${name ?? '(none)'}`));
   }
 

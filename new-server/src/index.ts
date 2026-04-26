@@ -16,6 +16,7 @@ import { likeRoutes } from './routes/likes.js';
 import { ratingRoutes } from './routes/ratings.js';
 import { shortsRoutes } from './routes/shorts.js';
 import { playRoutes } from './routes/plays.js';
+import { featuredRoutes } from './routes/featured.js';
 import { discordRoutes } from './moderation/interactions.js';
 
 const app = new Hono();
@@ -39,6 +40,7 @@ app.route('/', likeRoutes);
 app.route('/', ratingRoutes);
 app.route('/', shortsRoutes);
 app.route('/', playRoutes);
+app.route('/', featuredRoutes);
 app.route('/', discordRoutes);
 
 app.onError((err, c) => {

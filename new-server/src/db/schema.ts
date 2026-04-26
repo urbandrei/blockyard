@@ -4,7 +4,7 @@
 // primary row and its aggregate inside one transaction.
 
 import {
-  pgTable, pgEnum, text, boolean, integer, smallint, bigint, uuid, index, primaryKey, check,
+  pgTable, pgEnum, text, boolean, integer, smallint, bigint, uuid, serial, date, timestamp, index, primaryKey, check,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -92,6 +92,27 @@ export const plays = pgTable('plays', {
   byKindCompleted: index('plays_kind_completed_at').on(t.kind, t.completedAt),
   byToken:         index('plays_anon_token').on(t.anonToken),
 }));
+
+// Daily-featured-level history. One row per UTC date (the date is the PK
+// so a date can have at most one featured level). `addedBy` is the Discord
+// username of the moderator who queued it via /feature.
+export const featuredLevels = pgTable('featured_levels', {
+  utcDate:    date('utc_date').primaryKey(),
+  levelId:    uuid('level_id').notNull(),
+  addedBy:    text('added_by').notNull(),
+  promotedAt: timestamp('promoted_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// FIFO queue of upcoming featured picks. Lazy rotation pops the head into
+// `featured_levels` the first time a request lands on a UTC date that
+// doesn't yet have a row. UNIQUE on level_id keeps a level from being
+// queued twice — re-running /feature on the same id is a no-op.
+export const featuredQueue = pgTable('featured_queue', {
+  id:        serial('id').primaryKey(),
+  levelId:   uuid('level_id').notNull().unique(),
+  addedBy:   text('added_by').notNull(),
+  queuedAt:  timestamp('queued_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 // URL shortener. Maps an 8-char base64url id (first 8 chars of sha256 of
 // the share code) to the full share_code. Deterministic, so re-shortening

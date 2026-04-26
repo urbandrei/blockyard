@@ -1599,7 +1599,10 @@ export default class HomeScene extends Phaser.Scene {
 
     // Dots indicator — one small circle per card, sitting just below
     // the panel. The active card's dot is fully white; others are
-    // dimmer outlines.
+    // dimmer outlines. Each dot also carries an oversized invisible
+    // hit rectangle so the user can tap a dot to jump straight to
+    // that card; tap targets are sized ≥ 28 px even when the dots
+    // themselves are tiny on small viewports.
     const dotsY = cy + panelH / 2 + Math.max(10, Math.floor(pxCell * 0.32));
     const dotR = Math.max(3, Math.floor(pxCell * 0.10));
     const dotGap = dotR * 3;
@@ -1608,6 +1611,21 @@ export default class HomeScene extends Phaser.Scene {
     const dotsGfx = this.add.graphics().setDepth(0);
     this.socialContainer.add(dotsGfx);
     const dotsMeta = { gfx: dotsGfx, count: SOCIAL_CARDS.length, startX: dotsStartX, y: dotsY, gap: dotGap, r: dotR };
+    const dotHitSize = Math.max(28, dotR * 4);
+    const dotHits = [];
+    for (let i = 0; i < SOCIAL_CARDS.length; i++) {
+      const hitX = dotsStartX + i * dotGap;
+      const hitRect = this.add.rectangle(hitX, dotsY, dotHitSize, dotHitSize, 0xffffff, 0.001)
+        .setInteractive({ useHandCursor: true });
+      this.socialContainer.add(hitRect);
+      hitRect.on('pointerup', (p, lx, ly, e) => {
+        if (e && e.stopPropagation) e.stopPropagation();
+        playOnce(this.game, 'ui_click', { throttleMs: 80, volume: 0.5 });
+        this._jumpSocial(i);
+      });
+      dotHits.push(hitRect);
+    }
+    dotsMeta.hits = dotHits;
 
     // State: which card is showing + auto-cycle timer (resets on tap).
     if (typeof this._socialIdx !== 'number') this._socialIdx = 0;
@@ -1695,6 +1713,21 @@ export default class HomeScene extends Phaser.Scene {
     this._socialIdx = ((this._socialIdx | 0) + delta + SOCIAL_CARDS.length) % SOCIAL_CARDS.length;
     this._refreshSocialPanel();
     if (manual) this._startSocialAutoCycle();
+  }
+
+  /** Jump straight to a specific card index (dot tap). No-op if the
+   *  index is already current — avoids a needless cross-fade. Resets
+   *  the auto-cycle timer just like a manual arrow tap would. */
+  _jumpSocial(idx) {
+    if (!this._socialPanel) return;
+    const target = ((idx | 0) % SOCIAL_CARDS.length + SOCIAL_CARDS.length) % SOCIAL_CARDS.length;
+    if (target === ((this._socialIdx | 0) % SOCIAL_CARDS.length + SOCIAL_CARDS.length) % SOCIAL_CARDS.length) {
+      this._startSocialAutoCycle();
+      return;
+    }
+    this._socialIdx = target;
+    this._refreshSocialPanel();
+    this._startSocialAutoCycle();
   }
 
   _startSocialAutoCycle() {
