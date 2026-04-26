@@ -65,11 +65,14 @@ export const SOCIAL_CARDS = [
       type: 'modal',
       title: 'Ethereum challenge',
       body:
-        'Blockyard is part of an Ethereum challenge. You can sign and mint ' +
-        "any level you publish so your authorship lives on-chain as an " +
-        'ERC-721 on Base Sepolia.\n\n' +
-        "The server checks your signature before publishing. It's all opt-in. " +
-        'Connect a wallet from the publish flow if you want to mint.',
+        'You can mint your published levels on Base Sepolia so authorship ' +
+        'lives on-chain.\n\n' +
+        'The mint flow is OFF by default. To turn it on:\n' +
+        '  1. Open Settings (gear icon).\n' +
+        '  2. Toggle "Ethereum mint flow" ON.\n' +
+        '  3. Publish a level. Wallet controls appear in the Export panel.\n\n' +
+        'You\u2019ll need a Base Sepolia wallet with a small amount of test ' +
+        'ETH for gas.',
     },
     iconKind: 'eth',
   },

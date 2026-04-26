@@ -9,6 +9,7 @@ import { AuthorPrompt } from './AuthorPrompt.js';
 import { platform } from '../../platform/index.js';
 import { copyText } from './clipboard.js';
 import { shareLevel, canNativeShare, shareBaseForCurrentOrigin } from './socialShare.js';
+import { getEthOptIn } from '../../eth/userPref.js';
 
 const SHIELD_DEPTH = 9000;
 const PANEL_DEPTH  = 9001;
@@ -65,9 +66,11 @@ export class ExportPanel {
     this.shield = this.scene.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0.55)
       .setDepth(SHIELD_DEPTH).setInteractive();
 
-    // The wallet row only appears when the platform supports eth (web with
-    // a deployed contract). Other targets keep the legacy 3-row form.
-    this._walletEnabled = !!(platform && platform.ethEnabled);
+    // The wallet row only appears when the build supports eth (web with a
+    // deployed contract) AND the user has opted in via Settings. Default
+    // is OFF so the average player never sees a wallet prompt — eth is
+    // an optional advanced flow, not a publish requirement.
+    this._walletEnabled = !!(platform && platform.ethEnabled) && getEthOptIn();
     const extraRows = this._walletEnabled ? 1 : 0;
 
     const panelW = Math.min(560, width - 60);
