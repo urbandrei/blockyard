@@ -1,27 +1,40 @@
-// Layered music bed. All 5 layers play simultaneously on a single loop;
-// layer 1 is always audible and layers 2..5 start muted and fade in as
+// Layered music bed. All layers play simultaneously on a single loop;
+// layer 1 is always audible and layers 2..3 start muted and fade in as
 // the player makes progress (factories + red border funnels reached).
+// Layers 5 + 6 are CELEBRATION tracks — also started at boot so they
+// stay phase-locked with 1..3, but kept silent until a cinematic
+// (section intro / credits) fades them in.
 //
 // Every layer is the same length (trimmed to an exact number of 110 BPM
 // sim cycles) so starting them all together keeps them phase-locked —
-// the melodic parts stack cleanly.
+// the melodic parts stack cleanly. All 5 tracks (1, 2, 3, 5, 6) are
+// loaded + started together at MusicEngine.start() so they stay sync'd
+// for the entire session.
 //
 // API:
-//   initMusicEngine(game)             — once, from PreloadScene.
-//   pauseMusic() / resumeMusic()      — PlayerScene sim-state sync.
-//   setActiveLayerCount(n)            — fade-to-active for first N layers.
-//   fadeInNextLayer()                 — activate one more layer.
-//   fadeInAllLayers()                 — ensure every layer is active.
-//   fadeOutAll()                      — ramp every layer down to 0.
-//   resetLayersToInitial()            — layer 1 on, 2..5 muted (no fade).
+//   initMusicEngine(game)               — once, from PreloadScene.
+//   pauseMusic() / resumeMusic()        — PlayerScene sim-state sync.
+//   setActiveLayerCount(n)              — fade-to-active for first N bed layers.
+//   fadeInNextLayer()                   — activate one more bed layer.
+//   fadeInAllLayers()                   — ensure every bed layer (1..3) is active.
+//   fadeOutAll()                        — ramp every bed layer down to 0.
+//   fadeOutToLayerOne()                 — ramp 2..3 down, leave layer 1 audible.
+//   resetLayersToInitial()              — layer 1 on, 2..3 + 5 + 6 muted (no fade).
+//   fadeInCelebrationLayers(durationMs) — slowly + gently bring layer_5 + 6 in.
+//   fadeOutCelebrationLayers(durationMs)— ramp layer_5 + 6 back to silent.
 
 import { BEAT_MS } from '../constants.js';
 import { musicGain } from './settings.js';
 
 const LAYER_COUNT   = 3;
+const CELEBRATION_KEYS = ['layer_5', 'layer_6']; // celebratory cues, phase-locked w/ bed
 const DEFAULT_VOL   = 0.5;
 const FADE_IN_MS    = 600;          // initial boot + focus regain
 const RESUME_MS     = 200;          // sim-resume ramp
+// Celebration-layer envelopes — slow + gentle by default so the layers
+// well up under the bed instead of slamming in.
+const CELEB_FADE_IN_MS  = 4500;
+const CELEB_FADE_OUT_MS = 1800;
 // Every layer fade-in starts on a 4-beat bar boundary and ramps across
 // 3 beats — slow enough that the victory swell feels like a reveal
 // rather than a snap. Bar grid is anchored to game.loop.time = 0
@@ -61,6 +74,8 @@ export function fadeInToLayers(n)      { if (engine) engine.fadeInToLayers(n); }
 export function fadeOutAll()           { if (engine) engine.fadeOutAll(); }
 export function fadeOutToLayerOne(ms)  { if (engine) engine.fadeOutToLayerOne(ms); }
 export function resetLayersToInitial() { if (engine) engine.resetLayersToInitial(); }
+export function fadeInCelebrationLayers(ms)  { if (engine) engine.fadeInCelebrationLayers(ms); }
+export function fadeOutCelebrationLayers(ms) { if (engine) engine.fadeOutCelebrationLayers(ms); }
 export function isMusicPlaying() { return !!(engine && engine.tracks[0] && engine.tracks[0].isPlaying); }
 
 class MusicEngine {
@@ -74,6 +89,12 @@ class MusicEngine {
     // index 0 (= track "layer_1") starts active; everything above starts at 0.
     this._activeCount = 1;
     this._pausedByBlur = false;
+    // Celebration tracks — layer_5 + layer_6, started at the same boot
+    // moment as the bed so they stay phase-locked, but kept silent
+    // until a cinematic fades them in.
+    this.celebrationTracks  = new Array(CELEBRATION_KEYS.length).fill(null);
+    this.celebrationFades   = new Array(CELEBRATION_KEYS.length).fill(null);
+    this._celebrationActive = new Array(CELEBRATION_KEYS.length).fill(false);
     // Master envelope — drives the initial fade-in + focus-regain ramp.
     // This MULTIPLIES the per-layer volume so all layers ride the same
     // global level while their individual activation curves run.
@@ -88,6 +109,19 @@ class MusicEngine {
         const snd = this.game.sound.add(key, { loop: true, volume: 0 });
         snd.play();
         this.tracks[i] = snd;
+      } catch (e) {
+        console.warn(`[music] failed to start ${key}`, e);
+      }
+    }
+    // Celebration tracks — started at the SAME instant as the bed so
+    // they stay perfectly phase-locked. Loop continuously at volume 0
+    // until fadeInCelebrationLayers() rolls them in.
+    for (let i = 0; i < CELEBRATION_KEYS.length; i++) {
+      const key = CELEBRATION_KEYS[i];
+      try {
+        const snd = this.game.sound.add(key, { loop: true, volume: 0 });
+        snd.play();
+        this.celebrationTracks[i] = snd;
       } catch (e) {
         console.warn(`[music] failed to start ${key}`, e);
       }
@@ -111,10 +145,18 @@ class MusicEngine {
       try { snd.stop(); snd.destroy(); } catch (e) {}
     }
     this.tracks.fill(null);
+    for (const snd of this.celebrationTracks) {
+      if (!snd) continue;
+      try { snd.stop(); snd.destroy(); } catch (e) {}
+    }
+    this.celebrationTracks.fill(null);
   }
 
   pause() {
     for (const snd of this.tracks) {
+      if (snd && snd.isPlaying) { try { snd.pause(); } catch (e) {} }
+    }
+    for (const snd of this.celebrationTracks) {
       if (snd && snd.isPlaying) { try { snd.pause(); } catch (e) {} }
     }
     this._masterFade = null;
@@ -126,6 +168,13 @@ class MusicEngine {
 
   resume() {
     for (const snd of this.tracks) {
+      if (!snd) continue;
+      try {
+        if (snd.isPaused) snd.resume();
+        else if (!snd.isPlaying) snd.play();
+      } catch (e) {}
+    }
+    for (const snd of this.celebrationTracks) {
       if (!snd) continue;
       try {
         if (snd.isPaused) snd.resume();
@@ -219,15 +268,71 @@ class MusicEngine {
         else snd.volume = v * this._master;
       } catch (e) {}
     }
+    // Celebration tracks also snap to silent on a fresh run.
+    for (let i = 0; i < CELEBRATION_KEYS.length; i++) {
+      this.celebrationFades[i] = null;
+      this._celebrationActive[i] = false;
+      const snd = this.celebrationTracks[i];
+      if (!snd) continue;
+      try {
+        if (typeof snd.setVolume === 'function') snd.setVolume(0);
+        else snd.volume = 0;
+      } catch (e) {}
+    }
+  }
+
+  // Slowly + gently bring layer_5 + layer_6 up to DEFAULT_VOL. Both
+  // tracks have been looping silently since boot, so they're already
+  // phase-locked with layers 1..3 at fade-in time.
+  fadeInCelebrationLayers(durationMs = CELEB_FADE_IN_MS) {
+    for (let i = 0; i < CELEBRATION_KEYS.length; i++) {
+      this._celebrationActive[i] = true;
+      this._beginCelebrationFade(i, DEFAULT_VOL, durationMs);
+    }
+  }
+
+  fadeOutCelebrationLayers(durationMs = CELEB_FADE_OUT_MS) {
+    for (let i = 0; i < CELEBRATION_KEYS.length; i++) {
+      this._celebrationActive[i] = false;
+      this._beginCelebrationFade(i, 0, durationMs);
+    }
+  }
+
+  _beginCelebrationFade(idx, target, durationMs) {
+    if (idx < 0 || idx >= this.celebrationTracks.length) return;
+    const now = this.game.loop.time;
+    const current = this._celebrationVolumeUnmastered(idx);
+    if (current === target) { this.celebrationFades[idx] = null; return; }
+    this.celebrationFades[idx] = { start: now, from: current, to: target, duration: durationMs };
+  }
+
+  _celebrationVolumeUnmastered(idx) {
+    const fade = this.celebrationFades[idx];
+    if (!fade) return this._celebrationActive[idx] ? DEFAULT_VOL : 0;
+    const now = this.game.loop.time;
+    const elapsed = now - fade.start;
+    if (elapsed >= fade.duration) return fade.to;
+    const t = elapsed / fade.duration;
+    const eased = 1 - (1 - t) * (1 - t);
+    return fade.from + (fade.to - fade.from) * eased;
   }
 
   _onBlur() {
-    this._pausedByBlur = this.tracks.some((s) => s && s.isPlaying);
+    // Browsers commonly fire BOTH 'blur' and 'hidden' (or pair them with
+    // SDK pause hooks). Latch on the first call so a duplicate event can't
+    // observe the now-paused tracks and reset _pausedByBlur to false —
+    // that's how music gets stuck silent until the next level change.
+    if (this._pausedByBlur) return;
+    const anyPlaying =
+      this.tracks.some((s) => s && s.isPlaying) ||
+      this.celebrationTracks.some((s) => s && s.isPlaying);
+    if (!anyPlaying) return;
+    this._pausedByBlur = true;
     this.pause();
   }
 
   _onFocus() {
-    if (this._pausedByBlur) { this.resume(); this._pausedByBlur = false; }
+    if (this._pausedByBlur) { this._pausedByBlur = false; this.resume(); }
   }
 
   _beginMasterFade(durationMs) {
@@ -286,6 +391,19 @@ class MusicEngine {
       // Clear the fade once it's done so we stop recomputing.
       const fade = this.fades[i];
       if (fade && (now - fade.start) >= fade.duration) this.fades[i] = null;
+      const v = baseVol * this._master * userGain;
+      try {
+        if (typeof snd.setVolume === 'function') snd.setVolume(v);
+        else snd.volume = v;
+      } catch (e) {}
+    }
+    // Celebration tracks — same envelope mechanism, separate state.
+    for (let i = 0; i < this.celebrationTracks.length; i++) {
+      const snd = this.celebrationTracks[i];
+      if (!snd) continue;
+      const baseVol = this._celebrationVolumeUnmastered(i);
+      const fade = this.celebrationFades[i];
+      if (fade && (now - fade.start) >= fade.duration) this.celebrationFades[i] = null;
       const v = baseVol * this._master * userGain;
       try {
         if (typeof snd.setVolume === 'function') snd.setVolume(v);

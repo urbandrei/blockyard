@@ -6,9 +6,11 @@ import type { RateLimiter } from './rateLimit.ts';
 import { issueToken, assertToken } from './auth.ts';
 import { verifyLevelSignature } from './eth.ts';
 import type { LevelRecord } from './types.ts';
+import { FeaturedStore } from './featuredStore.ts';
 
 export interface HttpDeps {
   store: Store;
+  featured: FeaturedStore;
   limiter: RateLimiter;
   allowedOrigins: Set<string>;
   onLevelSubmitted(rec: LevelRecord): Promise<void>;
@@ -16,7 +18,7 @@ export interface HttpDeps {
 }
 
 export function makeFetch(deps: HttpDeps) {
-  const { store, limiter, allowedOrigins } = deps;
+  const { store, featured, limiter, allowedOrigins } = deps;
 
   return async function fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -151,6 +153,59 @@ export function makeFetch(deps: HttpDeps) {
         const result = await store.toggleLike(auth.token, likeMatch[1]!, liked);
         if (!result) return json({ error: 'not found' }, 404, cors);
         return json({ liked, likes: result.likes }, 200, cors);
+      }
+
+      // --- featured ---
+      // Today's featured level (rotated lazily — first GET of a new UTC day
+      // pops the queue head and writes a new featured_levels row). Embeds
+      // the full level body so the client doesn't need a follow-up
+      // /levels/<id> fetch. Returns null entry when the DB isn't configured.
+      if (url.pathname === '/featured/today' && req.method === 'GET') {
+        const row = await featured.getToday();
+        if (!row) return json({ entry: null, level: null, nextRotateUtcMs: FeaturedStore.nextRotateUtcMs() }, 200, cors);
+        const lvl = await store.readLevel(row.levelId);
+        return json({
+          entry: row,
+          level: lvl && lvl.status === 'public' ? lvl.level : null,
+          name: lvl?.name ?? null,
+          author: lvl?.author ?? null,
+          nextRotateUtcMs: FeaturedStore.nextRotateUtcMs(),
+        }, 200, cors);
+      }
+
+      // Past featureds, light index for the arrow-browser. Each entry is
+      // hydrated with the level's name + author from the on-disk store so
+      // the client can render the panel without a follow-up fetch per arrow.
+      if (url.pathname === '/featured/history' && req.method === 'GET') {
+        const limit = Number.parseInt(url.searchParams.get('limit') ?? '30', 10) || 30;
+        const rows = await featured.getHistory(limit);
+        const entries = await Promise.all(rows.map(async (r) => {
+          const lvl = await store.readLevel(r.levelId);
+          return {
+            utcDate: r.utcDate,
+            levelId: r.levelId,
+            addedBy: r.addedBy,
+            name: lvl?.name ?? null,
+            author: lvl?.author ?? null,
+          };
+        }));
+        return json({ entries }, 200, cors);
+      }
+
+      // Full level body for one historical featured — used when the player
+      // taps an arrow to a past day and then hits PLAY.
+      const featuredDateMatch = url.pathname.match(/^\/featured\/level\/(\d{4}-\d{2}-\d{2})$/);
+      if (featuredDateMatch && req.method === 'GET') {
+        const row = await featured.getByDate(featuredDateMatch[1]!);
+        if (!row) return json({ error: 'not found' }, 404, cors);
+        const lvl = await store.readLevel(row.levelId);
+        if (!lvl || lvl.status !== 'public') return json({ error: 'not found' }, 404, cors);
+        return json({
+          entry: row,
+          level: lvl.level,
+          name: lvl.name,
+          author: lvl.author,
+        }, 200, cors);
       }
 
       // Let a caller with the admin token pre-fetch the levels they've liked,

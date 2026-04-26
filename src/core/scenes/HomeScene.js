@@ -1,6 +1,9 @@
 import Phaser from 'phaser';
-import { loadProgress } from '../progress.js';
-import { nextUnbeaten, LEVELS } from '../catalog/index.js';
+import {
+  loadProgress, isFeaturedCompleted, currentStreak, utcToday,
+} from '../progress.js';
+import { nextUnbeaten, LEVELS, SECTIONS } from '../catalog/index.js';
+import { MAIN_SECTION_COUNT } from '../themes/sectionThemes.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
 import { disableMenuBg } from '../ui/MenuBackground.js';
 import { compute920Box } from '../ui/ContentBox.js';
@@ -33,6 +36,8 @@ import {
 } from '../audio/settings.js';
 import { SettingsModal } from '../ui/SettingsModal.js';
 import { CreditsModal } from '../ui/CreditsModal.js';
+import { SocialInfoModal } from '../ui/SocialInfoModal.js';
+import { SOCIAL_CARDS, renderSocialIcon } from '../ui/SocialCards.js';
 import { BOARD_GAP, CYCLE_MS, SHAPE_SCALE, motionWarp, outlineWidth } from '../constants.js';
 
 // Home menu rendered as a miniature live level. Three factory "buttons" sit
@@ -127,6 +132,46 @@ export default class HomeScene extends Phaser.Scene {
     this._allComplete = (unbeaten === null && LEVELS.length > 0);
     this._next = unbeaten || LEVELS[LEVELS.length - 1] || null;
 
+    // Wild-West-ready: the player has cleared every level in the main
+    // four sections AND hasn't beaten a single Wild West level yet.
+    // Flips the quick-start button to a "WILD WEST" label that launches
+    // the first Wild West level when tapped.
+    this._wildWestReady = false;
+    this._wildWestNext = null;
+    {
+      const mainSections = SECTIONS.slice(0, MAIN_SECTION_COUNT);
+      const wildSections = SECTIONS.slice(MAIN_SECTION_COUNT);
+      const mainAllBeaten = mainSections.every(
+        (s) => s.levels.every((l) => beatenSet.has(l.id))
+              && (!s.boss || beatenSet.has(s.boss.id)),
+      );
+      const anyWildBeaten = wildSections.some(
+        (s) => s.levels.some((l) => beatenSet.has(l.id))
+              || (s.boss && beatenSet.has(s.boss.id)),
+      );
+      if (mainAllBeaten && !anyWildBeaten && wildSections.length > 0) {
+        const first = wildSections[0].levels[0] || null;
+        if (first) {
+          this._wildWestReady = true;
+          this._wildWestNext = first;
+        }
+      }
+    }
+
+    // Daily-featured prefetch — fire-and-forget so a slow backend doesn't
+    // delay the rest of the home screen. The panel is built every layout
+    // pass; on the first build before this resolves it shows a placeholder
+    // and re-paints itself once the data lands.
+    this._featuredHistory = [];      // [{ utcDate, levelId, name, author }]
+    this._featuredHistoryIdx = 0;    // 0 = newest (today)
+    this._featuredView = null;       // currently displayed entry
+    this._featuredTodayLevel = null; // full level body for today (cached)
+    this._featuredNextRotateMs = 0;
+    this._featuredCompletedFlag = false;
+    this._featuredLoaded = false;    // true once the async fetches complete (success or empty)
+    this._streakCount = 0;
+    this._loadFeaturedAsync();
+
     // Containers. Depths mirror PlayerScene so exterior checker covers the
     // outside of the board via the same cut-out trick.
     this.boardContainer        = this.add.container(0, 0).setDepth(0);
@@ -165,6 +210,13 @@ export default class HomeScene extends Phaser.Scene {
     // left buffer of the outer border. Same depth family as the
     // toolbar so the exterior checker can't paint over it.
     this.creditsContainer      = this.add.container(0, 0).setDepth(212);
+    // Daily-featured panel — sits in the letterbox area above the top
+    // buffer of the board. Same depth family as the credits + toolbar
+    // so it always reads on top of any background painting.
+    this.featuredContainer     = this.add.container(0, 0).setDepth(214);
+    // Social-cards carousel — mirrors the featured panel but lives in
+    // the BOTTOM letterbox below the playable area.
+    this.socialContainer       = this.add.container(0, 0).setDepth(215);
 
     this.level = this._buildLevel();
     this.factoryRefs   = new Map();   // id → { bodyWrap, funnelWrap }
@@ -223,8 +275,11 @@ export default class HomeScene extends Phaser.Scene {
       if (this._laserPrev) this._laserPrev.clear();
       this._destroyToolbar();
       this._destroyCreditsButton();
+      this._destroyFeaturedPanel();
+      this._destroySocialPanel();
       if (this._settingsModal) { try { this._settingsModal.destroy(); } catch (e) {} this._settingsModal = null; }
       if (this._creditsModal)  { try { this._creditsModal.destroy();  } catch (e) {} this._creditsModal  = null; }
+      if (this._socialModal)   { try { this._socialModal.destroy();   } catch (e) {} this._socialModal   = null; }
       if (this._titleTexts) for (const t of this._titleTexts) { try { t.destroy(); } catch (e) {} }
       this._titleTexts = null;
     });
@@ -409,6 +464,8 @@ export default class HomeScene extends Phaser.Scene {
     this._buildFactoryButtons(L);
     this._buildToolbar(L);
     this._buildCreditsButton(L);
+    this._buildFeaturedPanel(L);
+    this._buildSocialPanel(L);
 
     // Letterbox checker so the brown pattern wraps the canvas just like in
     // Player. Must run after `pxCell` + board origin are known.
@@ -658,6 +715,10 @@ export default class HomeScene extends Phaser.Scene {
   _buildFactoryButtons(L) {
     const labelFor = (idx) => {
       if (idx === 0) {
+        // Wild-West-ready: 40 main levels beaten, 0 wild west beaten →
+        // the quick-start tile becomes the entry point for the new
+        // biome instead of asking the player to dig through Level Select.
+        if (this._wildWestReady) return 'WILD WEST';
         if (this._allComplete) return 'COMPLETE';
         if (!this._next) return 'PLAY';
         // Bosses have `number === null` (stamped in catalog). Show a
@@ -671,6 +732,10 @@ export default class HomeScene extends Phaser.Scene {
     };
     const onTapFor = (idx) => {
       if (idx === 0) return () => {
+        if (this._wildWestReady && this._wildWestNext) {
+          fadeTo(this, 'Player', { levelId: this._wildWestNext.id });
+          return;
+        }
         if (this._allComplete) { fadeTo(this, 'LevelSelect'); return; }
         if (this._next) fadeTo(this, 'Player', { levelId: this._next.id });
       };
@@ -971,6 +1036,730 @@ export default class HomeScene extends Phaser.Scene {
     this._creditsButton = null;
   }
 
+  // ---------- Daily-featured panel ----------
+
+  /** Async prefetch — kicks off the network calls and refreshes the panel
+   *  once each piece lands. Safe to call multiple times; the panel re-renders
+   *  itself idempotently on every refresh. */
+  async _loadFeaturedAsync() {
+    try {
+      const today = await platform.fetchTodaysFeatured();
+      if (today && today.entry) {
+        this._featuredTodayLevel = today.level || null;
+        this._featuredNextRotateMs = today.nextRotateUtcMs || 0;
+        // Build a baseline view from today's entry. The history fetch
+        // populates the rest of the array right after.
+        this._featuredHistory = [{
+          utcDate: today.entry.utcDate,
+          levelId: today.entry.levelId,
+          name: today.name || 'Featured level',
+          author: today.author || 'unknown',
+        }];
+        this._featuredHistoryIdx = 0;
+        this._featuredView = this._featuredHistory[0];
+      } else if (today && today.nextRotateUtcMs) {
+        this._featuredNextRotateMs = today.nextRotateUtcMs;
+      }
+    } catch (e) { console.warn('[home] today featured failed', e); }
+
+    try {
+      const hist = await platform.fetchFeaturedHistory(30);
+      if (hist && Array.isArray(hist.entries) && hist.entries.length > 0) {
+        // Server returns newest-first; keep that order so idx 0 = today.
+        this._featuredHistory = hist.entries.map((e) => ({
+          utcDate: e.utcDate,
+          levelId: e.levelId,
+          name: e.name || 'Featured level',
+          author: e.author || 'unknown',
+        }));
+        // Keep the current view aligned to today (idx 0) on initial load.
+        this._featuredHistoryIdx = 0;
+        this._featuredView = this._featuredHistory[0];
+      }
+    } catch (e) { console.warn('[home] featured history failed', e); }
+
+    try { this._streakCount = await currentStreak(); } catch (e) {}
+    try {
+      if (this._featuredView) {
+        this._featuredCompletedFlag = await isFeaturedCompleted(this._featuredView.utcDate);
+      }
+    } catch (e) {}
+    this._featuredLoaded = true;
+
+    // Re-render the panel with the fresh data.
+    if (this._featuredPanel) this._refreshFeaturedPanel();
+  }
+
+  _buildFeaturedPanel(L) {
+    this._destroyFeaturedPanel();
+    const pxCell = L.pxCell;
+    const step = pxCell + BOARD_GAP;
+
+    // 7×2 cell grid in board-grid units. The factoryCenter helper gives
+    // us the local-coords center, then we place the wrap so the panel
+    // sits in the letterbox above the board: 1 cell gap above the icon
+    // row (which lives at board row 0), then 2 cells of panel.
+    const colSpan = 7;
+    const rowSpan = 2;
+    const localCells = [];
+    for (let r = 0; r < rowSpan; r++) {
+      for (let c = 0; c < colSpan; c++) localCells.push({ r, c });
+    }
+    const [localCenterX, localCenterY] = factoryCenter(localCells, pxCell, BOARD_GAP);
+    const panelLeftCol = 1;          // 1-cell margin from the board's left edge
+    const panelTopRow  = -2;         // -2 -1 are the panel; 0 is the icons row
+    const cx = L.boardOriginX + panelLeftCol * step + localCenterX;
+    const cy = L.boardOriginY + panelTopRow * step + localCenterY;
+
+    const bodyWrap = this.add.container(cx, cy);
+    this.featuredContainer.add(bodyWrap);
+
+    // Body — green when completed, yellow otherwise. Matches the Quick-
+    // Play factory's two-state palette (PLAY = green, COMPLETE = yellow)
+    // but flipped: the featured panel uses YELLOW as the "active /
+    // pulsing" state so it visually pops against the menu's grey-blue
+    // chrome, then settles to green once the player has cleared it.
+    const completed = !!this._featuredCompletedFlag;
+    const fillCol   = completed ? PLAY_FILL   : COMPLETE_FILL;
+    const strokeCol = completed ? PLAY_STROKE : COMPLETE_STROKE;
+    const body = renderFactoryBody(this, bodyWrap, {
+      cells: localCells, pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
+      fill: fillCol, stroke: strokeCol,
+    });
+    body.setPosition(-localCenterX, -localCenterY);
+
+    // Geometry for inner content + outer attachments.
+    const panelW = colSpan * step - BOARD_GAP;
+    const panelH = rowSpan * step - BOARD_GAP;
+
+    // Name + author on the LEFT side of the panel, stacked, bigger fonts.
+    // Origin (0, 0.5) so the text grows leftward as it shortens — and
+    // both rows share the same x anchor so the stack reads as a column.
+    const titleFontSize = Math.max(18, Math.floor(pxCell * 0.62));
+    const subFontSize   = Math.max(12, Math.floor(pxCell * 0.36));
+    const labelLeftX    = -panelW / 2 + pxCell * 0.55;
+    const stackGap      = Math.floor(pxCell * 0.32);
+
+    // Choose label color so it reads against the panel fill — dark text
+    // on yellow, white text on green.
+    const labelColor = completed ? '#ffffff' : '#1a2332';
+
+    const view = this._featuredView;
+    const nameText   = view ? view.name   : 'Loading…';
+    const authorText = view ? `by ${view.author}` : '';
+    // Slight downward bias so the visual center of the cap-height-only
+    // text block aligns with the geometric center of the body. Without
+    // it, descender-less labels read as floating slightly above center.
+    const verticalBias = Math.floor(pxCell * 0.10);
+    const nameLabel = this.add.text(labelLeftX, -stackGap + verticalBias, nameText, {
+      fontFamily: 'system-ui, sans-serif', fontSize: `${titleFontSize}px`,
+      fontStyle: 'bold', color: labelColor,
+    }).setOrigin(0, 0.5);
+    bodyWrap.add(nameLabel);
+    const authorLabel = this.add.text(labelLeftX, stackGap + verticalBias, authorText, {
+      fontFamily: 'system-ui, sans-serif', fontSize: `${subFontSize}px`,
+      color: completed ? '#dfe7f0' : '#3a4555',
+    }).setOrigin(0, 0.5);
+    bodyWrap.add(authorLabel);
+
+    // Timer tag — INSIDE the card, lower-right area. Larger pill below
+    // the labels so the countdown is the primary right-side affordance.
+    // Streak counter is intentionally stubbed out for now (storage in
+    // progress.js still ticks; we just don't render the badge).
+    const tagW = Math.max(80, Math.floor(pxCell * 1.7));
+    const tagH = Math.max(20, Math.floor(pxCell * 0.50));
+    const tagCx = panelW / 2 - tagW / 2 - pxCell * 0.25;     // bodyWrap-local
+    const tagCy = panelH / 2 - tagH / 2 - pxCell * 0.18;     // lower half, pushed down
+    const tagGfx = this.add.graphics();
+    tagGfx.x = tagCx;
+    tagGfx.y = tagCy;
+    bodyWrap.add(tagGfx);
+    const timerFontSize = Math.max(13, Math.floor(tagH * 0.62));
+    const timerLabel = this.add.text(tagCx, tagCy, '', {
+      fontFamily: 'system-ui, sans-serif', fontSize: `${timerFontSize}px`,
+      fontStyle: 'bold', color: '#ffffff',
+    }).setOrigin(0.5);
+    bodyWrap.add(timerLabel);
+
+    // "FEATURED!" sticker — circular with wavy edges, jutting out of
+    // the top-right corner of the card. Uses the red shape palette so
+    // it pops against the yellow body. Slight rotation gives it the
+    // hand-stamped look; a subtle wobble tween adds life.
+    const stickerOuterR = Math.max(28, Math.floor(pxCell * 0.85));
+    const stickerInnerR = Math.floor(stickerOuterR * 0.88);
+    const stickerCx = panelW / 2 - stickerOuterR * 0.65;
+    const stickerCy = -panelH / 2 + stickerOuterR * 0.40;
+    const stickerWrap = this.add.container(stickerCx, stickerCy);
+    bodyWrap.add(stickerWrap);
+    const stickerGfx = this.add.graphics();
+    stickerWrap.add(stickerGfx);
+    drawWavySticker(stickerGfx, 0, 0, stickerOuterR, stickerInnerR, 16, 0xd94c4c, 0x5a1010);
+    const stickerFontSize = Math.max(10, Math.floor(stickerInnerR * 0.30));
+    const stickerLabel = this.add.text(0, 0, 'FEATURED!', {
+      fontFamily: 'system-ui, sans-serif', fontSize: `${stickerFontSize}px`,
+      fontStyle: 'bold', color: '#ffffff',
+    }).setOrigin(0.5);
+    stickerWrap.add(stickerLabel);
+    stickerWrap.setRotation(-Math.PI / 12); // -15°
+    // Wobble tween — small back-and-forth rotation for life.
+    this.tweens.add({
+      targets: stickerWrap,
+      rotation: { from: -Math.PI / 12 - 0.05, to: -Math.PI / 12 + 0.05 },
+      duration: 1100, ease: 'Sine.InOut',
+      yoyo: true, repeat: -1,
+    });
+
+    // Hit rect over the body for tap-to-launch.
+    const hit = this.add.rectangle(cx, cy, panelW - 12, panelH - 4, 0xffffff, 0)
+      .setInteractive({ useHandCursor: true });
+    this.featuredContainer.add(hit);
+
+    // Tap juice — same scale-spring as the credits button, but we ALSO
+    // run a continuous breathing pulse on the bodyWrap when the panel is
+    // not yet completed, so the user's eye is drawn to today's challenge.
+    const killAll = () => { try { this.tweens.killTweensOf(bodyWrap); } catch (e) {} };
+    const tweenScale = (to, duration, ease) => {
+      killAll();
+      this.tweens.add({ targets: bodyWrap, scaleX: to, scaleY: to, duration, ease });
+    };
+    let pulseTween = null;
+    const startPulse = () => {
+      if (pulseTween) return;
+      // Guard against a stale delayedCall that fires after this panel
+      // was torn down by a relayout — scene + container would be gone.
+      if (!bodyWrap || !bodyWrap.scene) return;
+      pulseTween = this.tweens.add({
+        targets: bodyWrap,
+        scaleX: 1.025, scaleY: 1.025,
+        duration: 600, ease: 'Sine.InOut',
+        yoyo: true, repeat: -1,
+      });
+    };
+    const stopPulse = () => {
+      if (!pulseTween) return;
+      try { pulseTween.stop(); } catch (e) {}
+      try { this.tweens.killTweensOf(bodyWrap); } catch (e) {}
+      bodyWrap.setScale(1);
+      pulseTween = null;
+    };
+    if (!completed) startPulse();
+
+    hit.on('pointerover', () => { stopPulse(); tweenScale(1.04, 140, 'Sine.Out'); });
+    hit.on('pointerout',  () => {
+      tweenScale(1.0, 180, 'Sine.Out');
+      // Resume pulse only when not completed.
+      if (!this._featuredCompletedFlag) {
+        // Defer so the tweenScale finishes first.
+        this.time.delayedCall(180, () => {
+          if (this._featuredPanel && !this._featuredCompletedFlag) startPulse();
+        });
+      }
+    });
+    hit.on('pointerdown', () => { stopPulse(); tweenScale(0.93, 90, 'Sine.Out'); });
+    hit.on('pointerup', () => {
+      tweenScale(1.0, 240, 'Back.Out');
+      playOnce(this.game, 'ui_click', { throttleMs: 80, volume: 0.5 });
+      this._launchFeatured();
+    });
+
+    // Arrow buttons — chevrons in the buffer columns OUTSIDE the panel
+    // (one cell to the left of the panel's left edge, one cell to the
+    // right of the right edge). Cycle through `_featuredHistory`
+    // (0 = today, larger idx = older).
+    const arrowSize = Math.max(14, Math.floor(pxCell * 0.55));
+    const arrowOutsideGap = pxCell * 0.38;
+    const arrowLeft  = this._buildFeaturedArrow(cx - panelW / 2 - arrowOutsideGap, cy, arrowSize, 'left',  () => this._cycleFeatured(+1));
+    const arrowRight = this._buildFeaturedArrow(cx + panelW / 2 + arrowOutsideGap, cy, arrowSize, 'right', () => this._cycleFeatured(-1));
+
+    this._featuredPanel = {
+      bodyWrap, body, hit, nameLabel, authorLabel,
+      tagGfx, timerLabel, tagW, tagH,
+      stickerWrap, stickerGfx, stickerLabel,
+      arrowLeft, arrowRight,
+      panelW, panelH, pxCell,
+      pulseControls: { startPulse, stopPulse },
+    };
+
+    this._refreshFeaturedPanel();
+  }
+
+  /** Re-paint the panel's text + completion color + streak badge + arrow
+   *  enabled-state. Called after data fetches and after the player cycles
+   *  the view via the arrows. Doesn't tear down the panel. */
+  async _refreshFeaturedPanel() {
+    const p = this._featuredPanel;
+    if (!p) return;
+    const view = this._featuredView;
+
+    // Completion state for the currently-displayed entry.
+    let completed = false;
+    try {
+      if (view) completed = await isFeaturedCompleted(view.utcDate);
+    } catch (e) {}
+    this._featuredCompletedFlag = completed;
+
+    // Replace the body so the fill swaps cleanly. Yellow when uncompleted
+    // (active state), green when completed.
+    if (p.body) try { p.body.destroy(); } catch (e) {}
+    const localCells = [];
+    const colSpan = 7, rowSpan = 2;
+    for (let r = 0; r < rowSpan; r++) for (let c = 0; c < colSpan; c++) localCells.push({ r, c });
+    const [lcx, lcy] = factoryCenter(localCells, p.pxCell, BOARD_GAP);
+    const fillCol   = completed ? PLAY_FILL   : COMPLETE_FILL;
+    const strokeCol = completed ? PLAY_STROKE : COMPLETE_STROKE;
+    const body = renderFactoryBody(this, p.bodyWrap, {
+      cells: localCells, pxCell: p.pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
+      fill: fillCol, stroke: strokeCol,
+    });
+    body.setPosition(-lcx, -lcy);
+    p.bodyWrap.sendToBack(body);
+    p.body = body;
+
+    // Re-tint labels for contrast against the new fill — dark on yellow,
+    // white on green.
+    const labelColor = completed ? '#ffffff' : '#1a2332';
+    const subColor   = completed ? '#dfe7f0' : '#3a4555';
+    p.nameLabel.setColor(labelColor);
+    p.authorLabel.setColor(subColor);
+
+    // Labels + interaction state. When there's no view to show, the
+    // panel acts as a passive placeholder — no tap, no pulse.
+    if (view) {
+      p.nameLabel.setText(view.name);
+      p.authorLabel.setText(`by ${view.author}`);
+      try { p.hit.setInteractive({ useHandCursor: true }); } catch (e) {}
+    } else {
+      p.nameLabel.setText(this._featuredLoaded ? 'No featured level yet' : 'Loading…');
+      p.authorLabel.setText(this._featuredLoaded ? 'check back tomorrow' : '');
+      try { p.hit.disableInteractive(); } catch (e) {}
+    }
+
+    // Countdown tag in the lower-right of the card. Visible when we're
+    // showing today's entry and have a future rotate timestamp; past
+    // entries hide it (no meaningful countdown).
+    p.tagGfx.clear();
+    if (view && view.utcDate === utcToday() && this._featuredNextRotateMs) {
+      p.tagGfx.fillStyle(0x1a2332, 0.92);
+      p.tagGfx.fillRoundedRect(-p.tagW / 2, -p.tagH / 2, p.tagW, p.tagH, 8);
+      p.tagGfx.lineStyle(2, 0xffffff, 1);
+      p.tagGfx.strokeRoundedRect(-p.tagW / 2, -p.tagH / 2, p.tagW, p.tagH, 8);
+      p.timerLabel.setVisible(true);
+    } else {
+      p.timerLabel.setVisible(false);
+    }
+
+    // Sticker fades to background when the level has been completed —
+    // the green panel + completion glow already telegraph "done".
+    if (p.stickerWrap) p.stickerWrap.setAlpha(completed ? 0.55 : 1);
+
+    // Arrow visibility — left moves to OLDER entries (idx +1), right
+    // moves to NEWER (idx -1). Hide entirely at boundaries so the
+    // player isn't shown an arrow that points to nothing.
+    const idx = this._featuredHistoryIdx | 0;
+    const histLen = this._featuredHistory ? this._featuredHistory.length : 0;
+    if (p.arrowLeft)  p.arrowLeft.setVisible(idx < histLen - 1);
+    if (p.arrowRight) p.arrowRight.setVisible(idx > 0);
+
+    // Pulse — bouncing only when not completed AND we're showing today.
+    const shouldPulse = !completed && view && view.utcDate === utcToday();
+    if (shouldPulse) p.pulseControls.startPulse();
+    else p.pulseControls.stopPulse();
+  }
+
+  /** Builds a single filled-triangle arrow at (cx, cy) pointing OUTWARD
+   *  (away from the panel). `dir` says which side of the panel it sits
+   *  on — `'left'` arrow lives on the left and points further left,
+   *  `'right'` arrow lives on the right and points further right. Same
+   *  triangle geometry the WildWest gate + GO BACK bar use in
+   *  LevelSelectScene. Returns a handle with .setEnabled(bool) and a
+   *  .destroy() for teardown. */
+  _buildFeaturedArrow(cx, cy, size, dir, onTap) {
+    const wrap = this.add.container(cx, cy);
+    this.featuredContainer.add(wrap);
+    const draw = (color, alpha) => {
+      const g = this.add.graphics();
+      // Stretched vertically vs the WildWest gate's flatter triangle so
+      // the arrows read as tall navigation chevrons — taller half-height
+      // with the same half-width, giving a slimmer-but-taller silhouette.
+      const halfH = size * 0.58;
+      const halfW = size * 0.32;
+      g.fillStyle(color, alpha);
+      g.beginPath();
+      if (dir === 'left') {
+        // Two vertices on the right, point on the left → '◀'.
+        g.moveTo( halfW, -halfH);
+        g.lineTo( halfW,  halfH);
+        g.lineTo(-halfW, 0);
+      } else {
+        // Two vertices on the left, point on the right → '▶'.
+        g.moveTo(-halfW, -halfH);
+        g.lineTo(-halfW,  halfH);
+        g.lineTo( halfW, 0);
+      }
+      g.closePath();
+      g.fillPath();
+      return g;
+    };
+    let glyph = draw(0xffffff, 1);
+    wrap.add(glyph);
+    const hitSize = size * 1.6;
+    const hit = this.add.rectangle(cx, cy, hitSize, hitSize, 0xffffff, 0)
+      .setInteractive({ useHandCursor: true });
+    this.featuredContainer.add(hit);
+
+    let enabled = true;
+    const repaint = () => {
+      try { glyph.destroy(); } catch (e) {}
+      glyph = draw(enabled ? 0xffffff : 0xffffff, enabled ? 1 : 0.25);
+      wrap.add(glyph);
+    };
+    const tweenScale = (to, duration, ease) => {
+      try { this.tweens.killTweensOf(wrap); } catch (e) {}
+      this.tweens.add({ targets: wrap, scaleX: to, scaleY: to, duration, ease });
+    };
+    hit.on('pointerover', () => { if (enabled) tweenScale(1.15, 160, 'Back.Out'); });
+    hit.on('pointerout',  () => tweenScale(1.0, 180, 'Sine.Out'));
+    hit.on('pointerdown', () => { if (enabled) tweenScale(0.82, 90, 'Sine.Out'); });
+    hit.on('pointerup',   (p, lx, ly, e) => {
+      if (e) e.stopPropagation();
+      if (!enabled) return;
+      // Springy release.
+      try { this.tweens.killTweensOf(wrap); } catch (e2) {}
+      this.tweens.add({
+        targets: wrap, scaleX: 1.22, scaleY: 1.22, duration: 90, ease: 'Sine.Out',
+        onComplete: () => this.tweens.add({
+          targets: wrap, scaleX: 1, scaleY: 1, duration: 160, ease: 'Back.Out',
+        }),
+      });
+      playOnce(this.game, 'ui_click', { throttleMs: 80, volume: 0.4 });
+      if (onTap) onTap();
+    });
+
+    return {
+      setEnabled(v) { enabled = !!v; repaint(); hit.input && (hit.input.cursor = v ? 'pointer' : 'default'); },
+      setVisible(v) {
+        try { wrap.setVisible(v); } catch (e) {}
+        try { hit.setVisible(v); v ? hit.setInteractive({ useHandCursor: true }) : hit.disableInteractive(); } catch (e) {}
+      },
+      destroy() {
+        try { glyph.destroy(); } catch (e) {}
+        try { wrap.destroy(true); } catch (e) {}
+        try { hit.destroy(); } catch (e) {}
+      },
+    };
+  }
+
+  /** Cycle the displayed featured entry. delta = +1 means OLDER, -1 NEWER. */
+  _cycleFeatured(delta) {
+    const hist = this._featuredHistory || [];
+    if (hist.length === 0) return;
+    const next = Math.max(0, Math.min(hist.length - 1, (this._featuredHistoryIdx | 0) + delta));
+    if (next === this._featuredHistoryIdx) return;
+    this._featuredHistoryIdx = next;
+    this._featuredView = hist[next];
+    this._refreshFeaturedPanel();
+  }
+
+  /** Tap-handler for the panel body — launches the displayed featured. */
+  async _launchFeatured() {
+    const view = this._featuredView;
+    if (!view) return;
+    // For today's entry we already have the level body cached. For past
+    // entries we fetch on demand.
+    const today = utcToday();
+    if (view.utcDate === today && this._featuredTodayLevel) {
+      fadeTo(this, 'Player', {
+        levelData: this._featuredTodayLevel,
+        communityId: view.levelId,
+        communityName: view.name,
+        featuredUtcDate: view.utcDate,
+      });
+      return;
+    }
+    let payload = null;
+    try { payload = await platform.fetchFeaturedByDate(view.utcDate); }
+    catch (e) { console.warn('[home] fetchFeaturedByDate failed', e); }
+    if (!payload || !payload.level) return;
+    fadeTo(this, 'Player', {
+      levelData: payload.level,
+      communityId: view.levelId,
+      communityName: view.name,
+      featuredUtcDate: view.utcDate,
+    });
+  }
+
+  _destroyFeaturedPanel() {
+    const p = this._featuredPanel;
+    if (!p) return;
+    try { this.tweens.killTweensOf(p.bodyWrap); } catch (e) {}
+    // bodyWrap.destroy(true) recursively destroys every child: body,
+    // labels, circle, streak label, tag, timer label — all cleaned up.
+    try { p.bodyWrap.destroy(true); } catch (e) {}
+    try { p.hit.destroy(); } catch (e) {}
+    try { if (p.arrowLeft)   p.arrowLeft.destroy(); } catch (e) {}
+    try { if (p.arrowRight)  p.arrowRight.destroy(); } catch (e) {}
+    this._featuredPanel = null;
+  }
+
+  /** Recomputes the panel's countdown text. Throttled to once per second
+   *  via a stored last-tick timestamp so we don't churn Text.setText every
+   *  frame for sub-second precision the user can't see. */
+  // ---------- Social cards carousel ----------
+
+  _buildSocialPanel(L) {
+    this._destroySocialPanel();
+    if (!SOCIAL_CARDS || SOCIAL_CARDS.length === 0) return;
+    const pxCell = L.pxCell;
+    const step = pxCell + BOARD_GAP;
+
+    // Mirror of the featured panel layout but in the BOTTOM letterbox.
+    // 7 cells wide, 2 cells tall, centered horizontally, sitting
+    // directly below the board (top edge at row BOARD_ROWS = 9).
+    const colSpan = 7;
+    const rowSpan = 2;
+    const localCells = [];
+    for (let r = 0; r < rowSpan; r++) {
+      for (let c = 0; c < colSpan; c++) localCells.push({ r, c });
+    }
+    const [localCenterX, localCenterY] = factoryCenter(localCells, pxCell, BOARD_GAP);
+    const panelLeftCol = 1;
+    const panelTopRow  = BOARD_ROWS;        // immediately below the board
+    const cx = L.boardOriginX + panelLeftCol * step + localCenterX;
+    const cy = L.boardOriginY + panelTopRow * step + localCenterY;
+
+    const bodyWrap = this.add.container(cx, cy);
+    this.socialContainer.add(bodyWrap);
+
+    // Body — same factory-styled rounded rect as the featured panel,
+    // using the standard grey palette so it doesn't visually compete
+    // with the featured (which is yellow/green) above the playfield.
+    const body = renderFactoryBody(this, bodyWrap, {
+      cells: localCells, pxCell, pxGap: BOARD_GAP, scale: SHAPE_SCALE,
+    });
+    body.setPosition(-localCenterX, -localCenterY);
+
+    const panelW = colSpan * step - BOARD_GAP;
+    const panelH = rowSpan * step - BOARD_GAP;
+
+    // Icon on the LEFT — mirror of the featured panel's right-side
+    // sticker. Drawn into a graphics anchored in bodyWrap-local coords.
+    const iconSize = Math.max(36, Math.floor(pxCell * 1.05));
+    const iconCx = -panelW / 2 + iconSize * 0.55 + pxCell * 0.42;
+    const iconWrap = this.add.container(iconCx, 0);
+    bodyWrap.add(iconWrap);
+    // renderSocialIcon manages the wrap's children (an Image for branded
+    // cards, a Graphics for the hand-drawn fallbacks), so we don't
+    // pre-create a Graphics here — _refreshSocialPanel populates it.
+
+    // Text stack on the RIGHT of the icon. Title (bold) above subtitle.
+    const titleFontSize = Math.max(16, Math.floor(pxCell * 0.50));
+    const subFontSize   = Math.max(11, Math.floor(pxCell * 0.32));
+    const stackGap      = Math.floor(pxCell * 0.28);
+    const verticalBias  = Math.floor(pxCell * 0.10);
+    const labelLeftX    = iconCx + iconSize * 0.55 + pxCell * 0.20;
+    const titleLabel = this.add.text(labelLeftX, -stackGap + verticalBias, '', {
+      fontFamily: 'system-ui, sans-serif', fontSize: `${titleFontSize}px`,
+      fontStyle: 'bold', color: '#ffffff',
+    }).setOrigin(0, 0.5);
+    bodyWrap.add(titleLabel);
+    const subLabel = this.add.text(labelLeftX, stackGap + verticalBias, '', {
+      fontFamily: 'system-ui, sans-serif', fontSize: `${subFontSize}px`,
+      color: '#dfe7f0',
+    }).setOrigin(0, 0.5);
+    bodyWrap.add(subLabel);
+
+    // Tap hit — full panel area.
+    const hit = this.add.rectangle(cx, cy, panelW - 12, panelH - 4, 0xffffff, 0)
+      .setInteractive({ useHandCursor: true });
+    this.socialContainer.add(hit);
+
+    // Same hover/press scale juice as the featured panel.
+    const tweenScale = (to, duration, ease) => {
+      try { this.tweens.killTweensOf(bodyWrap); } catch (e) {}
+      this.tweens.add({ targets: bodyWrap, scaleX: to, scaleY: to, duration, ease });
+    };
+    hit.on('pointerover', () => tweenScale(1.03, 140, 'Sine.Out'));
+    hit.on('pointerout',  () => tweenScale(1.0, 180, 'Sine.Out'));
+    hit.on('pointerdown', () => tweenScale(0.94, 90, 'Sine.Out'));
+    hit.on('pointerup', () => {
+      tweenScale(1.0, 240, 'Back.Out');
+      playOnce(this.game, 'ui_click', { throttleMs: 80, volume: 0.5 });
+      this._activateSocialCard();
+    });
+
+    // Cycling arrows — same triangle style as the featured panel,
+    // tucked just outside the card. The carousel loops, so neither
+    // arrow ever needs to be hidden at a boundary.
+    const arrowSize = Math.max(14, Math.floor(pxCell * 0.55));
+    const arrowOutsideGap = pxCell * 0.38;
+    const arrowLeft  = this._buildFeaturedArrow(cx - panelW / 2 - arrowOutsideGap, cy, arrowSize, 'left',  () => this._cycleSocial(-1, true));
+    const arrowRight = this._buildFeaturedArrow(cx + panelW / 2 + arrowOutsideGap, cy, arrowSize, 'right', () => this._cycleSocial(+1, true));
+
+    // Dots indicator — one small circle per card, sitting just below
+    // the panel. The active card's dot is fully white; others are
+    // dimmer outlines.
+    const dotsY = cy + panelH / 2 + Math.max(10, Math.floor(pxCell * 0.32));
+    const dotR = Math.max(3, Math.floor(pxCell * 0.10));
+    const dotGap = dotR * 3;
+    const dotsTotalW = (SOCIAL_CARDS.length - 1) * dotGap;
+    const dotsStartX = cx - dotsTotalW / 2;
+    const dotsGfx = this.add.graphics().setDepth(0);
+    this.socialContainer.add(dotsGfx);
+    const dotsMeta = { gfx: dotsGfx, count: SOCIAL_CARDS.length, startX: dotsStartX, y: dotsY, gap: dotGap, r: dotR };
+
+    // State: which card is showing + auto-cycle timer (resets on tap).
+    if (typeof this._socialIdx !== 'number') this._socialIdx = 0;
+    this._socialPanel = {
+      bodyWrap, body, hit, iconWrap, iconSize,
+      titleLabel, subLabel, arrowLeft, arrowRight,
+      dots: dotsMeta, panelW, panelH,
+    };
+    // First render is instant (no fade) — there's nothing on the panel
+    // yet to fade out from. Subsequent calls (from _cycleSocial) animate.
+    this._refreshSocialPanel({ instant: true });
+    this._startSocialAutoCycle();
+  }
+
+  /** Paint the current card's icon + labels + dots. Default behavior
+   *  cross-fades the per-card content (icon + title + subtitle) over
+   *  ~400ms total — fade out, swap, fade back in — so the carousel
+   *  reads as a smooth transition instead of a hard cut. Pass
+   *  `{ instant: true }` to skip the fade (used on initial build). The
+   *  dots indicator updates immediately either way; the body, hit, and
+   *  arrows aren't touched. */
+  _refreshSocialPanel(opts = {}) {
+    const p = this._socialPanel;
+    if (!p) return;
+    const idx = ((this._socialIdx | 0) + SOCIAL_CARDS.length) % SOCIAL_CARDS.length;
+    this._socialIdx = idx;
+    const card = SOCIAL_CARDS[idx];
+
+    // Dots update immediately — they're a navigational signal so the
+    // user knows the cycle has happened even before the fade lands.
+    const dm = p.dots;
+    dm.gfx.clear();
+    for (let i = 0; i < dm.count; i++) {
+      const x = dm.startX + i * dm.gap;
+      if (i === idx) {
+        dm.gfx.fillStyle(0xffffff, 1);
+        dm.gfx.fillCircle(x, dm.y, dm.r);
+      } else {
+        dm.gfx.fillStyle(0xffffff, 0.35);
+        dm.gfx.fillCircle(x, dm.y, dm.r * 0.85);
+      }
+    }
+
+    const swapContent = () => {
+      p.titleLabel.setText(card.title);
+      p.subLabel.setText(card.subtitle || '');
+      renderSocialIcon(this, p.iconWrap, card.iconKind, p.iconSize);
+    };
+
+    const targets = [p.iconWrap, p.titleLabel, p.subLabel];
+    // Kill any in-flight fade so a rapid second cycle doesn't end up
+    // mid-tween — the new tween starts fresh from current alpha.
+    if (this._socialFadeTween) {
+      try { this._socialFadeTween.stop(); } catch (e) {}
+      this._socialFadeTween = null;
+    }
+
+    if (opts.instant) {
+      swapContent();
+      for (const t of targets) t.setAlpha(1);
+      return;
+    }
+
+    this._socialFadeTween = this.tweens.add({
+      targets,
+      alpha: 0,
+      duration: 180,
+      ease: 'Sine.Out',
+      onComplete: () => {
+        swapContent();
+        this._socialFadeTween = this.tweens.add({
+          targets,
+          alpha: 1,
+          duration: 220,
+          ease: 'Sine.In',
+        });
+      },
+    });
+  }
+
+  /** Move the carousel by `delta` and (optionally) reset the auto-cycle
+   *  timer so a manual tap doesn't immediately get advanced again. */
+  _cycleSocial(delta, manual) {
+    if (!this._socialPanel) return;
+    this._socialIdx = ((this._socialIdx | 0) + delta + SOCIAL_CARDS.length) % SOCIAL_CARDS.length;
+    this._refreshSocialPanel();
+    if (manual) this._startSocialAutoCycle();
+  }
+
+  _startSocialAutoCycle() {
+    if (this._socialAutoTimer) {
+      try { this._socialAutoTimer.remove(false); } catch (e) {}
+      this._socialAutoTimer = null;
+    }
+    this._socialAutoTimer = this.time.addEvent({
+      delay: 7000, loop: true,
+      callback: () => this._cycleSocial(+1, false),
+    });
+  }
+
+  /** Tap-handler for the panel body — runs whatever the current card's
+   *  action is (open external link or pop up a SocialInfoModal). */
+  _activateSocialCard() {
+    const idx = ((this._socialIdx | 0) + SOCIAL_CARDS.length) % SOCIAL_CARDS.length;
+    const card = SOCIAL_CARDS[idx];
+    if (!card || !card.action) return;
+    const a = card.action;
+    if (a.type === 'link' && a.url) {
+      try { platform.openExternal(a.url); }
+      catch (e) { console.warn('[social] openExternal failed', e); }
+      return;
+    }
+    if (a.type === 'modal') {
+      if (this._socialModal) return; // already open
+      this._socialModal = new SocialInfoModal(this, {
+        title: a.title || card.title,
+        body:  a.body  || '',
+        onClose: () => { this._socialModal = null; },
+      });
+    }
+  }
+
+  _destroySocialPanel() {
+    const p = this._socialPanel;
+    if (this._socialAutoTimer) {
+      try { this._socialAutoTimer.remove(false); } catch (e) {}
+      this._socialAutoTimer = null;
+    }
+    if (!p) return;
+    try { this.tweens.killTweensOf(p.bodyWrap); } catch (e) {}
+    try { p.bodyWrap.destroy(true); } catch (e) {}
+    try { p.hit.destroy(); } catch (e) {}
+    try { if (p.arrowLeft)  p.arrowLeft.destroy(); } catch (e) {}
+    try { if (p.arrowRight) p.arrowRight.destroy(); } catch (e) {}
+    try { if (p.dots && p.dots.gfx) p.dots.gfx.destroy(); } catch (e) {}
+    this._socialPanel = null;
+  }
+
+  _tickFeaturedTimer() {
+    const p = this._featuredPanel;
+    if (!p || !p.timerLabel || !p.timerLabel.visible) return;
+    const now = Date.now();
+    if (this._featuredLastTimerSec === Math.floor(now / 1000)) return;
+    this._featuredLastTimerSec = Math.floor(now / 1000);
+
+    const target = this._featuredNextRotateMs || 0;
+    if (!target) { p.timerLabel.setText(''); return; }
+    let secs = Math.max(0, Math.floor((target - now) / 1000));
+    const h = Math.floor(secs / 3600); secs -= h * 3600;
+    const m = Math.floor(secs / 60);   secs -= m * 60;
+    const pad = (n) => n < 10 ? `0${n}` : `${n}`;
+    p.timerLabel.setText(`${pad(h)}:${pad(m)}:${pad(secs)}`);
+  }
+
   _destroyTitle() {
     if (this._titleTexts) for (const t of this._titleTexts) { try { t.destroy(); } catch (e) {} }
     this._titleTexts = null;
@@ -1075,6 +1864,9 @@ export default class HomeScene extends Phaser.Scene {
   update(time, delta) {
     if (!this.ready) return;
     this.simTime += delta;
+    // Featured countdown — recompute the HH:MM:SS-until-rotate text once
+    // per second. Cheap; just a string replace on a single Phaser.Text.
+    this._tickFeaturedTimer();
     const t = (this.simTime % CYCLE_MS) / CYCLE_MS;
     const sq = shapeSquash(t);
     // Title pulses on the opposite half-cycle from the factories, so when
@@ -1276,6 +2068,38 @@ function drawArc(g, cx, cy, r, start, end) {
     if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
   }
   g.strokePath();
+}
+
+// Draws a circular sticker / rosette with wavy edges into a Phaser
+// graphics object. `points` is the number of "petals"; the perimeter
+// is built from 2*points vertices alternating between outerR and innerR
+// so the boundary scallops smoothly.
+function drawWavySticker(g, cx, cy, outerR, innerR, points, fillColor, strokeColor) {
+  const total = points * 2;
+  g.fillStyle(fillColor, 1);
+  g.beginPath();
+  for (let i = 0; i < total; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const a = (i / total) * Math.PI * 2 - Math.PI / 2;
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  }
+  g.closePath();
+  g.fillPath();
+  if (strokeColor != null) {
+    g.lineStyle(2, strokeColor, 1);
+    g.beginPath();
+    for (let i = 0; i < total; i++) {
+      const r = i % 2 === 0 ? outerR : innerR;
+      const a = (i / total) * Math.PI * 2 - Math.PI / 2;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.closePath();
+    g.strokePath();
+  }
 }
 
 function factoryCenter(cells, pxCell, pxGap) {

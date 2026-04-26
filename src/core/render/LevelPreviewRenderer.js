@@ -18,6 +18,7 @@ import {
 import { renderBufferLabels } from './BufferLabelRenderer.js';
 import { renderFactoryBody } from './FactoryBodyRenderer.js';
 import { renderFunnels } from './FunnelRenderer.js';
+import { renderAcidPits } from './AcidPitRenderer.js';
 import {
   normalizeFactory, rotateFactoryShape, isObstacleFactory,
 } from '../model/shape.js';
@@ -58,7 +59,11 @@ export function renderLevelPreview(scene, level) {
       //   boardContainer (0) → flow (5) → funnels (15) → interactive (20)
       //   → exteriorCheckers (25) → frameShadow (140) → borderFunnels (145)
       //   → bufferLabels (150) → frameOutline (160)
+      // Acid pits sit between the interior floor and the factory funnels
+      // (matching PlayerScene's depth 7 between flow and shapes) so factories
+      // paint on top of the puddles where they overlap.
       const boardContainer        = scene.add.container(boardOriginX, boardOriginY);
+      const acidPitContainer      = scene.add.container(boardOriginX, boardOriginY);
       const funnelContainer       = scene.add.container(boardOriginX, boardOriginY);
       const interactiveContainer  = scene.add.container(boardOriginX, boardOriginY);
       const exteriorContainer     = scene.add.container(boardOriginX, boardOriginY);
@@ -70,6 +75,7 @@ export function renderLevelPreview(scene, level) {
 
       root.add([
         boardContainer,
+        acidPitContainer,
         funnelContainer,
         interactiveContainer,
         exteriorContainer,
@@ -83,6 +89,7 @@ export function renderLevelPreview(scene, level) {
       // --- Board area ---
       renderInteriorFloor(scene, boardContainer, { board: level.board, pxCell });
       renderBorder(scene, boardContainer, borderFunnelContainer, level, { pxCell, pxGap: BOARD_GAP });
+      renderAcidPits(scene, acidPitContainer, level, { pxCell, pxGap: BOARD_GAP });
 
       // Locked factories — bodies + funnels. Flow dashes are intentionally
       // omitted for the share image so the output is a clean static card
@@ -130,11 +137,12 @@ function cleanup(owned) {
 }
 
 // Simplified PlayerScene._layoutBoardAndBlueprint — no title-bar / icon
-// island slots, since the preview omits both. Blueprint outer size is
-// reference-based (REF_DIM=5) so it stays stable across levels, but the
-// slot grid count comes from the actual board: slotCols = board.cols - 1.
-// slotPx then shrinks inside the fixed outer so factories at the top-
-// right slots of a 9x9 board don't overflow past the blueprint frame.
+// island slots, since the preview omits both. Unlike the live scene
+// (which pins blueprint outer to a REF_DIM=5 reference so the chrome
+// stays stable as the player resizes), the share image makes blueprint
+// cells the SAME size as board cells: slotPx == pxCell. The blueprint
+// outer width/height tracks slotCols/slotRows so the two grids read as
+// one continuous scale stacked on top of each other.
 function computeLayout(level) {
   const board = level.board || { cols: 9, rows: 9 };
   const topPad = 24;
@@ -142,25 +150,22 @@ function computeLayout(level) {
   const bottomPad = 24;
   const sidePad = 16;
 
-  const REF_DIM = 5;
-  const refSlotCols = (REF_DIM - 2) + 1;
-  const refSlotRows = (REF_DIM - 2) + 1;
   const slotCols = Math.max(1, (board.cols - 2) + 1);
   const slotRows = Math.max(1, (board.rows - 2) + 1);
 
   const availW = VIEWPORT_W - sidePad * 2;
   const wFromBoard     = (availW - BOARD_GAP * (board.cols - 1)) / board.cols;
-  const wFromBlueprint = availW / refSlotCols;
+  const wFromBlueprint = availW / slotCols;
   const availH = VIEWPORT_H - topPad - betweenPad - bottomPad - BLUEPRINT_PAD * 2;
-  const hCellFactor = board.rows + refSlotRows;
+  const hCellFactor = board.rows + slotRows;
   const hFromVert = (availH - BOARD_GAP * (board.rows - 1)) / hCellFactor;
   const pxCell = Math.max(24, Math.floor(Math.min(wFromBoard, wFromBlueprint, hFromVert)));
 
   const boardW = board.cols * pxCell + (board.cols - 1) * BOARD_GAP;
   const boardH = board.rows * pxCell + (board.rows - 1) * BOARD_GAP;
-  const bpW = refSlotCols * pxCell;
-  const bpH = refSlotRows * pxCell;
-  const slotPx = Math.min(bpW / slotCols, bpH / slotRows);
+  const slotPx = pxCell;
+  const bpW = slotCols * slotPx;
+  const bpH = slotRows * slotPx;
 
   const boardOriginX = Math.round((VIEWPORT_W - boardW) / 2);
   const boardOriginY = topPad;

@@ -6,6 +6,7 @@ import { Store } from './store.ts';
 import { RateLimiter } from './rateLimit.ts';
 import { makeFetch } from './http.ts';
 import { ReviewBot } from './bot.ts';
+import { FeaturedStore } from './featuredStore.ts';
 
 function env(name: string, fallback?: string): string {
   const v = process.env[name] ?? fallback;
@@ -34,6 +35,9 @@ async function main() {
   await store.init();
   console.log(`[store] ready at ${store.root}`);
 
+  const featured = new FeaturedStore();
+  await featured.init(process.env.DATABASE_URL);
+
   const limiter = new RateLimiter({
     publishPerDay: envInt('RATE_PUBLISH_PER_DAY', 10),
     likePerMinute: envInt('RATE_LIKE_PER_MINUTE', 60),
@@ -41,7 +45,7 @@ async function main() {
 
   let bot: ReviewBot | null = null;
   if (botToken && reviewChannelId) {
-    bot = new ReviewBot({ token: botToken, reviewChannelId, store });
+    bot = new ReviewBot({ token: botToken, reviewChannelId, store, featured });
     await bot.start();
   } else {
     console.warn('[bot] DISCORD_BOT_TOKEN / DISCORD_REVIEW_CHANNEL_ID not set — skipping bot startup');
@@ -49,6 +53,7 @@ async function main() {
 
   const fetch = makeFetch({
     store,
+    featured,
     limiter,
     allowedOrigins,
     onLevelSubmitted: async (rec) => {

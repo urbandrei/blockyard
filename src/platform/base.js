@@ -79,6 +79,13 @@ export function createBaseAdapter(name = 'base') {
     // local community.deleteLevel() too, independent of the remote result.
     async deleteRemoteLevel(_id) { return false; },
     async rateLevel(_id, _stars) { return null; },
+
+    // Daily-featured-level fetch. Adapters that talk to the backend
+    // override these; sandboxed platforms keep the no-op stubs so the
+    // home panel cleanly hides itself when the backend is unreachable.
+    async fetchTodaysFeatured() { return null; },
+    async fetchFeaturedHistory(_limit) { return { entries: [] }; },
+    async fetchFeaturedByDate(_utcDate) { return null; },
     // URL shortener: takes a base64 share-string and returns `{code}` or
     // null if the backend is unreachable. Callers fall back to a direct
     // `?play=<base64>` URL when null.

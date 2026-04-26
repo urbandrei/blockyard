@@ -185,6 +185,43 @@ export default (function createWebAdapter() {
       }
     },
 
+    // Daily-featured-level fetch. The /featured/today response carries
+    // both the metadata row (utcDate / levelId / addedBy / etc.) AND the
+    // full level body, so the home panel can render + launch without a
+    // second fetch. Returns null on any network error so the panel
+    // gracefully hides itself rather than blocking the home screen.
+    async fetchTodaysFeatured() {
+      if (!API) return null;
+      try {
+        return await api('/featured/today');
+      } catch (e) {
+        console.warn('[web] fetchTodaysFeatured failed', e);
+        return null;
+      }
+    },
+
+    async fetchFeaturedHistory(limit) {
+      if (!API) return { entries: [] };
+      const n = Math.max(1, Math.min(100, Number(limit) || 30));
+      try {
+        return await api(`/featured/history?limit=${n}`);
+      } catch (e) {
+        console.warn('[web] fetchFeaturedHistory failed', e);
+        return { entries: [] };
+      }
+    },
+
+    async fetchFeaturedByDate(utcDate) {
+      if (!API || !utcDate) return null;
+      try {
+        return await api(`/featured/level/${encodeURIComponent(utcDate)}`);
+      } catch (e) {
+        if (e && e.status === 404) return null;
+        console.warn('[web] fetchFeaturedByDate failed', e);
+        return null;
+      }
+    },
+
     // URL shortener. Returns the short code (opaque string) for the given
     // share-string, or null on any failure — callers fall back to the raw
     // `?play=<base64>` URL so a cold API never breaks share buttons.

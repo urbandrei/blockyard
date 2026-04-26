@@ -7,6 +7,7 @@ import { LoadingOverlay } from '../ui/LoadingOverlay.js';
 import { compute920Box } from '../ui/ContentBox.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
 import { BOARD_GAP } from '../constants.js';
+import { resetCutscenes } from '../progress.js';
 
 // Mirror HomeScene's board layout so the bg tiles painted under the
 // loading overlay match the size + alignment HomeScene will paint as
@@ -86,6 +87,22 @@ export default class PreloadScene extends Phaser.Scene {
     for (let i = 1; i <= 3; i++) {
       this.load.audio(`layer_${i}`, [`audio/layer_${i}.ogg`, `audio/layer_${i}.mp3`]);
     }
+    // Standalone celebratory cues — NOT part of the looped 3-layer music
+    // bed. layer_5 plays on the section-unlock cinematic; layer_5 + layer_6
+    // play together over the end-game credits.
+    this.load.audio('layer_5', ['audio/layer_5.ogg', 'audio/layer_5.mp3']);
+    this.load.audio('layer_6', ['audio/layer_6.ogg', 'audio/layer_6.mp3']);
+
+    // Brand logos for the Home screen's social-cards carousel. SVGs are
+    // loaded as plain images (Phaser rasterizes them at draw time) so
+    // they scale cleanly to whatever size the card renders.
+    this.load.image('logo_kofi',     'logos/kofi.svg');
+    this.load.image('logo_eth',      'logos/ethereum.svg');
+    this.load.image('logo_discord',  'logos/discord.svg');
+    this.load.image('logo_twitch',   'logos/twitch.svg');
+    this.load.image('logo_playables','logos/playables.svg');
+    this.load.image('logo_wavedash', 'logos/wavedash.png');
+    this.load.image('logo_phaser',   'logos/phaser.png');
     // Decorative gears are stubbed out (see FactoryGears.js) — skip
     // their SVG preload so we don't pay the fetch cost for textures
     // that never get drawn.
@@ -111,6 +128,18 @@ export default class PreloadScene extends Phaser.Scene {
     // frame of sim catch-up (and any looping laser_beam resuming at
     // full volume) doesn't slam in all at once.
     try { installSfxFocusRamp(); } catch (e) { console.warn('[sfx] focus ramp install failed', e); }
+
+    // Dev console hooks. Open the browser dev console and call
+    // `blockyardDev.resetCutscenes()` to wipe the seen-intros list so
+    // every section unlock cinematic plays again on the next trigger.
+    if (typeof window !== 'undefined') {
+      const dev = window.blockyardDev || (window.blockyardDev = {});
+      dev.resetCutscenes = async () => {
+        const n = await resetCutscenes();
+        console.log(`[dev] cleared ${n} seen-intro entries — every section cutscene will play again on next unlock`);
+        return n;
+      };
+    }
 
     // Audio is loaded now (we're in create()). Tell the overlay it can
     // wrap up its overfill phase fast — this snaps its slow trickle

@@ -42,8 +42,9 @@ import {
   playOnce, wireUiClicks, spawnEmptyClickParticles,
   playSfxSound, createLoopingSfx, playTimedSfx,
 } from '../audio/sfx.js';
-import { getLevelById, nextLevelAfter } from '../catalog/index.js';
-import { markBeaten } from '../progress.js';
+import { getLevelById, nextLevelAfter, SECTIONS } from '../catalog/index.js';
+import { markBeaten, markFeaturedCompleted, consumeSectionIntro } from '../progress.js';
+import { SECTION_THEMES, MAIN_SECTION_COUNT } from '../themes/sectionThemes.js';
 import { fadeIn, fadeTo } from '../ui/SceneFader.js';
 import { disableMenuBg } from '../ui/MenuBackground.js';
 import {
@@ -81,12 +82,48 @@ export default class PlayerScene extends Phaser.Scene {
     // pick up on return.
     this._communityId   = (data && data.communityId)   || null;
     this._communityName = (data && data.communityName) || null;
+    // Daily-featured tag: when HomeScene's featured panel launches a level,
+    // it passes the UTC date string so we can mark it completed on victory
+    // (advancing the streak when it's today's, recording it for the
+    // history list when it's a past day's catch-up). Null for any other
+    // launch path.
+    this._featuredUtcDate = (data && data.featuredUtcDate) || null;
+    // Set by SectionIntroScene when it auto-advances back into the
+    // player so we don't ping-pong back into the intro on every level
+    // 41 entry — the intro only fires the first time anyway via
+    // consumeSectionIntro, but this short-circuit is cheaper.
+    this._skipIntroCheck = !!(data && data._skipIntroCheck);
   }
 
   async create() {
     wireUiClicks(this);
     disableMenuBg();
     fadeIn(this);
+
+    // First-time Wild West entry → redirect to the section-unlock
+    // cinematic before the level loads. Detected by walking the
+    // catalog's section index for our level id; a non-main section
+    // (idx >= MAIN_SECTION_COUNT) plus an unseen 'wild-west' intro
+    // means this is the first time the player has crossed the gate.
+    if (!this._skipIntroCheck && this.sourceLevel && this.sourceLevel.id) {
+      try {
+        let mySectionIdx = -1;
+        for (let i = 0; i < SECTIONS.length; i++) {
+          if (SECTIONS[i].levels.some((l) => l.id === this.sourceLevel.id)) { mySectionIdx = i; break; }
+        }
+        if (mySectionIdx >= MAIN_SECTION_COUNT) {
+          const sectionId = (SECTION_THEMES[MAIN_SECTION_COUNT] || {}).id;
+          const alreadySeen = await consumeSectionIntro(sectionId);
+          if (!alreadySeen) {
+            fadeTo(this, 'SectionIntro', {
+              sectionIdx: MAIN_SECTION_COUNT,
+              nextLevelId: this.sourceLevel.id,
+            });
+            return;
+          }
+        }
+      } catch (e) { console.warn('[player] wild west intro check failed', e); }
+    }
     this.ready = false;
     this.simState = 'idle';        // 'idle' | 'running' | 'paused'
     this.simTime  = 0;             // virtual clock — only advances when running
@@ -2944,6 +2981,12 @@ export default class PlayerScene extends Phaser.Scene {
     } else if (this.sourceLevel.id) {
       markBeaten(this.sourceLevel.id);
     }
+    // Daily-featured: when the launch path tagged this run with a UTC
+    // date, record the completion so the home panel flips green and the
+    // streak math (only same-day completions) advances.
+    if (this._featuredUtcDate) {
+      markFeaturedCompleted(this._featuredUtcDate);
+    }
     // All red border funnels are now satisfied — swell every remaining
     // layer to full volume. If events already unlocked everything this
     // is a no-op; otherwise it fills the mix for the victory hold.
@@ -3083,8 +3126,13 @@ export default class PlayerScene extends Phaser.Scene {
       fontFamily: 'system-ui, sans-serif', fontSize: '36px',
       color: '#ffffff',
     }).setOrigin(0.5).setDepth(8999);
-    // Disable input during the message so stray taps can't derail auto-advance.
-    if (this.input) this.input.enabled = false;
+    // Tap-to-skip: any pointerdown during the victory banner advances
+    // the transition immediately (the SceneFader's own _fading guard
+    // makes the auto-timer's later call a no-op).
+    if (this.input) {
+      this.input.enabled = true;
+      this.input.once('pointerdown', () => this._advanceAfterVictory());
+    }
     // Launch a staggered volley of 4 fireworks that runs the full length
     // of the banner hold. Each burst fills ~half the board width; they
     // sit around the banner (two above, two below) so the text stays
@@ -3146,6 +3194,43 @@ export default class PlayerScene extends Phaser.Scene {
     const next = (!isCommunity && this.sourceLevel.id) ? nextLevelAfter(this.sourceLevel.id) : null;
     // Re-enable input so SceneFader's own disable/enable cycle works cleanly.
     if (this.input) this.input.enabled = true;
+
+    // Catalog-level routing detours:
+    //  - End of section 4 (level 40) → CREDITS, every time it's beaten.
+    //  - End of section 1/2/3 (levels 10/20/30) → unlock cinematic for
+    //    the next section (Paint Spill / Acid Swamp / Laser Field), but
+    //    only the first time it's unlocked. Subsequent runs through
+    //    those levels skip the cinematic and fall through to the
+    //    next-level fade.
+    if (!isCommunity && this.sourceLevel.id) {
+      const num = (typeof this.sourceLevel.number === 'number') ? this.sourceLevel.number : null;
+      if (num === 40) {
+        fadeTo(this, 'Credits');
+        return;
+      }
+      if (num === 10 || num === 20 || num === 30) {
+        const newSectionIdx = num / 10; // 10→1 (paint), 20→2 (acid), 30→3 (laser)
+        const sectionId = (SECTION_THEMES[newSectionIdx] || {}).id;
+        // consumeSectionIntro: returns true if already seen → falls
+        // through to the standard next-level path below; false if this
+        // is the first unlock → routes through the intro cinematic.
+        consumeSectionIntro(sectionId).then((alreadySeen) => {
+          if (alreadySeen || !next) {
+            // Already seen OR no next level for some reason — fall back
+            // to the normal advance path.
+            if (next) fadeTo(this, 'Player', { levelId: next.id });
+            else      fadeTo(this, isCommunity ? 'Community' : 'LevelSelect');
+            return;
+          }
+          fadeTo(this, 'SectionIntro', { sectionIdx: newSectionIdx, nextLevelId: next.id });
+        }).catch(() => {
+          if (next) fadeTo(this, 'Player', { levelId: next.id });
+          else      fadeTo(this, isCommunity ? 'Community' : 'LevelSelect');
+        });
+        return;
+      }
+    }
+
     if (next) {
       fadeTo(this, 'Player', { levelId: next.id });
     } else {

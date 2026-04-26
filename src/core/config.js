@@ -6,6 +6,8 @@ import EditorScene from './scenes/EditorScene.js';
 import PlayerScene from './scenes/PlayerScene.js';
 import LevelSelectScene from './scenes/LevelSelectScene.js';
 import CommunityScene from './scenes/CommunityScene.js';
+import CreditsScene from './scenes/CreditsScene.js';
+import SectionIntroScene from './scenes/SectionIntroScene.js';
 import { BG_COLOR } from './constants.js';
 
 // Responsive Scale.FIT + CENTER_BOTH supports every aspect ratio from 9:32
@@ -39,5 +41,5 @@ export const gameConfig = {
     activePointers: 2,
     touch: true,
   },
-  scene: [BootScene, PreloadScene, HomeScene, EditorScene, PlayerScene, LevelSelectScene, CommunityScene],
+  scene: [BootScene, PreloadScene, HomeScene, EditorScene, PlayerScene, LevelSelectScene, CommunityScene, CreditsScene, SectionIntroScene],
 };
