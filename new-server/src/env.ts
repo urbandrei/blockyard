@@ -40,6 +40,35 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 
-export const allowedOrigins = new Set(
-  env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
-);
+// CORS allowlist supporting BOTH exact origins and host wildcards. Exact
+// entries like `https://www.block-yard.com` go in the Set for O(1) lookup;
+// wildcard entries like `https://*.builds.wavedash.com` get compiled to a
+// regex (anchored, escaped, with `*` substituted for a single host label
+// that excludes dots so `evil.builds.wavedash.com.attacker.io` can't match).
+//
+// Why wildcards: Wavedash serves each game build on a fresh subdomain
+// `https://<hash>.builds.wavedash.com` — the hash rotates on every upload,
+// so a literal allowlist entry would break after the next deploy.
+const exactOrigins = new Set<string>();
+const wildcardPatterns: RegExp[] = [];
+for (const raw of env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)) {
+  if (raw.includes('*')) {
+    // Escape regex meta-chars, then replace the literal `*` with a host-
+    // label match that does NOT cross dots. Anchor both ends.
+    const escaped = raw.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^.]+');
+    wildcardPatterns.push(new RegExp(`^${escaped}$`));
+  } else {
+    exactOrigins.add(raw);
+  }
+}
+
+export function isOriginAllowed(origin: string | undefined): boolean {
+  if (!origin) return false;
+  if (exactOrigins.has(origin)) return true;
+  for (const re of wildcardPatterns) if (re.test(origin)) return true;
+  return false;
+}
+
+// Kept for back-compat with any callers importing the Set directly. New
+// code should use isOriginAllowed() so wildcards are honored.
+export const allowedOrigins = exactOrigins;

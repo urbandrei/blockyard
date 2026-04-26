@@ -8,7 +8,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
-import { env, allowedOrigins } from './env.js';
+import { env, isOriginAllowed } from './env.js';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './routes/auth.js';
 import { levelRoutes } from './routes/levels.js';
@@ -26,7 +26,7 @@ const app = new Hono();
 app.use('*', async (c, next) => {
   if (c.req.path === '/discord/interactions') return next();
   return cors({
-    origin: (origin) => allowedOrigins.has(origin) ? origin : '',
+    origin: (origin) => isOriginAllowed(origin) ? origin : '',
     allowHeaders: ['content-type', 'x-blockyard-token'],
     allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     maxAge: 600,
