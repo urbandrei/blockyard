@@ -19,11 +19,15 @@ import { BOARD_GAP, BUFFER_FILL, BUFFER_FILL_ALT } from '../constants.js';
 
 function hex(c) { return '#' + c.toString(16).padStart(6, '0'); }
 
+// `getLayout()` may return { pxCell, boardOriginX, boardOriginY, theme? }.
+// When `theme` is present, its `buffer`/`bufferAlt` colors paint the body
+// checker instead of the constants default — so the page background outside
+// the 9:20 content box matches the in-game exterior buffer ring per section.
 export function wireLetterboxChecker(scene, getLayout) {
   const apply = () => {
     const layout = getLayout();
     if (!layout || !layout.pxCell) return;
-    const { pxCell, boardOriginX, boardOriginY } = layout;
+    const { pxCell, boardOriginX, boardOriginY, theme } = layout;
     const step = pxCell + BOARD_GAP;
     const sx = scene.scale.displayScale.x;
     const sy = scene.scale.displayScale.y;
@@ -41,8 +45,10 @@ export function wireLetterboxChecker(scene, getLayout) {
     const boardVX = canvasRect.left + boardOriginX / sx;
     const boardVY = canvasRect.top  + boardOriginY / sy;
 
-    const primary = hex(BUFFER_FILL);
-    const alt     = hex(BUFFER_FILL_ALT);
+    const primaryHex = (theme && theme.buffer)    != null ? theme.buffer    : BUFFER_FILL;
+    const altHex     = (theme && theme.bufferAlt) != null ? theme.bufferAlt : BUFFER_FILL_ALT;
+    const primary = hex(primaryHex);
+    const alt     = hex(altHex);
     const style   = document.body.style;
     style.backgroundColor   = primary;
     style.backgroundImage   =

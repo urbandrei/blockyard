@@ -6,6 +6,7 @@ import { enableMenuBg } from '../ui/MenuBackground.js';
 import { compute920Box } from '../ui/ContentBox.js';
 import { BOARD_GAP, BLUEPRINT_BG, BLUEPRINT_STROKE, BLUEPRINT_DOT, BEAT_MS } from '../constants.js';
 import { drawHome, drawGear, drawPlayTriangle } from '../ui/Icons.js';
+import { themeForSectionIdx, MAIN_SECTION_COUNT } from '../themes/sectionThemes.js';
 import { SettingsModal } from '../ui/SettingsModal.js';
 import { TitleBar } from '../ui/TitleBar.js';
 import { wireUiClicks, wireEmptyClicks } from '../audio/sfx.js';
@@ -50,11 +51,6 @@ const COLOR_BLUE         = 0x3b66b8;
 const COLOR_BLUE_STROKE  = 0x1f3a74;
 const COLOR_GREY         = 0x9aa6b2;
 const COLOR_GREY_STROKE  = 0x5a6674;
-
-// Number of regular levels gated behind the Wild West unlock. Sections 1..4
-// (40 levels) make up the main campaign; everything from level 41 onward is
-// reachable only through the Wild West sub-page.
-const MAIN_SECTION_COUNT = 4;
 
 export default class LevelSelectScene extends Phaser.Scene {
   constructor() { super({ key: 'LevelSelect' }); }
@@ -165,7 +161,7 @@ export default class LevelSelectScene extends Phaser.Scene {
       : SECTIONS.slice(0, MAIN_SECTION_COUNT);
 
     if (isWildWest) {
-      this._drawHeaderBox(centerX, y + HEADER_H / 2, bpW, HEADER_H, 'WILD WEST');
+      this._drawHeaderBox(centerX, y + HEADER_H / 2, bpW, HEADER_H, 'WILD WEST', themeForSectionIdx(MAIN_SECTION_COUNT));
       y += HEADER_H + BLOCK_GAP;
     }
 
@@ -173,7 +169,7 @@ export default class LevelSelectScene extends Phaser.Scene {
       const section = sectionsToRender[si];
       if (!isWildWest) {
         const title = SECTION_TITLES[si] || section.name.toUpperCase();
-        this._drawHeaderBox(centerX, y + HEADER_H / 2, bpW, HEADER_H, title);
+        this._drawHeaderBox(centerX, y + HEADER_H / 2, bpW, HEADER_H, title, themeForSectionIdx(si));
         y += HEADER_H + BLOCK_GAP;
       }
 
@@ -219,16 +215,22 @@ export default class LevelSelectScene extends Phaser.Scene {
     this._drawIconIsland(islandOriginX, islandOriginY, islandW, islandH);
   }
 
-  _drawHeaderBox(cx, cy, w, h, label) {
+  _drawHeaderBox(cx, cy, w, h, label, theme) {
+    // When a section theme is provided, the bar fills with the theme's
+    // buffer color (the in-game exterior) so the header visually quotes the
+    // biome below it. Label stays white for consistent contrast across
+    // every palette; stroke stays the standard dark frame.
+    const fill = theme && theme.buffer != null ? theme.buffer : HEADER_FRAME_FILL;
+    const labelColor = theme ? '#ffffff' : HEADER_TEXT_COLOR;
     const gfx = this.add.graphics().setDepth(10);
-    gfx.fillStyle(HEADER_FRAME_FILL, 1);
+    gfx.fillStyle(fill, 1);
     gfx.lineStyle(2, HEADER_FRAME_STROKE, 1);
     gfx.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, HEADER_CORNER_R);
     gfx.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, HEADER_CORNER_R);
     this._gfx.push(gfx);
     const text = this.add.text(cx, cy, label, {
       fontFamily: 'system-ui, sans-serif', fontSize: '24px', fontStyle: 'bold',
-      color: HEADER_TEXT_COLOR,
+      color: labelColor,
     }).setOrigin(0.5).setDepth(11);
     this._texts.push(text);
   }
@@ -346,17 +348,15 @@ export default class LevelSelectScene extends Phaser.Scene {
   }
 
   _drawWildWestButton(cx, cy, w, h, unlocked) {
-    // Visually mirrors the themed section headers (white panel, dark border,
-    // dark label) so it reads as the next section in the column. Locked
-    // state swaps to the standard grey/grey-stroke combo. When unlocked the
-    // panel takes on a warm cream tint and the whole tile breathes on the
-    // 2-beat grid so the player's eye catches the new gate.
-    const UNLOCKED_FILL   = 0xffe9b8;       // warm cream — distinct from white headers
-    const UNLOCKED_STROKE = 0x8a5a1a;       // amber border to match
-    const fill   = unlocked ? UNLOCKED_FILL   : COLOR_GREY;
-    const stroke = unlocked ? UNLOCKED_STROKE : COLOR_GREY_STROKE;
-    const labelColor = unlocked ? HEADER_TEXT_COLOR : '#ffffff';
-    const arrowColor = unlocked ? 0x1a2332 : 0xffffff;
+    // Foreshadows the Wild West biome: when unlocked, fills with the wild
+    // west theme's buffer (sunset orange) so the gate visually advertises
+    // the biome it leads to. Locked state stays grey. The whole tile
+    // breathes on the 2-beat grid so the player's eye catches the new gate.
+    const wwTheme = themeForSectionIdx(MAIN_SECTION_COUNT);
+    const fill   = unlocked ? wwTheme.buffer    : COLOR_GREY;
+    const stroke = unlocked ? HEADER_FRAME_STROKE : COLOR_GREY_STROKE;
+    const labelColor = '#ffffff';
+    const arrowColor = 0xffffff;
 
     // Container so a single scale tween pulses the panel + label + arrow as
     // one unit, scaling around the bar's center.

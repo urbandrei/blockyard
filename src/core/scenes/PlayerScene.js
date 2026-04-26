@@ -25,6 +25,7 @@ import { spawnFunnelFirework } from '../render/FunnelFirework.js';
 import { HintConfirmModal } from '../ui/HintConfirmModal.js';
 import { HintNudgePopup } from '../ui/HintNudgePopup.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
+import { themeForLevelId } from '../themes/sectionThemes.js';
 import { compute920Box } from '../ui/ContentBox.js';
 import { Simulation } from '../sim/Simulation.js';
 import { DragController } from '../input/DragController.js';
@@ -173,6 +174,10 @@ export default class PlayerScene extends Phaser.Scene {
       this._bossHintAutoShow = false;
       this.sourceLevel = source;
     }
+    // Section theme drives interior/exterior/letterbox palettes for this
+    // level. Inline (community) levels and unknown ids fall back to Block
+    // Yard inside themeForLevelId.
+    this._theme = themeForLevelId(this.sourceLevel && this.sourceLevel.id);
 
     this._initRuntime();
     this._layoutBoardAndBlueprint();
@@ -188,6 +193,7 @@ export default class PlayerScene extends Phaser.Scene {
       pxCell: this.pxCell,
       boardOriginX: this.boardOriginX,
       boardOriginY: this.boardOriginY,
+      theme: this._theme,
     }));
 
     this.shapeRenderer = new ShapeRenderer(this, this.shapeContainer, { pxCell: this.pxCell });
@@ -651,7 +657,7 @@ export default class PlayerScene extends Phaser.Scene {
     this._clearBoardDynamic();
     const lvl = this._composeLevel();
     this._refreshFunnelParticles(lvl);
-    renderInteriorFloor(this, this.boardContainer, { board: lvl.board, pxCell: this.pxCell });
+    renderInteriorFloor(this, this.boardContainer, { board: lvl.board, pxCell: this.pxCell, theme: this._theme });
     if (this._acidPits) { this._acidPits.destroy(); this._acidPits = null; }
     this._acidPits = renderAcidPits(this, this.acidPitContainer, this.sourceLevel, {
       pxCell: this.pxCell, pxGap: BOARD_GAP,
@@ -670,6 +676,7 @@ export default class PlayerScene extends Phaser.Scene {
     renderExteriorCheckers(this, this.exteriorContainer, {
       board: lvl.board, pxCell: this.pxCell,
       boardOriginX: this.boardOriginX, boardOriginY: this.boardOriginY,
+      theme: this._theme,
     });
     renderFrameShadow(this, this.shadowContainer, { board: lvl.board, pxCell: this.pxCell });
     renderFrameOutline(this, this.frameContainer, { board: lvl.board, pxCell: this.pxCell });

@@ -49,6 +49,7 @@ import { applyToolAt } from '../editor/applyTool.js';
 import { drawBackChevron, drawHome, drawQuestion, drawTrash, drawPlus, drawMinus, drawGear } from '../ui/Icons.js';
 import { SettingsModal } from '../ui/SettingsModal.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
+import { themeForSectionIdx } from '../themes/sectionThemes.js';
 import { compute920Box } from '../ui/ContentBox.js';
 import { Simulation } from '../sim/Simulation.js';
 import { DragController } from '../input/DragController.js';
@@ -1243,7 +1244,7 @@ export default class EditorScene extends Phaser.Scene {
     // Black outline around the playable interior (read as "puzzle area").
     // Pass 1 (back): peach floor on the interior only.
     renderInteriorFloor(this, this.boardContainer, {
-      board: this.level.board, pxCell: this.pxCell,
+      board: this.level.board, pxCell: this.pxCell, theme: themeForSectionIdx(0),
     });
     // Acid pits layer into their own container between the floor and the
     // shapes. Returns a {destroy, tick} handle so the cosmetic update loop
@@ -1272,6 +1273,7 @@ export default class EditorScene extends Phaser.Scene {
     renderExteriorCheckers(this, this.exteriorContainer, {
       board: this.level.board, pxCell: this.pxCell,
       boardOriginX: this.boardOriginX, boardOriginY: this.boardOriginY,
+      theme: themeForSectionIdx(0),
     });
     // Pass 3a: inner shadow into shadowContainer (below border funnels).
     renderFrameShadow(this, this.shadowContainer, { board: this.level.board, pxCell: this.pxCell });

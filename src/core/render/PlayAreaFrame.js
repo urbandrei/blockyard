@@ -41,19 +41,23 @@ const SHADOW_BANDS  = [
 ];
 
 // Pass 1 — peach checker over interior cells. Drawn at the very back.
-export function renderInteriorFloor(scene, container, { board, pxCell }) {
+// `theme` is optional; when omitted we fall back to the constants palette
+// (which is the Block Yard / current-default look).
+export function renderInteriorFloor(scene, container, { board, pxCell, theme }) {
   const gfx = scene.make.graphics({ add: false });
   const step = pxCell + BOARD_GAP;
   const rFrom = 1, rTo = board.rows - 2;
   const cFrom = 1, cTo = board.cols - 2;
   if (rTo < rFrom || cTo < cFrom) return null;
+  const fillA = (theme && theme.interior)    != null ? theme.interior    : INTERIOR_FILL;
+  const fillB = (theme && theme.interiorAlt) != null ? theme.interiorAlt : INTERIOR_FILL_ALT;
   for (let r = rFrom; r <= rTo; r++) {
     for (let c = cFrom; c <= cTo; c++) {
       // Parity convention mirrors the buffer checker: parity 0 = DARKER
       // cell in both regions, parity 1 = LIGHTER. Keeps the alternating
       // light/dark pattern continuous across the interior/buffer seam.
       const parity = (r + c) & 1;
-      gfx.fillStyle(parity ? INTERIOR_FILL : INTERIOR_FILL_ALT, 1);
+      gfx.fillStyle(parity ? fillA : fillB, 1);
       gfx.fillRect(c * step, r * step, step, step);
     }
   }
@@ -65,7 +69,7 @@ export function renderInteriorFloor(scene, container, { board, pxCell }) {
 // cells. Together with the peach floor underneath, this produces the
 // "cut-out window" effect: peach + sim visible through the hole, brown
 // covering everything else. Drawn above the sim so it visually sits on top.
-export function renderExteriorCheckers(scene, container, { board, pxCell, boardOriginX, boardOriginY }) {
+export function renderExteriorCheckers(scene, container, { board, pxCell, boardOriginX, boardOriginY, theme }) {
   const gfx = scene.make.graphics({ add: false });
   const step = pxCell + BOARD_GAP;
   const sceneW = scene.scale.width;
@@ -80,6 +84,8 @@ export function renderExteriorCheckers(scene, container, { board, pxCell, boardO
   const tileYMin = Math.floor(localTop    / step) - 1;
   const tileYMax = Math.ceil (localBottom / step) + 1;
 
+  const fillA = (theme && theme.buffer)    != null ? theme.buffer    : BUFFER_FILL;
+  const fillB = (theme && theme.bufferAlt) != null ? theme.bufferAlt : BUFFER_FILL_ALT;
   const rFrom = 1, rTo = board.rows - 2;
   const cFrom = 1, cTo = board.cols - 2;
   for (let tileY = tileYMin; tileY <= tileYMax; tileY++) {
@@ -89,7 +95,7 @@ export function renderExteriorCheckers(scene, container, { board, pxCell, boardO
         tileX >= cFrom && tileX <= cTo;
       if (inInterior) continue;                  // leave the hole unfilled
       const parity = (tileX + tileY) & 1;
-      gfx.fillStyle(parity ? BUFFER_FILL_ALT : BUFFER_FILL, 1);
+      gfx.fillStyle(parity ? fillB : fillA, 1);
       gfx.fillRect(tileX * step, tileY * step, step, step);
     }
   }
