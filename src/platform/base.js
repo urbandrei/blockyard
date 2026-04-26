@@ -94,6 +94,12 @@ export function createBaseAdapter(name = 'base') {
     // network failure must NEVER throw into the scene shutdown path.
     async startPlay(_kind, _levelId) { return null; },
     async endPlay(_args) { return; },
+
+    // Token-scoped moderation status sync. Returns
+    // [{id, name, status, rejectedReason, updatedAt}] for every level
+    // this caller submitted. Sandboxed adapters return an empty list so
+    // CommunityScene's check loop is a no-op there.
+    async fetchMySubmissions() { return []; },
     // URL shortener: takes a base64 share-string and returns `{code}` or
     // null if the backend is unreachable. Callers fall back to a direct
     // `?play=<base64>` URL when null.

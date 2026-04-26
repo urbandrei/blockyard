@@ -123,6 +123,47 @@ export async function setStatus(id, status) {
   return level;
 }
 
+// Sync moderation outcomes for every level this device has submitted.
+// Pulls /my/submissions, walks each row against the locally-cached level,
+// and rewrites the local copy when the server status differs. Returns the
+// list of MEANINGFUL transitions (out of 'pending') so CommunityScene can
+// surface a toast / reason modal — that loop runs once on scene entry.
+//
+// Sandboxed adapters (YouTube Playables, mobile, …) return an empty list
+// from fetchMySubmissions, so this is a no-op there.
+export async function checkSubmissionStatuses() {
+  const remote = await platform.fetchMySubmissions();
+  if (!Array.isArray(remote) || remote.length === 0) return [];
+  const idx = await loadIndex();
+  const transitions = [];
+  for (const s of remote) {
+    if (!s || !s.id) continue;
+    if (!idx.local.includes(s.id)) continue;
+    const level = await platform.loadData(LEVEL_KEY(s.id));
+    if (!level) continue;
+    if (level.status === s.status) continue;
+    const wasPending = level.status === 'pending';
+    level.status = s.status;
+    if (s.status === 'rejected') {
+      level.rejectedReason = s.rejectedReason || null;
+    } else if (level.rejectedReason && s.status !== 'rejected') {
+      // Recovered after a denial (mod approved on appeal): clear stale reason.
+      level.rejectedReason = null;
+    }
+    level.updatedAt = Date.now();
+    await platform.saveData(LEVEL_KEY(s.id), level);
+    if (wasPending) {
+      transitions.push({
+        id: s.id,
+        name: level.name || s.name || 'untitled',
+        status: s.status,
+        rejectedReason: s.rejectedReason || null,
+      });
+    }
+  }
+  return transitions;
+}
+
 export async function deleteLevel(id) {
   const idx = await loadIndex();
   idx.local    = idx.local.filter((x) => x !== id);

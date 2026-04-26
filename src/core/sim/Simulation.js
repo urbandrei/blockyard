@@ -617,8 +617,11 @@ export class Simulation {
     for (const k of required) if (!set.has(k)) return; // still waiting on a sink
     this.firedThisCycle.add(ownerId);
     // Lightning-bolt gate: a factory with one or more bolt cells cannot
-    // spawn shapes from its outputs until every bolt on it is powered.
-    if (!this._factoryBoltsPowered(ownerId)) return;
+    // spawn shapes from its outputs until every bolt has been powered
+    // long enough for its fill animation to top out (≥ CYCLE_MS). The
+    // emitter charge uses the same gate, so spawn + emitter-charge
+    // start together once the bolts read as fully lit.
+    if (!this._factoryBoltsFullyLit(ownerId, now)) return;
     for (const f of this.funnels) {
       if (f.ownerId === ownerId && isSource(f)) this._spawn(f, now);
     }
@@ -785,6 +788,19 @@ export class Simulation {
       if (!this.boltPowered.get(`${factoryId}:${cellKey}`)) return false;
     }
     return true;
+  }
+
+  // Stronger gate than _factoryBoltsPowered: the bolts must have stayed
+  // powered for ≥ CYCLE_MS, i.e. the visual fill animation has reached
+  // 100%. Same threshold the emitter charge uses (see _updateLasers
+  // step 3) — keeps "shapes start spawning" in sync with "bolts read as
+  // fully lit" instead of firing the instant the laser connects.
+  _factoryBoltsFullyLit(factoryId, now) {
+    const bolts = this._boltCells && this._boltCells.get(factoryId);
+    if (!bolts || bolts.size === 0) return true;
+    if (!this._factoryBoltsPowered(factoryId)) return false;
+    const since = this._factoryBoltsPoweredSince.get(factoryId);
+    return since !== undefined && (now - since) >= CYCLE_MS;
   }
 
   _updateLasers(dtMs) {

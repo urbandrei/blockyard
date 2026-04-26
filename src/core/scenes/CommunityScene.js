@@ -3,9 +3,11 @@ import {
   listAll, applyFilter, getLikes, toggleLike,
   toggleHide, getHidden, getLocalIds,
   deleteLevel as deleteLocalLevel,
+  checkSubmissionStatuses,
 } from '../community.js';
 import { ConfirmModal } from '../ui/ConfirmModal.js';
 import { RateLevelModal } from '../ui/RateLevelModal.js';
+import { SocialInfoModal } from '../ui/SocialInfoModal.js';
 import { shareLevel as nativeShareLevel, encodeShareString as encodeShareForClient } from '../ui/socialShare.js';
 import { wireUiClicks, wireEmptyClicks } from '../audio/sfx.js';
 import { LevelCard } from '../ui/LevelCard.js';
@@ -131,6 +133,14 @@ export default class CommunityScene extends Phaser.Scene {
       this.game.registry.set('pendingRating', null);
       this._showRatingPrompt(pending);
     }
+
+    // Pull moderation outcomes for every level we submitted. Approvals
+    // surface as a quick toast; denials open a modal carrying the reason
+    // (the only place the player sees the moderator's note). The list of
+    // local levels is rewritten in-place by checkSubmissionStatuses, so
+    // the next _refreshLevels reflects the new statuses.
+    this._processSubmissionTransitions().catch((e) =>
+      console.warn('[community] submission sync failed', e));
 
     this._onResize = () => this._relayout();
     this.scale.on('resize', this._onResize);
@@ -657,6 +667,41 @@ export default class CommunityScene extends Phaser.Scene {
     await this._refreshLevels();
   }
 
+  // Run after the first refresh: walk every transition out of 'pending'
+  // for our submissions and surface a notification. Approvals stack as
+  // toasts (auto-dismiss); denials queue as modals so the player has to
+  // dismiss each one — the rejection reason is the only thing the mod
+  // wrote and we don't want it to flash by. After all transitions are
+  // shown, re-render the list so any flipped status chip + dropdown
+  // item lands without waiting for a manual refresh.
+  async _processSubmissionTransitions() {
+    const transitions = await checkSubmissionStatuses();
+    if (!transitions || transitions.length === 0) return;
+    let listDirty = false;
+    for (const t of transitions) {
+      if (t.status === 'public') {
+        this._toast(`\u2713 "${t.name}" approved! It's now public.`);
+        listDirty = true;
+      } else if (t.status === 'rejected') {
+        await this._showDenialModal(t);
+        listDirty = true;
+      }
+    }
+    if (listDirty) await this._refreshLevels();
+  }
+
+  _showDenialModal(transition) {
+    return new Promise((resolve) => {
+      const reason = (transition.rejectedReason || '').trim() || 'No reason provided.';
+      const body = `Moderators denied "${transition.name}".\n\nReason:\n${reason}\n\nYou can edit the level and resubmit, or open the menu on the card to read this reason again later.`;
+      this._denialModal = new SocialInfoModal(this, {
+        title: 'Level denied',
+        body,
+        onClose: () => { this._denialModal = null; resolve(); },
+      });
+    });
+  }
+
   _toast(message) {
     if (this._toastText) this._toastText.destroy();
     const y = (this._listBottom || (this.scale.height - 80)) - 8;
@@ -838,6 +883,20 @@ export default class CommunityScene extends Phaser.Scene {
         onTap: () => this._confirmDelete(level),
         destructive: true,
       });
+      // Denial reason — only present for our own rejected levels. Opens the
+      // same modal the moderation-sync flow shows on first detection so the
+      // author can re-read the moderator note any time.
+      if (isMine && level.status === 'rejected') {
+        moreItems.push({
+          label: 'Why was this denied?',
+          onTap: () => this._showDenialModal({
+            id: level.id,
+            name: level.name || 'untitled',
+            status: 'rejected',
+            rejectedReason: level.rejectedReason || null,
+          }),
+        });
+      }
 
       const card = new LevelCard(this, {
         x: cardX, y: cy, width: cardW, height: CARD_H,

@@ -91,6 +91,32 @@ levelRoutes.get('/levels/:id', async (c) => {
   return c.json(body);
 });
 
+// ---- GET /my/submissions ----
+//
+// Token-scoped status sync. Returns a flat list of every level the calling
+// token submitted, with the moderation outcome on each one. The client
+// stores per-level status locally (community.level.<id>.status) and uses
+// this endpoint to detect transitions: pending → public ("approved") or
+// pending → rejected ("denied with reason"). No PII — the token-scoping
+// is the only filter, the response carries nothing the caller didn't write.
+levelRoutes.get('/my/submissions', requireToken(), async (c) => {
+  const { token } = c.get('auth');
+  const rows = await db.select({
+    id: schema.levels.id,
+    name: schema.levels.name,
+    status: schema.levels.status,
+    rejectedReason: schema.levels.rejectedReason,
+    updatedAt: schema.levels.updatedAt,
+  }).from(schema.levels).where(eq(schema.levels.submittedByToken, token));
+  return c.json({ submissions: rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    status: r.status,
+    rejectedReason: r.rejectedReason,
+    updatedAt: Number(r.updatedAt),
+  })) });
+});
+
 // ---- POST /levels (publish) ----
 
 // ---- DELETE /levels/:id (author-only) ----

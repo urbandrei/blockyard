@@ -747,7 +747,17 @@ export default class EditorScene extends Phaser.Scene {
   // so factories open back in their authored slots.
   _restoreBlueprintSetupFromLevel() {
     if (this._mode === 'blueprintSetup') return;
-    const source = (this.level.factories || [])
+    // _assembleExportLevel removes slotted factories from level.factories
+    // when the author drags them into a blueprint slot, leaving only the
+    // locked carry-over there. The full set lives in level.solution.factories
+    // — that's the canonical snapshot we restore from on reopen so the
+    // blueprint can find each id and render the factory in its slot.
+    // Older drafts (never exported) won't have a solution block; fall back
+    // to level.factories so they still restore as a freshly-entered setup.
+    const fromSolution = (this.level.solution && Array.isArray(this.level.solution.factories))
+      ? this.level.solution.factories
+      : null;
+    const source = ((fromSolution && fromSolution.length > 0) ? fromSolution : (this.level.factories || []))
       .filter((f) => !(this._bossMode && f.locked));
     this._solutionSnapshot = JSON.parse(JSON.stringify(source));
     this._blueprintAssignments = new Map();

@@ -232,6 +232,17 @@ export default (function createWebAdapter() {
       }
     },
 
+    async fetchMySubmissions() {
+      if (!API) return [];
+      try {
+        const res = await api('/my/submissions', { auth: true });
+        return Array.isArray(res && res.submissions) ? res.submissions : [];
+      } catch (e) {
+        console.warn('[web] fetchMySubmissions failed', e);
+        return [];
+      }
+    },
+
     async endPlay({ sessionId, completed, hintCount, timeSpentMs }) {
       if (!API || !sessionId) return;
       try {

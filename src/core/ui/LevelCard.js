@@ -21,6 +21,7 @@ const STATUS_PALETTE = {
   private:    { fill: 0x9aa6b2, label: 'private'    },
   pending:    { fill: 0xff8a3a, label: 'pending'    },
   public:     { fill: 0x4caf50, label: 'public'     },
+  rejected:   { fill: 0xd94c4c, label: 'denied'     },
   imported:   { fill: 0x3b66b8, label: 'imported'   },
 };
 

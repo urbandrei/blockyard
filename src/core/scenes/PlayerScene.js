@@ -2054,7 +2054,12 @@ export default class PlayerScene extends Phaser.Scene {
   _cellAt(px, py) {
     const board = this._boardCellAt(px, py);
     if (board) return { ...board, kind: 'board' };
-    const slot = this._slotAt(px, py);
+    // Allow taps on the hint-pill row AND on factory parts that visually
+    // hang above/around the slot grid. The reserved-row + outOfBounds
+    // flags travel along so _onTapCell can suppress rotation when the
+    // grab-point is outside the placement area, and _onDragEnd can
+    // refuse drops in those same cells.
+    const slot = this._slotAt(px, py, { allowOutside: true });
     if (slot) return { ...slot, kind: 'blueprint' };
     return null;
   }
@@ -2072,18 +2077,40 @@ export default class PlayerScene extends Phaser.Scene {
     return { r, c };
   }
 
-  _slotAt(px, py) {
+  // Slot hit detection.
+  //   Default — returns the in-bounds, non-reserved slot or null. This is
+  //     the strict "valid drop target" form used by _onDragEnd.
+  //   { allowOutside: true } — also returns reserved-row slots and slots
+  //     immediately above/around the grid (within the buffer below) so
+  //     the DragController can resolve a factory whose footprint extends
+  //     into the hint-pill row OR pokes above the blueprint frame. The
+  //     returned slot carries `reserved` and `outOfBounds` flags; the tap
+  //     handler reads them to decide whether to rotate (only on a
+  //     placement-valid cell) and the drag-end ignores them as drops.
+  //
+  // The buffer is generous (3 rows above, 1 below/sides) so even tall
+  // factories anchored at row 1 with negative-offset cells pick up
+  // cleanly when the user grabs by the protruding tip.
+  _slotAt(px, py, { allowOutside = false } = {}) {
     const lx = px - this.blueprintOriginX;
     const ly = py - this.blueprintOriginY;
-    if (lx < 0 || ly < 0 || lx > this.blueprintW || ly > this.blueprintH) return null;
     const c = Math.floor(lx / this.slotPx);
     const r = Math.floor(ly / this.slotPx);
-    if (r < 0 || c < 0 || r >= this._slotRows() || c >= this._slotCols()) return null;
-    // Top row is reserved for the instructional text box (when present) or
-    // the boss stage-pill strip — reject placements there so the player
-    // can't drop a factory under the hint/pills.
-    if ((this._instructionText() || this._isBossLevel()) && r === 0) return null;
-    return { r, c };
+    const rows = this._slotRows();
+    const cols = this._slotCols();
+    const inGrid = r >= 0 && c >= 0 && r < rows && c < cols
+      && lx >= 0 && ly >= 0 && lx <= this.blueprintW && ly <= this.blueprintH;
+    const reserved = (this._instructionText() || this._isBossLevel()) && r === 0;
+    if (inGrid) {
+      if (reserved && !allowOutside) return null;
+      return { r, c, reserved, outOfBounds: false };
+    }
+    if (!allowOutside) return null;
+    const buffer = 3;
+    if (r >= -buffer && r <= rows && c >= -1 && c <= cols) {
+      return { r, c, reserved: false, outOfBounds: true };
+    }
+    return null;
   }
 
   // Returns the active instructional text for the current sourceLevel
@@ -2157,6 +2184,12 @@ export default class PlayerScene extends Phaser.Scene {
       // draft composer. info.{r,c} is absolute slot coords; the pivot
       // invariant repositions the factory's anchor so the clicked cell
       // stays put.
+      // Suppress rotation when the grab landed on a part of the factory
+      // that visually hangs OFF the blueprint slot grid — rotating around
+      // a pivot outside the grid would punt the rest of the factory into
+      // an unplaceable position. The user can still drag the protruding
+      // part to pick the factory up; tapping it just no-ops.
+      if (info.outOfBounds) { this._playEmptyTapRustle(pointer); return; }
       this._rotateBlueprint(def, { slotR: info.r, slotC: info.c, localCell: hit.localCell });
     }
   }
@@ -2548,6 +2581,10 @@ export default class PlayerScene extends Phaser.Scene {
     // feel like a "snap" so they share the same click cue.
     playOnce(this.game, 'ui_click', { throttleMs: 100, volume: 0.5 });
     if (boardRC && this._tryPlaceOnBoard(boardRC)) { this._clearDrag(); return; }
+    // Strict-form _slotAt — null on reserved row + out-of-bounds, so a
+    // user who grabbed by a protruding cell and let go on the hint pill
+    // (or above the frame) cancels back to the origin instead of dropping
+    // into an invalid placement.
     const slot = this._slotAt(px, py);
     if (slot) {
       this._dropIntoSlot(slot);
