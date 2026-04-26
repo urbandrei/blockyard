@@ -49,6 +49,22 @@ jobs:
         run: npm ci
 
       - name: Build itch bundle
+        # Vite snapshots VITE_* env vars at build start and inlines them
+        # into the bundle. Storing them as repo "Variables" (Settings →
+        # Secrets and variables → Actions → Variables) keeps the
+        # contract address + RPC + API base URL out of source control
+        # while still being baked into the public JS — they're not
+        # secret (anyone reading the bundle sees them anyway), but they
+        # change per-environment, so config-not-source. The only true
+        # secret is the WalletConnect project id, which lives under
+        # Secrets so it's masked in workflow logs.
+        env:
+          VITE_BLOCKYARD_API: ${{ vars.VITE_BLOCKYARD_API }}
+          VITE_BLOCKYARD_ETH_ENABLED: ${{ vars.VITE_BLOCKYARD_ETH_ENABLED }}
+          VITE_BLOCKYARD_CHAIN_ID: ${{ vars.VITE_BLOCKYARD_CHAIN_ID }}
+          VITE_BLOCKYARD_CONTRACT_ADDRESS: ${{ vars.VITE_BLOCKYARD_CONTRACT_ADDRESS }}
+          VITE_BASE_SEPOLIA_RPC: ${{ vars.VITE_BASE_SEPOLIA_RPC }}
+          VITE_WALLETCONNECT_PROJECT_ID: ${{ secrets.VITE_WALLETCONNECT_PROJECT_ID }}
         run: npm run build:itch
 
       # Install butler manually. Tries the newer CDN (broth.itch.zone)

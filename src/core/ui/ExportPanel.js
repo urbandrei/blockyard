@@ -578,23 +578,27 @@ export class ExportPanel {
 
     // ---- eth-disabled fast path (legacy behavior) ----
     if (!this._walletEnabled) {
-      const stamped = await saveLocal(this.level);
-      const accepted = await platform.publishLevel(stamped);
-      let final = stamped;
-      if (accepted) final = (await setStatus(stamped.id, 'pending')) || stamped;
-      Object.assign(this.level, { id: final.id, status: final.status, author: final.author });
-      this._setStatus(accepted ? 'Submitted \u2014 status: pending mod review' : 'Saved (publish stub returned false)');
-      if (this.opts.onSaved) this.opts.onSaved(final);
+      await this._publishLegacy();
       return;
     }
 
-    // ---- eth-enabled path ----
+    // ---- eth-enabled path with graceful fall-through ----
+    // If the user doesn't have a wallet, dismisses the picker, or rejects
+    // the signature, we don't want the publish to dead-end — submit the
+    // level via the no-mint path and surface a status hint that the
+    // on-chain bit was skipped. Same fallback also catches the rare case
+    // where a wallet is connected but signing fails.
     let address = await platform.getConnectedWallet().catch(() => null);
     if (!address) {
       this._setStatus('Connecting wallet\u2026');
-      try { address = await platform.connectWallet(); }
-      catch (e) { this._setStatus('Publish requires a connected wallet.'); return; }
-      await this._refreshWallet();
+      try {
+        address = await platform.connectWallet();
+        await this._refreshWallet();
+      } catch (e) {
+        this._setStatus('No wallet connected \u2014 submitting without on-chain mint\u2026');
+        await this._publishLegacy();
+        return;
+      }
     }
 
     this._setStatus('Sign the level in your wallet\u2026');
@@ -602,7 +606,8 @@ export class ExportPanel {
     try {
       signed = await platform.signLevel(this.level);
     } catch (e) {
-      this._setStatus('Signature rejected: ' + (e?.shortMessage || e?.message || 'unknown'));
+      this._setStatus('Signature skipped \u2014 submitting without on-chain mint\u2026');
+      await this._publishLegacy();
       return;
     }
     this.level.authorWallet    = signed.address;
@@ -653,6 +658,21 @@ export class ExportPanel {
 
     this._setStatus(`Submitted \u2014 minted token #${mintResult.tokenId}, pending mod review.`);
     if (this.opts.onSaved) this.opts.onSaved(this.level);
+  }
+
+  // Signature-free publish — saves locally, hits the publish stub, flips
+  // status to 'pending'. Same body the eth-disabled fast path used inline
+  // before; pulled out so the eth-enabled path can fall back to it when
+  // the user has no wallet, dismisses the picker, or rejects the
+  // signature.
+  async _publishLegacy() {
+    const stamped = await saveLocal(this.level);
+    const accepted = await platform.publishLevel(stamped);
+    let final = stamped;
+    if (accepted) final = (await setStatus(stamped.id, 'pending')) || stamped;
+    Object.assign(this.level, { id: final.id, status: final.status, author: final.author });
+    this._setStatus(accepted ? 'Submitted \u2014 status: pending mod review' : 'Saved (publish stub returned false)');
+    if (this.opts.onSaved) this.opts.onSaved(final);
   }
 
   _setStatus(msg) {
