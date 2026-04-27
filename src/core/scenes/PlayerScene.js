@@ -1426,6 +1426,7 @@ export default class PlayerScene extends Phaser.Scene {
         scene: this,
         level: source,
         shareString,
+        featuredUtcDate: this._featuredUtcDate || null,
         onStatus: () => {},   // navigator.share UI is self-explanatory; no local toast needed
       });
     } catch (e) {

@@ -15,6 +15,7 @@
 import { platform } from '../../platform/index.js';
 import { generateShareImage } from './sharePreview.js';
 import { copyText } from './clipboard.js';
+import { utcToday } from '../progress.js';
 
 const BLOCK_YARD_SHARE_URL = 'https://www.block-yard.com';
 const ITCH_SHARE_URL       = 'https://urbandrei.itch.io/block-yard';
@@ -48,9 +49,10 @@ function unchunk(shareString) {
  * @param {object} opts.level        the level JSON — must have board / factories / etc.
  * @param {string} opts.shareString  the base64 share-string (ExportPanel._encodeShareString output)
  * @param {(msg:string)=>void} [opts.onStatus]  optional status-text sink for the caller's UI
+ * @param {string} [opts.featuredUtcDate]  YYYY-MM-DD UTC date if this level was launched as a daily featured; switches the share text to the featured-style line when it matches today.
  */
 export async function shareLevel(opts) {
-  const { scene, level, shareString } = opts;
+  const { scene, level, shareString, featuredUtcDate } = opts;
   const status = typeof opts.onStatus === 'function' ? opts.onStatus : () => {};
   if (!level || !shareString) { status('Nothing to share.'); return; }
   if (!scene) { status('Cannot render preview — no scene.'); return; }
@@ -75,7 +77,10 @@ export async function shareLevel(opts) {
   }
 
   const name = level.name || 'Blockyard level';
-  const text = `Check out "${name}" on Blockyard. Can you solve it?`;
+  const isFeaturedToday = !!featuredUtcDate && featuredUtcDate === utcToday();
+  const text = isFeaturedToday
+    ? `Check out today's featured Block Yard puzzle: "${name}". Can you solve it? #blockyard #puzzle`
+    : `Check out "${name}" on Block Yard. Can you solve it? #blockyard #puzzle`;
   const filename = safeFilename(name) + '.png';
 
   try {
