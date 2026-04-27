@@ -101,6 +101,19 @@ export default class PlayerScene extends Phaser.Scene {
     disableMenuBg();
     fadeIn(this);
 
+    // vibej.am portal arrival: PreloadScene stashed a PortalCover that
+    // is still drawn on top of us. Trigger its reveal phase one frame
+    // after our content paints so the swirl pulls back over a clean
+    // first frame. Single-shot — clear the global so re-entries don't
+    // try to dismiss a destroyed cover.
+    if (typeof window !== 'undefined' && window.__blockyardPortalCover) {
+      const cover = window.__blockyardPortalCover;
+      window.__blockyardPortalCover = null;
+      this.time.delayedCall(0, () => {
+        try { cover.triggerExit(); } catch (e) { /* ignore */ }
+      });
+    }
+
     // First-time Wild West entry → redirect to the section-unlock
     // cinematic before the level loads. Detected by walking the
     // catalog's section index for our level id; a non-main section

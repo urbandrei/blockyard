@@ -4,6 +4,7 @@ import { installOutsideCanvasClicks, installSfxFocusRamp } from '../audio/sfx.js
 import { loadAudioSettings } from '../audio/settings.js';
 import { enableMenuBg } from '../ui/MenuBackground.js';
 import { LoadingOverlay } from '../ui/LoadingOverlay.js';
+import { PortalCover } from '../ui/PortalCover.js';
 import { compute920Box } from '../ui/ContentBox.js';
 import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
 import { BOARD_GAP } from '../constants.js';
@@ -30,6 +31,17 @@ export default class PreloadScene extends Phaser.Scene {
   constructor() { super({ key: 'Preload' }); }
 
   preload() {
+    // vibej.am 2026 portal arrival — when the URL has `?portal=true` AND
+    // this is the render build (VIBEJAM=1), we skip the standard
+    // shape-rain LoadingOverlay + "LOADING" label and run a quick portal
+    // cover animation instead. The first scene then dispatches straight
+    // to PlayerScene at level-1 rather than HomeScene. The flag is build-
+    // time gated so itch / wavedash / etc. ignore the param entirely.
+    // eslint-disable-next-line no-undef
+    this._portalArrival = (typeof __VIBEJAM__ !== 'undefined') && __VIBEJAM__
+      && (typeof window !== 'undefined')
+      && new URL(window.location.href).searchParams.has('portal');
+
     // Body bg under the (transparent-bg) overlay canvas. We paint it with
     // LetterboxChecker using HomeScene's board layout math so the static
     // pattern is identical to what Home renders — same colors (BUFFER_FILL
@@ -44,25 +56,38 @@ export default class PreloadScene extends Phaser.Scene {
     }
     wireLetterboxChecker(this, () => this._homeBgLayout());
 
-    // LOADING label, layered above the shape overlay so it stays legible
-    // against the colorful pile. Owned by the scene (not the overlay) so
-    // it can persist past the shape drop on slow networks — the user
-    // sees it through any wait between shapes-gone and audio-loaded.
-    this._buildLoadingLabel();
-
-    this._overlay = new LoadingOverlay();
-    // The overlay autonomously fills the container with shapes that lock
-    // in place. We do NOT trigger exit immediately on fill — instead we
-    // wait until BOTH the container is filled AND audio is loaded, then
-    // start HomeScene (which fades its main camera up from alpha 0 over
-    // ~700ms). Home renders BEHIND the still-locked shapes during that
-    // fade. Only after the fade completes do we triggerExit so the
-    // shapes drop and reveal a fully-faded-in Home behind.
-    this._overlay.setOnFilled(() => {
-      this._overlayFilled = true;
-      this._maybeStartHome();
-    });
-    this._overlay.start();
+    if (this._portalArrival) {
+      // Portal arrival: run the cover animation, gate the scene swap on
+      // its peak. PortalCover lives in PreloadScene's window-scoped
+      // closure so it survives the scene transition; PlayerScene's first
+      // frame triggers its reveal phase via this._portalCover.
+      this._portalCover = new PortalCover({
+        onCoverPeak: () => {
+          this._overlayFilled = true;   // reuse existing gate
+          this._maybeStartHome();
+        },
+      });
+      this._portalCover.start();
+      // Stash on window so PlayerScene can reach it without import
+      // gymnastics — the cover is a singleton DOM canvas anyway.
+      if (typeof window !== 'undefined') window.__blockyardPortalCover = this._portalCover;
+    } else {
+      // Standard boot path: LOADING label + shape-rain overlay.
+      this._buildLoadingLabel();
+      this._overlay = new LoadingOverlay();
+      // The overlay autonomously fills the container with shapes that lock
+      // in place. We do NOT trigger exit immediately on fill — instead we
+      // wait until BOTH the container is filled AND audio is loaded, then
+      // start HomeScene (which fades its main camera up from alpha 0 over
+      // ~700ms). Home renders BEHIND the still-locked shapes during that
+      // fade. Only after the fade completes do we triggerExit so the
+      // shapes drop and reveal a fully-faded-in Home behind.
+      this._overlay.setOnFilled(() => {
+        this._overlayFilled = true;
+        this._maybeStartHome();
+      });
+      this._overlay.start();
+    }
 
     // Phaser picks the first entry the browser can decode. OGG for
     // desktop Chrome/Firefox + modern Android (smaller / better at the
@@ -151,7 +176,9 @@ export default class PreloadScene extends Phaser.Scene {
     // back to the rapid spawn rate so the remaining shapes pile up
     // quickly and the drop fires sooner. The actual scene transition
     // is gated by `_maybeStartHome` so it can't race ahead of the
-    // shape-drop animation.
+    // shape-drop animation. Portal arrivals bypass the overlay
+    // entirely — PortalCover's onCoverPeak already flagged
+    // _overlayFilled.
     this._audioReady = true;
     if (this._overlay) this._overlay.signalReady();
     this._maybeStartHome();
@@ -179,6 +206,24 @@ export default class PreloadScene extends Phaser.Scene {
     if (!this._audioReady) return;
     if (!this._overlayFilled) return;
     this._sceneStarted = true;
+
+    if (this._portalArrival) {
+      // Portal arrival path: clean the ?portal=true off the URL so a
+      // refresh doesn't re-enter portal mode, then dispatch straight to
+      // PlayerScene at level-1. PortalCover stays on top until
+      // PlayerScene's first frame calls triggerExit on it (see the
+      // window-scoped reference stashed in preload()).
+      try {
+        if (typeof window !== 'undefined') {
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+      } catch (e) { /* ignore */ }
+      this.scene.start('Player', {
+        levelId: 'level-1',
+        _skipIntroCheck: true,
+      });
+      return;
+    }
 
     // Start HomeScene with the fade-in flag. Home's create() runs alpha
     // 0 → 1 over 700ms; during that window the still-locked overlay

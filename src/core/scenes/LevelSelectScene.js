@@ -10,6 +10,8 @@ import { themeForSectionIdx, MAIN_SECTION_COUNT } from '../themes/sectionThemes.
 import { SettingsModal } from '../ui/SettingsModal.js';
 import { TitleBar } from '../ui/TitleBar.js';
 import { wireUiClicks, wireEmptyClicks } from '../audio/sfx.js';
+import { PortalCover } from '../ui/PortalCover.js';
+import { getAuthorHandle } from '../community.js';
 
 // Level select. Layout mirrors the Player scene's column so this screen
 // reads as a "preview" of the in-game layout: the LEVEL SELECT header box,
@@ -185,7 +187,23 @@ export default class LevelSelectScene extends Phaser.Scene {
         const cy = y + r * (btnSize + BLOCK_GAP) + btnSize / 2;
         this._drawLevelTile(cx, cy, btnSize, lvls[idx]);
       }
-      const rows = Math.max(1, Math.ceil(lvls.length / cols));
+      let tileCount = lvls.length;
+      // vibej.am 2026 exit portal: extra tile after the final Wild West section,
+      // gated on the build flag and on the main campaign being fully beaten.
+      const showExitPortal = isWildWest
+        && si === sectionsToRender.length - 1
+        && (typeof __VIBEJAM__ !== 'undefined') && __VIBEJAM__
+        && this._isMainCampaignFullyBeaten();
+      if (showExitPortal) {
+        const idx = tileCount;
+        const r = Math.floor(idx / cols);
+        const c = idx % cols;
+        const cx = startX + c * (btnSize + BLOCK_GAP) + btnSize / 2;
+        const cy = y + r * (btnSize + BLOCK_GAP) + btnSize / 2;
+        this._drawExitPortalTile(cx, cy, btnSize);
+        tileCount += 1;
+      }
+      const rows = Math.max(1, Math.ceil(tileCount / cols));
       y += rows * btnSize + Math.max(0, rows - 1) * BLOCK_GAP + BLOCK_GAP;
 
       if (section.boss) {
@@ -488,6 +506,91 @@ export default class LevelSelectScene extends Phaser.Scene {
     };
     addGlyph(0, drawHome, () => fadeTo(this, 'Home'));
     addGlyph(1, drawGear, () => this._openSettings());
+  }
+
+  // True when every level (and any authored boss) inside the first
+  // MAIN_SECTION_COUNT sections is in the beaten set. Mirrors
+  // _isWildWestUnlocked but exists separately so the exit-portal gate can
+  // diverge from the Wild West gate later if needed.
+  _isMainCampaignFullyBeaten() {
+    const main = SECTIONS.slice(0, MAIN_SECTION_COUNT);
+    for (const s of main) {
+      for (const l of s.levels) if (!this._beaten.has(l.id)) return false;
+      if (s.boss && !this._beaten.has(s.boss.id)) return false;
+    }
+    return true;
+  }
+
+  // vibej.am 2026 exit portal — same outer geometry as a level tile so it
+  // slots into the Wild West grid, but painted as a swirling orange portal
+  // (matching PortalCover's accent palette) so it reads as "leave the
+  // game" rather than "another level".
+  _drawExitPortalTile(cx, cy, size) {
+    const BASE   = 0x412722;
+    const ACCENT = 0xff8a3a;
+    const STROKE = 0x8a4a18;
+
+    const tile = this.add.container(cx, cy).setDepth(10);
+
+    const gfx = this.add.graphics();
+    gfx.fillStyle(BASE, 1);
+    gfx.lineStyle(2, STROKE, 1);
+    gfx.fillRoundedRect(-size / 2, -size / 2, size, size, BUTTON_CORNER_R);
+    gfx.strokeRoundedRect(-size / 2, -size / 2, size, size, BUTTON_CORNER_R);
+    tile.add(gfx);
+
+    // Swirl glyph: a few rotated wedges fanning out from center, clipped to
+    // a disc. Flat draw — the live animation lives on PortalCover; here we
+    // just need the glyph to read as "portal".
+    const swirl = this.add.graphics();
+    const r = size * 0.36;
+    swirl.fillStyle(ACCENT, 0.85);
+    const RAYS = 8;
+    const spokeAngle = (Math.PI * 2) / RAYS;
+    const spokeWidth = spokeAngle * 0.45;
+    for (let i = 0; i < RAYS; i++) {
+      const a = i * spokeAngle + Math.PI / RAYS;
+      swirl.beginPath();
+      swirl.moveTo(0, 0);
+      swirl.arc(0, 0, r, a - spokeWidth / 2, a + spokeWidth / 2);
+      swirl.closePath();
+      swirl.fillPath();
+    }
+    swirl.fillStyle(BASE, 1);
+    swirl.fillCircle(0, 0, r * 0.35);
+    swirl.fillStyle(ACCENT, 1);
+    swirl.fillCircle(0, 0, r * 0.18);
+    tile.add(swirl);
+
+    // Slow rotation so the tile reads as motion at a glance.
+    this.tweens.add({
+      targets: swirl, angle: 360, duration: 6000, repeat: -1, ease: 'Linear',
+    });
+
+    this._gfx.push(tile);
+
+    const hit = this.add.rectangle(cx, cy, size, size, 0xffffff, 0.001)
+      .setInteractive({ useHandCursor: true }).setDepth(12);
+    this._attachTileJuice(hit, tile, () => this._enterExitPortal());
+    this._hits.push(hit);
+  }
+
+  // Tap handler for the exit portal: kick off PortalCover's swirl-in, then
+  // redirect the tab to the vibej.am 2026 portal once coverage peaks (so the
+  // page navigation happens behind the cover rather than under a still
+  // LevelSelect frame). The page unload tears down PortalCover for us.
+  async _enterExitPortal() {
+    if (this._exitPortalArmed) return;
+    this._exitPortalArmed = true;
+    let handle = '';
+    try { handle = (await getAuthorHandle()) || ''; } catch (e) { handle = ''; }
+    const url = 'https://vibej.am/portal/2026?ref='
+      + encodeURIComponent(window.location.origin)
+      + '&username=' + encodeURIComponent(handle);
+    const cover = new PortalCover({
+      onCoverPeak: () => { window.location.href = url; },
+    });
+    cover.start();
   }
 
   _openSettings() {
