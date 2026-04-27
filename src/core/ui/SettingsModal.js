@@ -9,8 +9,6 @@ import {
   getMusicVolume, getSfxVolume, setMusicVolume, setSfxVolume,
 } from '../audio/settings.js';
 import { addDomDim } from './DomDim.js';
-import { getEthOptIn, setEthOptIn } from '../../eth/userPref.js';
-import { platform } from '../../platform/index.js';
 
 const SHIELD_DEPTH = 9000;
 const PANEL_DEPTH  = 9001;
@@ -36,14 +34,9 @@ export class SettingsModal {
 
     const { width, height } = scene.scale;
     const panelW = Math.min(460, width - 60);
-    // Eth toggle only shown on builds where the platform supports it
-    // (web with a deployed contract). Other adapters silently skip the
-    // row to keep the panel compact.
-    const showEthToggle = !!(platform && platform.ethEnabled);
-    const panelH = showEthToggle ? 340 : 300;
+    const panelH = 300;
     const px = width / 2 - panelW / 2;
     const py = height / 2 - panelH / 2;
-    this._showEthToggle = showEthToggle;
 
     // Dim the HTML letterbox so the dim looks continuous across the
     // whole viewport. The Phaser shield below dims the canvas itself.
@@ -67,62 +60,9 @@ export class SettingsModal {
     this.sliders.push(this._slider(width / 2, py + 110, 'Music', getMusicVolume(), setMusicVolume));
     this.sliders.push(this._slider(width / 2, py + 185, 'SFX',   getSfxVolume(),   setSfxVolume));
 
-    // Optional Ethereum opt-in toggle. Sits below the SFX slider with
-    // the same horizontal margins. Stored in userPref.js so the publish
-    // flow can read it on every Export panel build.
-    if (this._showEthToggle) {
-      this.ethToggle = this._toggle(
-        width / 2, py + 250,
-        'Ethereum mint flow',
-        getEthOptIn(),
-        setEthOptIn,
-      );
-    }
-
     // Close button.
     const buttonY = py + panelH - 44;
     this.closeBtn = this._button(width / 2, buttonY, 150, 46, 'CLOSE', () => this._finish());
-  }
-
-  // Compact label + ON/OFF pill switch. Tap the pill to flip; visual is
-  // a single rounded rect that swaps background color and "ON"/"OFF"
-  // glyph based on the current state.
-  _toggle(cx, cy, label, initial, setter) {
-    const scene = this.scene;
-    const labelText = scene.add.text(cx - SLIDER_W / 2, cy, label, {
-      fontFamily: 'system-ui, sans-serif', fontSize: '14px', fontStyle: 'bold',
-      color: LABEL_COLOR,
-    }).setOrigin(0, 0.5).setDepth(PANEL_DEPTH);
-
-    const pillW = 64, pillH = 28;
-    const pillCx = cx + SLIDER_W / 2 - pillW / 2;
-    const pillBg = scene.add.graphics().setDepth(PANEL_DEPTH);
-    const pillLabel = scene.add.text(pillCx, cy, '', {
-      fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontStyle: 'bold',
-      color: '#ffffff',
-    }).setOrigin(0.5).setDepth(PANEL_DEPTH + 1);
-
-    let state = !!initial;
-    const paint = () => {
-      pillBg.clear();
-      pillBg.fillStyle(state ? FILL_COLOR : 0x9aa6b2, 1);
-      pillBg.lineStyle(2, TRACK_STROKE, 1);
-      pillBg.fillRoundedRect(pillCx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2);
-      pillBg.strokeRoundedRect(pillCx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2);
-      pillLabel.setText(state ? 'ON' : 'OFF');
-    };
-    paint();
-
-    const hit = scene.add.rectangle(pillCx, cy, pillW + 8, pillH + 8, 0xffffff, 0.001)
-      .setDepth(PANEL_DEPTH + 2).setInteractive({ useHandCursor: true });
-    hit.on('pointerup', (p, lx, ly, e) => {
-      if (e) e.stopPropagation();
-      state = !state;
-      try { setter(state); } catch (e2) {}
-      paint();
-    });
-
-    return { labelText, pillBg, pillLabel, hit };
   }
 
   _slider(cx, cy, label, initialValue, setter) {
@@ -239,13 +179,6 @@ export class SettingsModal {
       try { s.percentText.destroy(); } catch (e) {}
     }
     this.sliders = null;
-    if (this.ethToggle) {
-      try { this.ethToggle.labelText.destroy(); } catch (e) {}
-      try { this.ethToggle.pillBg.destroy(); } catch (e) {}
-      try { this.ethToggle.pillLabel.destroy(); } catch (e) {}
-      try { this.ethToggle.hit.destroy(); } catch (e) {}
-      this.ethToggle = null;
-    }
     if (this.closeBtn) {
       try { this.closeBtn.container.destroy(true); } catch (e) {}
       this.closeBtn = null;

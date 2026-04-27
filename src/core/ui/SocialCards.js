@@ -58,25 +58,6 @@ export const SOCIAL_CARDS = [
     iconKind: 'kofi',
   },
   {
-    id: 'eth',
-    title: 'Ethereum challenge',
-    subtitle: 'on-chain level ownership',
-    action: {
-      type: 'modal',
-      title: 'Ethereum challenge',
-      body:
-        'You can mint your published levels on Base Sepolia so authorship ' +
-        'lives on-chain.\n\n' +
-        'The mint flow is OFF by default. To turn it on:\n' +
-        '  1. Open Settings (gear icon).\n' +
-        '  2. Toggle "Ethereum mint flow" ON.\n' +
-        '  3. Publish a level. Wallet controls appear in the Export panel.\n\n' +
-        'You\u2019ll need a Base Sepolia wallet with a small amount of test ' +
-        'ETH for gas.',
-    },
-    iconKind: 'eth',
-  },
-  {
     id: 'playables',
     title: 'YouTube Playables',
     subtitle: 'built for the platform',
@@ -122,7 +103,6 @@ export const SOCIAL_CARDS = [
 // since no brand logo applies.
 const LOGO_KEYS = {
   kofi:      'logo_kofi',
-  eth:       'logo_eth',
   discord:   'logo_discord',
   twitch:    'logo_twitch',
   playables: 'logo_playables',
@@ -155,7 +135,6 @@ export function renderSocialIcon(scene, container, kind, size) {
     case 'shapes':    drawShapes(g, size);   break;
     case 'phaser':    drawPhaser(g, size);   break;
     case 'kofi':      drawKofi(g, size);     break;
-    case 'eth':       drawEthereum(g, size); break;
     case 'playables': drawPlayables(g, size); break;
     case 'twitch':    drawTwitch(g, size);   break;
     case 'discord':   drawDiscord(g, size);  break;
@@ -196,49 +175,6 @@ function drawKofi(g, size) {
   // White rim line on the mug to suggest the coffee level.
   g.lineStyle(Math.max(2, Math.floor(size * 0.04)), 0xffffff, 0.85);
   g.lineBetween(cx - w / 2 + 4, cy - h * 0.18, cx + w / 2 - 4, cy - h * 0.18);
-}
-
-function drawEthereum(g, size) {
-  // Diamond logo: top half + bottom half as two stacked triangles, then
-  // a smaller centered rhombus on the seam.
-  const halfW = size * 0.30;
-  const topY  = -size * 0.42;
-  const midY  = size * 0.04;
-  const botY  = size * 0.46;
-  // Top half (lighter).
-  g.fillStyle(0xb6c6ff, 1);
-  g.beginPath();
-  g.moveTo(0, topY);
-  g.lineTo(-halfW, midY);
-  g.lineTo(0, midY * 0.55);
-  g.lineTo(halfW, midY);
-  g.closePath();
-  g.fillPath();
-  // Top half darker right cheek (depth).
-  g.fillStyle(0x6f86d8, 1);
-  g.beginPath();
-  g.moveTo(0, topY);
-  g.lineTo(halfW, midY);
-  g.lineTo(0, midY * 0.55);
-  g.closePath();
-  g.fillPath();
-  // Bottom half — single triangle pointing down.
-  g.fillStyle(0x4661c2, 1);
-  g.beginPath();
-  g.moveTo(-halfW, midY + 4);
-  g.lineTo(halfW, midY + 4);
-  g.lineTo(0, botY);
-  g.closePath();
-  g.fillPath();
-  // Outline tying it together.
-  g.lineStyle(Math.max(2, Math.floor(size * 0.03)), 0x1a2332, 1);
-  g.beginPath();
-  g.moveTo(0, topY);
-  g.lineTo(-halfW, midY + 2);
-  g.lineTo(0, botY);
-  g.lineTo(halfW, midY + 2);
-  g.closePath();
-  g.strokePath();
 }
 
 function drawPlayables(g, size) {

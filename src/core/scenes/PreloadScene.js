@@ -9,7 +9,6 @@ import { wireLetterboxChecker } from '../ui/LetterboxChecker.js';
 import { BOARD_GAP } from '../constants.js';
 import { resetCutscenes } from '../progress.js';
 import { ensureStaticAtlases } from '../render/textures/atlas.js';
-import { loadEthOptIn } from '../../eth/userPref.js';
 
 // Mirror HomeScene's board layout so the bg tiles painted under the
 // loading overlay match the size + alignment HomeScene will paint as
@@ -99,7 +98,6 @@ export default class PreloadScene extends Phaser.Scene {
     // loaded as plain images (Phaser rasterizes them at draw time) so
     // they scale cleanly to whatever size the card renders.
     this.load.image('logo_kofi',     'logos/kofi.svg');
-    this.load.image('logo_eth',      'logos/ethereum.svg');
     this.load.image('logo_discord',  'logos/discord.svg');
     this.load.image('logo_twitch',   'logos/twitch.svg');
     this.load.image('logo_playables','logos/playables.svg');
@@ -118,9 +116,6 @@ export default class PreloadScene extends Phaser.Scene {
     // BEFORE the music bed spins up so the first fade-in reflects the
     // user's saved mix instead of snapping from full volume.
     try { loadAudioSettings(); } catch (e) { console.warn('[audio] settings load failed', e); }
-    // Eth opt-in pref. Defaults to false so the publish flow stays
-    // signature-free for the average player; flipped on via Settings.
-    try { loadEthOptIn(); } catch (e) { console.warn('[eth] opt-in load failed', e); }
     // Global looping music bed, started once for the life of the game.
     // PlayerScene will pause/resume it on sim state transitions.
     try { initMusicEngine(this.game); } catch (e) { console.warn('[music] init failed', e); }
