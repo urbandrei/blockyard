@@ -31,7 +31,7 @@ import { compute920Box } from '../ui/ContentBox.js';
 import { Simulation } from '../sim/Simulation.js';
 import { DragController } from '../input/DragController.js';
 import { shapeSquash } from '../render/pulse.js';
-import { drawHome, drawGrid, drawCircleArrow, drawPlayTriangle, drawShareNet, drawGear } from '../ui/Icons.js';
+import { drawHome, drawGrid, drawCircleArrow, drawPlayTriangle, drawFastForward, drawShareNet, drawGear } from '../ui/Icons.js';
 import { SettingsModal } from '../ui/SettingsModal.js';
 import { addDomBand } from '../ui/DomDim.js';
 import { shareLevel as nativeShareLevel, encodeShareString as encodeShareForClient } from '../ui/socialShare.js';
@@ -141,6 +141,7 @@ export default class PlayerScene extends Phaser.Scene {
     this.ready = false;
     this.simState = 'idle';        // 'idle' | 'running' | 'paused'
     this.simTime  = 0;             // virtual clock — only advances when running
+    this._fastForwardActive = false; // blueprint >> button held → 2x sim speed
     this.satisfiedOutputs = new Set();
     this.satisfiedCollectors = new Set();
     // Red border funnels that have already played their right/wrong SFX
@@ -1097,8 +1098,14 @@ export default class PlayerScene extends Phaser.Scene {
     const resetBg = makeTile(resetCX, (g) => drawCircleArrow(g, 0, 0, btnSize * 0.75, 0xffffff));
 
     const running = this.simState === 'running';
-    const playIconColor = running ? 0x637a5a : 0x4caf50;
-    const playBg = makeTile(playCX, (g) => drawPlayTriangle(g, btnSize * 0.04, 0, btnSize * 0.68, playIconColor));
+    // While the sim is running the PLAY tile becomes a fast-forward (>>)
+    // glyph: press-and-hold doubles sim speed. Idle/paused keep the classic
+    // play triangle that starts/resumes on tap.
+    const playIconColor = 0x4caf50;
+    const playBg = makeTile(playCX, (g) => {
+      if (running) drawFastForward(g, 0, 0, btnSize * 0.68, playIconColor);
+      else         drawPlayTriangle(g, btnSize * 0.04, 0, btnSize * 0.68, playIconColor);
+    });
 
     const tweens = [];
     if (animateEntry) {
@@ -1137,11 +1144,24 @@ export default class PlayerScene extends Phaser.Scene {
     resetHit.on('pointerout',  () => pop(resetBg));
 
     const playHit = this.add.rectangle(playHitCX, hitCY, btnSize, btnSize, 0xffffff, 0)
-      .setInteractive({ useHandCursor: !running }).setDepth(56);
-    playHit.on('pointerdown', () => squash(playBg));
-    playHit.on('pointerout',  () => pop(playBg));
-    playHit.on('pointerup', () => {
+      .setInteractive({ useHandCursor: true }).setDepth(56);
+    // Fast-forward gating: only the running tile holds the >> glyph and
+    // toggles the speed flag on press. Idle/paused fall through to the
+    // classic single-tap start/resume path.
+    const releaseFastForward = () => {
+      this._fastForwardActive = false;
       pop(playBg);
+    };
+    playHit.on('pointerdown', () => {
+      squash(playBg);
+      if (this.simState === 'running') this._fastForwardActive = true;
+    });
+    playHit.on('pointerout',     releaseFastForward);
+    playHit.on('pointerupoutside', releaseFastForward);
+    playHit.on('pointerup', () => {
+      const wasRunning = this.simState === 'running';
+      releaseFastForward();
+      if (wasRunning) return;          // hold-only — no tap action while running
       if (this.simState === 'idle' && this._canPlay()) this._startPlay();
       else if (this.simState === 'paused') this._resume();
     });
@@ -1186,6 +1206,17 @@ export default class PlayerScene extends Phaser.Scene {
     const m = this._blueprintButtonMetrics;
     if (m && m.dgW === dgW && m.dgH === dgH) return;
     this._showBlueprintPlayButtons(dgW, dgH, false);
+  }
+
+  // Force a play-button rebuild after a sim-state transition so the icon
+  // swaps between play-triangle (idle/paused) and fast-forward (running).
+  // No-op if the buttons aren't currently mounted (blueprint occupied or
+  // a factory is being dragged).
+  _refreshBlueprintPlayButtons() {
+    if (!this._blueprintButtonsVisible) return;
+    const m = this._blueprintButtonMetrics;
+    if (!m) return;
+    this._showBlueprintPlayButtons(m.dgW, m.dgH, false);
   }
 
   _teardownBlueprintPlayButtons() {
@@ -1955,7 +1986,9 @@ export default class PlayerScene extends Phaser.Scene {
     // state anymore; if the tab blurs, MusicEngine's own blur handler
     // pauses everything and restores on focus.
     this._updateLaserSounds();
-    if (this.simState === 'running') this.simTime += delta;
+    if (this.simState === 'running') {
+      this.simTime += delta * (this._fastForwardActive ? 2 : 1);
+    }
     // 30fps cosmetic tick — flow repaint + squash/stretch are visual-only
     // and don't need to run every frame. Halves per-frame GPU cost at 60fps;
     // at <30fps (mobile lag) they fire every frame, same as before.
@@ -2789,13 +2822,16 @@ export default class PlayerScene extends Phaser.Scene {
     this.sim.start(this._composeLevel(), this.simTime);
     this.simState = 'running';
     this._renderIconIsland();
+    this._refreshBlueprintPlayButtons();
   }
 
   _pause() {
     if (this.simState !== 'running') return;
     this.sim.pause(this.simTime);
     this.simState = 'paused';
+    this._fastForwardActive = false;
     this._renderIconIsland();
+    this._refreshBlueprintPlayButtons();
   }
 
   _resume() {
@@ -2803,6 +2839,7 @@ export default class PlayerScene extends Phaser.Scene {
     this.sim.resume(this.simTime);
     this.simState = 'running';
     this._renderIconIsland();
+    this._refreshBlueprintPlayButtons();
   }
 
   _resetPlay() {
@@ -2832,10 +2869,12 @@ export default class PlayerScene extends Phaser.Scene {
       this.satisfiedCollectors && this.satisfiedCollectors.clear();
       this.simState = 'idle';
       this.simTime = 0;
+      this._fastForwardActive = false;
       try { resetLayersToInitial(); } catch (e) {}
       this._initRuntime();
       this._renderAll();
       this._renderBlueprint();
+      this._refreshBlueprintPlayButtons();
       this._renderIconIsland();
       return;
     }
@@ -2846,6 +2885,7 @@ export default class PlayerScene extends Phaser.Scene {
     this.satisfiedCollectors.clear();
     this.simState = 'idle';
     this.simTime = 0;
+    this._fastForwardActive = false;
     // RESET drops any progression-tied layers so the idle bed is back
     // to layer 1 only. Press PLAY again to start fading them in fresh.
     if (this._musicEventsSeen) this._musicEventsSeen.clear();
@@ -2880,6 +2920,7 @@ export default class PlayerScene extends Phaser.Scene {
     }
     this._renderAll();
     this._renderBlueprint();
+    this._refreshBlueprintPlayButtons();
     this._renderIconIsland();
   }
 
@@ -2903,9 +2944,11 @@ export default class PlayerScene extends Phaser.Scene {
     if (this.shapeRenderer) this.shapeRenderer.clearAll();
     this.simState = 'idle';
     this.simTime = 0;
+    this._fastForwardActive = false;
     // Re-render so the empty-blueprint PLAY/RESET tiles come back, and the
     // icon-island RESET re-evaluates its enabled state.
     this._renderBlueprint();
+    this._refreshBlueprintPlayButtons();
     this._renderIconIsland && this._renderIconIsland();
   }
 
@@ -3076,6 +3119,10 @@ export default class PlayerScene extends Phaser.Scene {
       return;
     }
     this.victory = true;
+    // Drop fast-forward so the victory celebration plays at normal speed
+    // even if the player happened to be holding the >> tile when shapes
+    // satisfied the level.
+    this._fastForwardActive = false;
     // Telemetry: mark the play complete only on the FINAL boss round (or
     // any non-boss victory). Intermediate boss rounds short-circuited
     // above with their own `victory = true`, so they don't reach here.

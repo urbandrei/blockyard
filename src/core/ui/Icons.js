@@ -233,6 +233,28 @@ export function drawPlayTriangle(gfx, cx, cy, size, color = 0xffffff) {
   gfx.fillPath();
 }
 
+// Two stacked play triangles forming a >> fast-forward glyph. Used by the
+// blueprint play button while the sim is running — press-and-hold to
+// double sim speed.
+export function drawFastForward(gfx, cx, cy, size, color = 0xffffff) {
+  const h = size * 0.82;
+  const halfH = h / 2;
+  // Each triangle is a bit slimmer than the single-arrow play glyph so the
+  // pair fits inside the same tile. Overlap them slightly so they read as
+  // one shape, not two divorced arrows.
+  const halfW = halfH * 0.62;
+  const offset = halfW * 0.95;
+  gfx.fillStyle(color, 1);
+  for (const dx of [-offset, offset]) {
+    gfx.beginPath();
+    gfx.moveTo(cx + dx - halfW, cy - halfH);
+    gfx.lineTo(cx + dx - halfW, cy + halfH);
+    gfx.lineTo(cx + dx + halfW, cy);
+    gfx.closePath();
+    gfx.fillPath();
+  }
+}
+
 function toCssColor(c) {
   return '#' + c.toString(16).padStart(6, '0');
 }
