@@ -30,6 +30,16 @@ const Schema = z.object({
   // 1 POST + 1 PATCH per play, but a single fast-replaying user can churn
   // through many sessions in a minute, so leave headroom.
   RATE_PLAY_PER_MINUTE:   z.coerce.number().int().positive().default(120),
+
+  // Phase 2 share-card storage. PREVIEW_DIR is a writable path on the
+  // Render persistent disk; OG_REDIRECT_BASE is where /p/:code bounces
+  // human visitors after the OG-scraping bots have read the head;
+  // API_PUBLIC_BASE is this server's own public-facing origin (Render
+  // terminates TLS so c.req.url would otherwise be http://, which OG
+  // scrapers reject for og:image).
+  PREVIEW_DIR:      z.string().default('/var/data/previews'),
+  OG_REDIRECT_BASE: z.string().url().default('https://www.block-yard.com'),
+  API_PUBLIC_BASE:  z.string().url().default('https://blockyard-api.onrender.com'),
 });
 
 const parsed = Schema.safeParse(process.env);

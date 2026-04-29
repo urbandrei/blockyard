@@ -100,10 +100,16 @@ export function createBaseAdapter(name = 'base') {
     // this caller submitted. Sandboxed adapters return an empty list so
     // CommunityScene's check loop is a no-op there.
     async fetchMySubmissions() { return []; },
-    // URL shortener: takes a base64 share-string and returns `{code}` or
-    // null if the backend is unreachable. Callers fall back to a direct
-    // `?play=<base64>` URL when null.
-    async shortenShareCode(_shareCode) { return null; },
+    // URL shortener: takes a base64 share-string and an optional
+    // `previewImage` (base64-encoded PNG body or full data: URL). Returns
+    // `{ code, hasPreview, ogUrl } | null`. `ogUrl` is the absolute,
+    // public OG-tagged share URL when a preview was persisted server-side
+    // (callers should prefer it for native shares so social unfurls show
+    // the per-level card); a falsy `ogUrl` means callers should fall back
+    // to the in-app `?s=<code>` shape on their own origin. The whole call
+    // returns null when the backend is unreachable; callers then fall back
+    // to a direct `?play=<base64>` URL.
+    async shortenShareCode(_shareCode, _opts) { return null; },
     async resolveShortCode(_code) { return null; },
 
     // External-link primitive. Adapters that can pop a new tab override this

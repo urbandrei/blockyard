@@ -127,7 +127,11 @@ export const featuredQueue = pgTable('featured_queue', {
 // so duplicate share_codes always collide on the PK; getOrCreateShortCode
 // dedupes by id instead.
 export const shortLinks = pgTable('short_links', {
-  id:        text('id').primaryKey(),
-  shareCode: text('share_code').notNull(),
-  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  id:         text('id').primaryKey(),
+  shareCode:  text('share_code').notNull(),
+  createdAt:  bigint('created_at', { mode: 'number' }).notNull(),
+  // True iff a per-level preview PNG was uploaded and persisted to the
+  // PREVIEW_DIR mount. /p/:code uses this to decide whether to point
+  // og:image at the per-level PNG or fall back to the global og-image.png.
+  hasPreview: boolean('has_preview').notNull().default(false),
 });

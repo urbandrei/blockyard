@@ -61,20 +61,33 @@ export async function shareLevel(opts) {
   const raw = unchunk(shareString);
   const base = shareBaseForCurrentOrigin();
 
-  // Backend shortener is best-effort; fall back to the full `?play=` URL
-  // whenever it can't respond.
-  let code = null;
-  try { code = await platform.shortenShareCode(raw); } catch (e) {}
-  const url = code
-    ? withShareParam(base, 's', code)
-    : withShareParam(base, 'play', raw);
-
+  // Render the per-level preview FIRST so we can hand it to the shortener
+  // alongside the share-code. Failures here are non-fatal; we just lose
+  // the per-level OG card and fall back to the global og-image.png.
   let blob = null;
   try {
     blob = await generateShareImage(scene, level, { url: base.replace(/^https?:\/\//, '') });
   } catch (e) {
     console.warn('[share] preview generation failed', e);
   }
+
+  // Backend shortener is best-effort; fall back to the in-app `?play=` URL
+  // whenever it can't respond. When the preview upload succeeds, prefer
+  // the OG-tagged `ogUrl` (api host) so Discord/Twitter/Slack unfurl the
+  // per-level card; otherwise stay on the canonical origin with `?s=`.
+  let previewBase64 = null;
+  if (blob) {
+    try { previewBase64 = await blobToBase64(blob); } catch (e) {}
+  }
+  let shortenResult = null;
+  try {
+    shortenResult = await platform.shortenShareCode(raw, previewBase64 ? { previewImage: previewBase64 } : undefined);
+  } catch (e) {}
+  const url = shortenResult && shortenResult.ogUrl
+    ? shortenResult.ogUrl
+    : shortenResult && shortenResult.code
+      ? withShareParam(base, 's', shortenResult.code)
+      : withShareParam(base, 'play', raw);
 
   const name = level.name || 'Blockyard level';
   const isFeaturedToday = !!featuredUtcDate && featuredUtcDate === utcToday();
@@ -112,6 +125,21 @@ export async function shareLevel(opts) {
 
 function safeFilename(name) {
   return String(name || 'level').toLowerCase().replace(/[^a-z0-9-_]+/gi, '_').slice(0, 40);
+}
+
+// FileReader → data URL → base64 body. Returns the BARE base64 (no
+// `data:image/png;base64,` prefix) so the backend doesn't have to strip it.
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const out = String(reader.result || '');
+      const i = out.indexOf(',');
+      resolve(i >= 0 ? out.slice(i + 1) : out);
+    };
+    reader.onerror = () => reject(reader.error || new Error('blob read failed'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 // Base64 of a minified level JSON with runtime-only fields stripped.

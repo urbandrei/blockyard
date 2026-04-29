@@ -32,3 +32,13 @@ services:
         sync: false
       - key: ADMIN_TOKEN
         generateValue: true
+      - key: PREVIEW_DIR
+        value: /var/data/previews
+      - key: OG_REDIRECT_BASE
+        value: https://www.block-yard.com
+      - key: API_PUBLIC_BASE
+        value: https://blockyard-api.onrender.com
+    disk:
+      name: blockyard-data
+      mountPath: /var/data
+      sizeGB: 1

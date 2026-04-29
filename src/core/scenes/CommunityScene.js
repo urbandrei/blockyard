@@ -498,8 +498,11 @@ export default class CommunityScene extends Phaser.Scene {
       return `https://www.block-yard.com/?level=${encodeURIComponent(level.id)}`;
     }
     const shareString = encodeShareForClient(level);
-    let code = null;
-    try { code = await platform.shortenShareCode(shareString); } catch (e) {}
+    // No preview uploaded from this path; we only need the bare short code
+    // and stay on the canonical `?s=<code>` shape.
+    let shortenResult = null;
+    try { shortenResult = await platform.shortenShareCode(shareString); } catch (e) {}
+    const code = shortenResult && shortenResult.code;
     const base = 'https://www.block-yard.com';
     return code
       ? `${base}/?s=${encodeURIComponent(code)}`

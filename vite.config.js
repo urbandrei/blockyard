@@ -34,6 +34,57 @@ function injectVibejWidgetPlugin() {
   };
 }
 
+// SEO meta block — only shipped on the canonical web build (block-yard.com).
+// Itch / Wavedash / Playables / CrazyGames builds run inside iframes or
+// platform-owned listing pages and do NOT want canonical URLs, sitemap
+// references, or block-yard.com OG URLs leaking into their host page.
+function injectSeoPlugin() {
+  return {
+    name: 'blockyard-inject-seo',
+    transformIndexHtml(html) {
+      if (PLATFORM !== 'web') return html;
+      const SITE = 'https://www.block-yard.com';
+      const DESC = 'A puzzle game where you place factories on a grid to manufacture shapes, then design and share your own levels to stump your friends.';
+      const TITLE = 'Blockyard | Build & Share Factory Puzzles';
+      const OG_IMAGE = `${SITE}/og-image.png`;
+      const ldJson = JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'VideoGame',
+        name: 'Blockyard',
+        description: DESC,
+        url: SITE,
+        image: OG_IMAGE,
+        applicationCategory: 'GameApplication',
+        genre: 'Puzzle',
+        operatingSystem: 'Web Browser',
+        author: { '@type': 'Person', name: 'urbandrei' },
+      });
+      const seo = [
+        `<meta name="description" content="${DESC}">`,
+        `<meta name="theme-color" content="#412722">`,
+        `<meta name="robots" content="index,follow">`,
+        `<link rel="canonical" href="${SITE}/">`,
+        `<link rel="manifest" href="/manifest.webmanifest">`,
+        `<meta property="og:type" content="website">`,
+        `<meta property="og:site_name" content="Blockyard">`,
+        `<meta property="og:title" content="${TITLE}">`,
+        `<meta property="og:description" content="${DESC}">`,
+        `<meta property="og:url" content="${SITE}/">`,
+        `<meta property="og:image" content="${OG_IMAGE}">`,
+        `<meta property="og:image:width" content="630">`,
+        `<meta property="og:image:height" content="500">`,
+        `<meta name="twitter:card" content="summary_large_image">`,
+        `<meta name="twitter:title" content="${TITLE}">`,
+        `<meta name="twitter:description" content="${DESC}">`,
+        `<meta name="twitter:image" content="${OG_IMAGE}">`,
+        `<script type="application/ld+json">${ldJson}</script>`,
+      ].map((tag) => `  ${tag}`).join('\n');
+      let out = html.replace('<title>Blockyard</title>', `<title>${TITLE}</title>`);
+      return out.replace('</head>', `${seo}\n</head>`);
+    },
+  };
+}
+
 export default defineConfig({
   // Relative asset paths so `assets/index-xxx.js` resolves next to
   // index.html rather than at the origin root. Required by itch.io
@@ -43,7 +94,7 @@ export default defineConfig({
     __PLATFORM__: JSON.stringify(PLATFORM),
     __VIBEJAM__: JSON.stringify(VIBEJAM),
   },
-  plugins: [injectYtgameSdkPlugin(), injectVibejWidgetPlugin()],
+  plugins: [injectYtgameSdkPlugin(), injectVibejWidgetPlugin(), injectSeoPlugin()],
   server: {
     host: true,
     port: 5173,

@@ -1,0 +1,16 @@
+{
+  "name": "Blockyard",
+  "short_name": "Blockyard",
+  "description": "A puzzle game where you place factories on a grid to manufacture shapes, then design and share your own levels to stump your friends.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#412722",
+  "theme_color": "#412722",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

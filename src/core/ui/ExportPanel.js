@@ -411,8 +411,11 @@ export class ExportPanel {
 
     // Try to shorten via the backend. If the API is down / slow / offline,
     // fall back to the long `?play=<b64>` URL so the button always works.
-    let code = null;
-    try { code = await platform.shortenShareCode(raw); } catch (e) {}
+    // No previewImage uploaded here — the copy-link flow stays on the
+    // canonical `?s=<code>` shape and skips the OG-tagged share URL.
+    let shortenResult = null;
+    try { shortenResult = await platform.shortenShareCode(raw); } catch (e) {}
+    const code = shortenResult && shortenResult.code;
     const url = code
       ? withShareParam(base, 's', code)
       : withShareParam(base, 'play', raw);

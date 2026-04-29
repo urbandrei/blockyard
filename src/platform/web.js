@@ -271,18 +271,33 @@ export default (function createWebAdapter() {
       }
     },
 
-    // URL shortener. Returns the short code (opaque string) for the given
-    // share-string, or null on any failure — callers fall back to the raw
-    // `?play=<base64>` URL so a cold API never breaks share buttons.
-    async shortenShareCode(shareCode) {
+    // URL shortener. Returns `{ code, hasPreview, ogUrl } | null` for the
+    // given share-string. `ogUrl` is set to `${API}/p/<code>` when a preview
+    // PNG was uploaded and persisted server-side — that URL renders proper
+    // per-level OG tags, so native-share callers should prefer it for
+    // social unfurls. When `previewImage` isn't supplied or its upload
+    // fails, `ogUrl` is null and callers fall back to the in-app
+    // `?s=<code>` URL on their own origin. Any network failure returns
+    // null so a cold API never breaks share buttons.
+    async shortenShareCode(shareCode, opts = {}) {
       if (!API || !shareCode) return null;
       try {
+        const body = { shareCode };
+        if (opts && typeof opts.previewImage === 'string' && opts.previewImage) {
+          body.previewImage = opts.previewImage;
+        }
         const res = await api('/shorts', {
           method: 'POST',
           auth: true,
-          body: JSON.stringify({ shareCode }),
+          body: JSON.stringify(body),
         });
-        return (res && res.code) || null;
+        if (!res || !res.code) return null;
+        const hasPreview = !!res.hasPreview;
+        return {
+          code: res.code,
+          hasPreview,
+          ogUrl: hasPreview ? `${API}/p/${encodeURIComponent(res.code)}` : null,
+        };
       } catch (e) {
         console.warn('[web] shortenShareCode failed', e);
         return null;
