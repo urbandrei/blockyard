@@ -91,16 +91,14 @@ export default class HomeScene extends Phaser.Scene {
     // kind gets the right sound + juice without two handlers racing.
     disableMenuBg();
 
-    // Initial-boot fade-in: PreloadScene hands off via the LoadingOverlay
-    // exit phase (shapes still falling), and tells us to fade the main
-    // camera up from the menu-bg color so the home menu arrives smoothly
-    // behind the falling shapes instead of snapping into place. Only
-    // honored on the very first transition from Preload — re-entries
-    // from gameplay scenes use SceneFader's brown overlay instead.
+    // Initial-boot fade-in: PreloadScene tells us to fade the main camera
+    // up from the menu-bg color so the home menu arrives smoothly over
+    // the brown checker bg instead of snapping into place. Only honored
+    // on the very first transition from Preload — re-entries from
+    // gameplay scenes use SceneFader's brown overlay instead.
     if (data && data.initialFadeIn) {
-      // True opacity fade — Home's content blends with whatever's behind
-      // it (the body bg pattern + the LoadingOverlay's still-falling
-      // shapes) instead of being painted over with a brown wash.
+      // True opacity fade — Home's content blends with the body bg
+      // pattern instead of being painted over with a brown wash.
       this.cameras.main.setAlpha(0);
       this.tweens.add({
         targets: this.cameras.main,

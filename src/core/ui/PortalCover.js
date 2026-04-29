@@ -50,7 +50,7 @@ export class PortalCover {
     c.style.position      = 'fixed';
     c.style.left          = '0';
     c.style.top           = '0';
-    c.style.zIndex        = '10001';   // above the LoadingOverlay's 10000
+    c.style.zIndex        = '10001';   // sits above any in-page DOM overlays
     c.style.pointerEvents = 'none';
     c.style.background    = 'transparent';
     document.body.appendChild(c);
