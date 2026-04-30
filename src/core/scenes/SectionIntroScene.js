@@ -27,6 +27,10 @@ export default class SectionIntroScene extends Phaser.Scene {
   init(data) {
     this._sectionIdx  = (data && data.sectionIdx != null) ? data.sectionIdx : 0;
     this._nextLevelId = (data && data.nextLevelId) || null;
+    // Phaser reuses scene instances across scene.start, so the prior run's
+    // dismiss flag would otherwise stick and short-circuit _advance on the
+    // very next intro the player sees.
+    this._dismissing  = false;
   }
 
   create() {
